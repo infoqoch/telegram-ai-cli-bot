@@ -213,6 +213,11 @@ class BotHandlers:
         else:
             auth_section = "🔓 <b>인증 없이 바로 사용 가능</b>\n\n"
 
+        # 플러그인 안내
+        plugin_section = ""
+        if self.plugins and self.plugins.plugins:
+            plugin_section = "/plugins - 플러그인 목록 + 사용법\n"
+
         await update.message.reply_text(
             "📖 <b>명령어 목록</b>\n\n"
             f"{auth_section}"
@@ -222,6 +227,7 @@ class BotHandlers:
             "/session_list - 세션 목록 + AI 요약\n\n"
             "ℹ️ 기타\n"
             "/chatid - 내 채팅 ID 확인\n"
+            f"{plugin_section}"
             "/help - 이 도움말",
             parse_mode="HTML"
         )
@@ -244,6 +250,34 @@ class BotHandlers:
             f"💡 이 ID를 <code>ALLOWED_CHAT_IDS</code>에 추가하세요.",
             parse_mode="HTML"
         )
+
+    async def plugins_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /plugins command - show plugin list."""
+        if not self.plugins or not self.plugins.plugins:
+            await update.message.reply_text("🔌 로드된 플러그인이 없습니다.")
+            return
+
+        lines = ["🔌 <b>플러그인 목록</b>\n"]
+        for plugin in self.plugins.plugins:
+            lines.append(f"• <b>/{plugin.name}</b> - {plugin.description}")
+        lines.append("\n💡 <code>/플러그인명</code>으로 사용법 확인")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+    async def plugin_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /plugin_name command - show specific plugin usage."""
+        if not self.plugins:
+            return
+
+        # /memo -> "memo"
+        text = update.message.text.strip()
+        if not text.startswith("/"):
+            return
+        plugin_name = text[1:].split()[0]  # /memo arg -> "memo"
+
+        plugin = self.plugins.get_plugin_by_name(plugin_name)
+        if plugin:
+            await update.message.reply_text(plugin.usage, parse_mode="HTML")
 
     async def auth_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /auth command."""

@@ -23,6 +23,7 @@ class Plugin(ABC):
 
     name: str = "base"
     description: str = "Base plugin"
+    usage: str = "사용법이 정의되지 않았습니다."
 
     @abstractmethod
     async def can_handle(self, message: str, chat_id: int) -> bool:
@@ -172,3 +173,10 @@ class PluginLoader:
             {"name": p.name, "description": p.description}
             for p in self.plugins
         ]
+
+    def get_plugin_by_name(self, name: str) -> Optional[Plugin]:
+        """이름으로 플러그인 찾기."""
+        for plugin in self.plugins:
+            if plugin.name == name:
+                return plugin
+        return None

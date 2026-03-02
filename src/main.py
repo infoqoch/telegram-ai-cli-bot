@@ -80,6 +80,14 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("session", handlers.session_command))
     app.add_handler(CommandHandler("session_list", handlers.session_list_command))
     app.add_handler(CommandHandler("chatid", handlers.chatid_command))
+    app.add_handler(CommandHandler("plugins", handlers.plugins_command))
+
+    # 동적 플러그인 명령어 (예: /memo)
+    if plugins.plugins:
+        plugin_names = [p.name for p in plugins.plugins]
+        for name in plugin_names:
+            app.add_handler(CommandHandler(name, handlers.plugin_help_command))
+
     app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))

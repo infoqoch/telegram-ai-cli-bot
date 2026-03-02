@@ -14,6 +14,18 @@ class MemoPlugin(Plugin):
 
     name = "memo"
     description = "메모 저장, 조회, 삭제"
+    usage = (
+        "📝 <b>메모 플러그인 사용법</b>\n\n"
+        "<b>저장</b>\n"
+        "• <code>OOO 메모해줘</code>\n"
+        "• <code>메모: OOO</code>\n\n"
+        "<b>조회</b>\n"
+        "• <code>메모 보여줘</code>\n"
+        "• <code>메모 목록</code>\n\n"
+        "<b>삭제</b>\n"
+        "• <code>메모 1 삭제</code>\n"
+        "• <code>1번 메모 지워</code>"
+    )
 
     # 트리거 패턴
     SAVE_PATTERNS = [
@@ -31,10 +43,22 @@ class MemoPlugin(Plugin):
         r"메모\s*(\d+)\s*(삭제|지워)",
         r"(\d+)번?\s*메모\s*(삭제|지워)",
     ]
+    # 제외 패턴 - AI에게 넘겨야 하는 경우
+    EXCLUDE_PATTERNS = [
+        r"(란|이란|가|이)\s*(뭐|무엇|뭔)",  # "메모란 뭐야", "메모가 뭐야"
+        r"영어로|번역|translate",            # 번역 요청
+        r"어떻게|왜|언제|어디",              # 질문
+        r"알려줘|설명|뜻",                   # 설명 요청
+    ]
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """메모 관련 메시지인지 확인."""
         msg = message.strip()
+
+        # 제외 패턴 먼저 체크 - AI에게 넘김
+        for pattern in self.EXCLUDE_PATTERNS:
+            if re.search(pattern, msg, re.IGNORECASE):
+                return False
 
         # 저장 패턴
         for pattern in self.SAVE_PATTERNS:
