@@ -83,8 +83,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("plugins", handlers.plugins_command))
 
     # 동적 플러그인 명령어 (예: /memo)
-    if plugins.plugins:
-        plugin_names = [p.name for p in plugins.plugins]
+    if plugin_loader.plugins:
+        plugin_names = [p.name for p in plugin_loader.plugins]
         for name in plugin_names:
             app.add_handler(CommandHandler(name, handlers.plugin_help_command))
 
