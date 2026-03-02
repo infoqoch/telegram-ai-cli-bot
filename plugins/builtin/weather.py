@@ -224,7 +224,7 @@ class WeatherPlugin(Plugin):
             # 한글 → 영문 변환 (Open-Meteo는 한글 검색 미지원)
             search_query = self.KOREAN_TO_ENGLISH.get(query, query)
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 params = {"name": search_query, "count": 1, "language": "ko"}
                 resp = await client.get(self.GEOCODING_URL, params=params)
                 if resp.status_code != 200:
@@ -246,7 +246,7 @@ class WeatherPlugin(Plugin):
     async def _fetch_weather(self, lat: float, lon: float) -> Optional[dict]:
         """날씨 데이터 조회."""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 params = {
                     "latitude": lat,
                     "longitude": lon,
