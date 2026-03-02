@@ -45,8 +45,8 @@ class AuthManager:
         """만료된 인증 세션 정리. 정리된 수 반환."""
         now = datetime.now()
         expired = [
-            uid for uid, expiry in self._sessions.items()
-            if now > expiry
+            uid for uid, last_auth in self._sessions.items()
+            if now - last_auth >= timedelta(minutes=self.timeout_minutes)
         ]
         for uid in expired:
             del self._sessions[uid]

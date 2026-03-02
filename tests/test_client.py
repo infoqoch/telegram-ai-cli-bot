@@ -6,13 +6,14 @@ ClaudeClient 클래스의 핵심 기능 검증:
 - 세션 생성
 """
 
+import asyncio
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.claude.client import ClaudeClient
+from src.claude.client import ChatError, ChatResponse, ClaudeClient
 
 
 @pytest.fixture
@@ -102,3 +103,272 @@ class TestClaudeClient:
         """빈 질문 목록 요약."""
         result = await client.summarize([])
         assert result == "(내용 없음)"
+
+
+class TestChatError:
+    """ChatError Enum 테스트."""
+
+    def test_chat_error_enum_values(self):
+        """ChatError enum 값 검증."""
+        assert ChatError.TIMEOUT.value == "TIMEOUT"
+        assert ChatError.SESSION_NOT_FOUND.value == "SESSION_NOT_FOUND"
+        assert ChatError.CLI_ERROR.value == "CLI_ERROR"
+
+
+class TestChatResponse:
+    """ChatResponse Dataclass 테스트."""
+
+    def test_chat_response_creation(self):
+        """모든 필드를 포함한 ChatResponse 생성."""
+        from src.claude.client import ChatError, ChatResponse
+
+        response = ChatResponse(
+            text="Hello, world!",
+            error=ChatError.CLI_ERROR,
+            session_id="session-123"
+        )
+
+        assert response.text == "Hello, world!"
+        assert response.error == ChatError.CLI_ERROR
+        assert response.session_id == "session-123"
+
+    def test_chat_response_defaults(self):
+        """기본값 검증 (error=None, session_id=None)."""
+        from src.claude.client import ChatResponse
+
+        response = ChatResponse(text="Test")
+
+        assert response.text == "Test"
+        assert response.error is None
+        assert response.session_id is None
+
+    def test_chat_response_tuple_unpacking(self):
+        """하위 호환성을 위한 tuple 언패킹 지원."""
+        from src.claude.client import ChatResponse
+
+        response = ChatResponse(
+            text="Success",
+            error=None,
+            session_id="abc-123"
+        )
+
+        text, error, session_id = response
+
+        assert text == "Success"
+        assert error is None
+        assert session_id == "abc-123"
+
+    def test_chat_response_error_value_in_tuple(self):
+        """tuple 언패킹 시 error.value 반환 검증."""
+        from src.claude.client import ChatError, ChatResponse
+
+        response = ChatResponse(
+            text="",
+            error=ChatError.TIMEOUT,
+            session_id=None
+        )
+
+        text, error, session_id = response
+
+        assert text == ""
+        assert error == "TIMEOUT"
+        assert session_id is None
+
+
+class TestRunCommand:
+    """_run_command 메서드 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_run_command_success(self, client):
+        """정상적인 명령어 실행."""
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(b"output text", b"")
+            )
+            mock_process.returncode = 0
+            mock_exec.return_value = mock_process
+
+            stdout, stderr, returncode = await client._run_command(
+                ["echo", "test"],
+                timeout=60
+            )
+
+            assert stdout == "output text"
+            assert stderr == ""
+            assert returncode == 0
+
+    @pytest.mark.asyncio
+    async def test_run_command_returns_tuple(self, client):
+        """_run_command가 (stdout, stderr, returncode) 반환 검증."""
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(b"out", b"err")
+            )
+            mock_process.returncode = 1
+            mock_exec.return_value = mock_process
+
+            result = await client._run_command(["test"], timeout=60)
+
+            assert isinstance(result, tuple)
+            assert len(result) == 3
+            assert result == ("out", "err", 1)
+
+
+class TestChatMethod:
+    """chat() 메서드 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_chat_returns_chat_response(self, client):
+        """chat()이 ChatResponse 반환 검증."""
+        from src.claude.client import ChatResponse
+
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(
+                    b'{"result": "Hi!", "session_id": "s1"}',
+                    b""
+                )
+            )
+            mock_process.returncode = 0
+            mock_exec.return_value = mock_process
+
+            response = await client.chat("Hello")
+
+            assert isinstance(response, ChatResponse)
+            assert response.text == "Hi!"
+            assert response.error is None
+            assert response.session_id == "s1"
+
+    @pytest.mark.asyncio
+    async def test_chat_session_not_found(self, client):
+        """SESSION_NOT_FOUND 에러 검증 (stderr에 'not found')."""
+        from src.claude.client import ChatError
+
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"Session not found")
+            )
+            mock_process.returncode = 1
+            mock_exec.return_value = mock_process
+
+            response = await client.chat("Hello", "invalid-session")
+
+            assert response.error == ChatError.SESSION_NOT_FOUND
+            assert response.text == ""
+            assert response.session_id is None
+
+    @pytest.mark.asyncio
+    async def test_chat_cli_error(self, client):
+        """CLI_ERROR 검증 (non-zero return code)."""
+        from src.claude.client import ChatError
+
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"Some error")
+            )
+            mock_process.returncode = 1
+            mock_exec.return_value = mock_process
+
+            response = await client.chat("Hello")
+
+            assert response.error == ChatError.CLI_ERROR
+            assert "Some error" in response.text or response.text == "(오류)"
+
+    @pytest.mark.asyncio
+    async def test_chat_json_parse_success(self, client):
+        """JSON 파싱 성공 및 session_id 추출 검증."""
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(
+                    b'{"result": "Response text", "session_id": "xyz-789"}',
+                    b""
+                )
+            )
+            mock_process.returncode = 0
+            mock_exec.return_value = mock_process
+
+            response = await client.chat("Test")
+
+            assert response.text == "Response text"
+            assert response.session_id == "xyz-789"
+            assert response.error is None
+
+    @pytest.mark.asyncio
+    async def test_chat_json_parse_failure(self, client):
+        """JSON 파싱 실패 시 원본 출력 반환 검증."""
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(b"Plain text response", b"")
+            )
+            mock_process.returncode = 0
+            mock_exec.return_value = mock_process
+
+            response = await client.chat("Test")
+
+            assert response.text == "Plain text response"
+            assert response.error is None
+            assert response.session_id is None
+
+    @pytest.mark.asyncio
+    async def test_chat_timeout_returns_chat_response(self, client):
+        """타임아웃 시 ChatResponse 반환 검증."""
+        from src.claude.client import ChatError
+
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+            mock_exec.return_value = mock_process
+
+            with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
+                response = await client.chat("Hello")
+
+            assert isinstance(response, ChatError) is False
+            assert response.error == ChatError.TIMEOUT
+            assert response.text == ""
+            assert response.session_id is None
+
+
+class TestCreateSession:
+    """create_session() 메서드 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_create_session_success(self, client):
+        """성공 시 session_id 반환."""
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(
+                    b'{"result": "hi", "session_id": "new-session-123"}',
+                    b""
+                )
+            )
+            mock_process.returncode = 0
+            mock_exec.return_value = mock_process
+
+            session_id = await client.create_session()
+
+            assert session_id == "new-session-123"
+
+    @pytest.mark.asyncio
+    async def test_create_session_failure(self, client):
+        """실패 시 None 반환."""
+        from src.claude.client import ChatError
+
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(
+                return_value=(b"", b"Error creating session")
+            )
+            mock_process.returncode = 1
+            mock_exec.return_value = mock_process
+
+            session_id = await client.create_session()
+
+            assert session_id is None
