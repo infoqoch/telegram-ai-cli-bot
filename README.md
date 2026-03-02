@@ -1,18 +1,18 @@
 # AI Bot
 
-Telegram bot interface for AI CLI with session persistence.
+AI CLI를 텔레그램으로 사용하는 봇. 세션 유지 지원.
 
-## Features
+## 기능
 
-- Multi-session support per user
-- Session switching and history
-- AI-powered session summaries
-- Async architecture for better performance
-- Optional authentication
+- 유저별 멀티 세션 지원
+- 세션 전환 및 히스토리
+- AI 기반 세션 요약
+- 비동기 아키텍처
+- 선택적 인증
 
-## Quick Start
+## 시작하기
 
-### 1. Setup
+### 1. 설치
 
 ```bash
 python -m venv venv
@@ -20,64 +20,65 @@ source venv/bin/activate
 pip install -e .
 ```
 
-### 2. Configure
+### 2. 설정
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# .env 파일 수정
 ```
 
-### 3. Run
+### 3. 실행
 
 ```bash
 python -m src.main
 ```
 
-## Commands
+## 명령어
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Show bot status |
-| `/help` | Show help message |
-| `/auth <key>` | Authenticate (if required) |
-| `/new` | Start new session |
-| `/session` | Show current session info |
-| `/session_list` | List all sessions |
-| `/s_<id>` | Switch to session |
+| 명령어 | 설명 |
+|--------|------|
+| `/start` | 봇 상태 |
+| `/help` | 도움말 |
+| `/auth <키>` | 인증 (필요 시) |
+| `/new` | 새 세션 |
+| `/session` | 현재 세션 정보 |
+| `/session_list` | 세션 목록 |
+| `/s_<id>` | 세션 전환 |
 
-## Configuration
+## 환경변수
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TELEGRAM_TOKEN` | (required) | Bot API token |
-| `ALLOWED_CHAT_IDS` | (empty) | Allowed chat IDs |
-| `MAINTAINER_CHAT_ID` | (empty) | Dev notification target |
-| `AI_COMMAND` | `claude` | AI CLI command |
-| `SESSION_TIMEOUT_HOURS` | `24` | Session expiry |
-| `REQUIRE_AUTH` | `true` | Require authentication |
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `TELEGRAM_TOKEN` | (필수) | 봇 토큰 |
+| `ALLOWED_CHAT_IDS` | (빈값) | 허용 채팅 ID |
+| `MAINTAINER_CHAT_ID` | (빈값) | 개발 알림 수신 |
+| `AI_COMMAND` | `claude` | AI CLI 명령어 |
+| `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 |
+| `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
 
-## Development
+## 개발
 
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
 
-## Architecture
+## 구조
 
 ```
 src/
-├── main.py           # Entry point
-├── config.py         # Configuration
-├── bot/
-│   ├── handlers.py   # Command handlers
-│   ├── middleware.py # Auth middleware
-│   └── formatters.py # Message formatting
-└── claude/
-    ├── client.py     # Async CLI wrapper
-    └── session.py    # Session storage
+├── main.py           # 엔트리포인트
+├── config.py         # 설정
+├── notify.py         # 개발 알림
+├── bot/              # 텔레그램
+│   ├── handlers.py
+│   ├── middleware.py
+│   └── formatters.py
+└── claude/           # AI CLI
+    ├── client.py
+    └── session.py
 ```
 
-## License
+## 라이선스
 
 MIT
