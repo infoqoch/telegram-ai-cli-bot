@@ -20,6 +20,7 @@ from src.claude.client import ClaudeClient
 from src.claude.session import SessionStore
 from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
+from src.plugins.loader import PluginLoader
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +50,13 @@ def create_app() -> Application:
         secret_key=settings.auth_secret_key,
         timeout_minutes=settings.auth_timeout_minutes,
     )
-    
+
+    # 플러그인 로더 초기화
+    plugin_loader = PluginLoader(settings.base_dir)
+    loaded_plugins = plugin_loader.load_all()
+    if loaded_plugins:
+        logger.info(f"플러그인 로드됨: {', '.join(loaded_plugins)}")
+
     handlers = BotHandlers(
         session_store=session_store,
         claude_client=claude_client,
@@ -58,6 +65,7 @@ def create_app() -> Application:
         allowed_chat_ids=settings.allowed_chat_ids,
         response_notify_seconds=settings.response_notify_seconds,
         session_list_ai_summary=settings.session_list_ai_summary,
+        plugin_loader=plugin_loader,
     )
     
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
@@ -71,6 +79,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("new", handlers.new_session))
     app.add_handler(CommandHandler("session", handlers.session_command))
     app.add_handler(CommandHandler("session_list", handlers.session_list_command))
+    app.add_handler(CommandHandler("chatid", handlers.chatid_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))

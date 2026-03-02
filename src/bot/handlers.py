@@ -16,6 +16,7 @@ from .formatters import format_session_quick_list, truncate_message
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
     from src.claude.session import SessionStore
+    from src.plugins.loader import PluginLoader
     from .middleware import AuthManager
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class BotHandlers:
         allowed_chat_ids: list[int],
         response_notify_seconds: int = 60,
         session_list_ai_summary: bool = False,
+        plugin_loader: "PluginLoader" = None,
     ):
         self.sessions = session_store
         self.claude = claude_client
@@ -69,6 +71,7 @@ class BotHandlers:
         self.allowed_chat_ids = allowed_chat_ids
         self.response_notify_seconds = response_notify_seconds
         self.session_list_ai_summary = session_list_ai_summary
+        self.plugins = plugin_loader
         self._watchdog_started = False
 
     def _ensure_watchdog(self) -> None:
@@ -204,7 +207,7 @@ class BotHandlers:
         if self.require_auth:
             auth_section = (
                 "🔐 인증\n"
-                "/auth &lt;키&gt; - 인증 (30분 유효)\n"
+                f"/auth &lt;키&gt; - 인증 ({self.auth.timeout_minutes}분 유효)\n"
                 "/status - 인증 상태 확인\n\n"
             )
         else:
@@ -218,7 +221,27 @@ class BotHandlers:
             "/session - 현재 세션 정보 + 대화 내용\n"
             "/session_list - 세션 목록 + AI 요약\n\n"
             "ℹ️ 기타\n"
+            "/chatid - 내 채팅 ID 확인\n"
             "/help - 이 도움말",
+            parse_mode="HTML"
+        )
+
+    async def chatid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /chatid command - show user's chat ID."""
+        chat_id = update.effective_chat.id
+        user = update.effective_user
+
+        user_info = ""
+        if user:
+            if user.username:
+                user_info = f"\n• Username: @{user.username}"
+            if user.first_name:
+                user_info += f"\n• 이름: {user.first_name}"
+
+        await update.message.reply_text(
+            f"🆔 <b>내 정보</b>\n\n"
+            f"• Chat ID: <code>{chat_id}</code>{user_info}\n\n"
+            f"💡 이 ID를 <code>ALLOWED_CHAT_IDS</code>에 추가하세요.",
             parse_mode="HTML"
         )
 
@@ -237,7 +260,7 @@ class BotHandlers:
         key = context.args[0]
 
         if self.auth.authenticate(user_id, key):
-            await update.message.reply_text("✅ 인증 성공! 30분간 유효합니다.")
+            await update.message.reply_text(f"✅ 인증 성공! {self.auth.timeout_minutes}분간 유효합니다.")
             logger.info(f"[{user_id}] 인증 성공")
         else:
             await update.message.reply_text("❌ 인증 실패. 키가 틀렸습니다.")
@@ -489,10 +512,26 @@ class BotHandlers:
             message = message[:self.MAX_MESSAGE_LENGTH]
             logger.warning(f"[{user_id}] 메시지 길이 제한 적용: {original_len} -> {self.MAX_MESSAGE_LENGTH}")
 
+        # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
+        if self.plugins:
+            try:
+                result = await self.plugins.process_message(message, chat_id)
+                if result and result.handled:
+                    if result.response:
+                        try:
+                            await update.message.reply_text(result.response, parse_mode="HTML")
+                        except Exception:
+                            await update.message.reply_text(result.response)
+                    return
+            except Exception as e:
+                logger.error(f"[{user_id}] 플러그인 처리 오류: {e}")
+                # 플러그인 오류 시 Claude로 fallback
+
         if not self._is_authenticated(user_id):
             await update.message.reply_text(
                 "🔒 인증이 필요합니다.\n"
-                "/auth <키>로 인증하세요. (30분간 유효)"
+                f"/auth <키>로 인증하세요. ({self.auth.timeout_minutes}분간 유효)\n"
+                "/help 도움말"
             )
             return
 
