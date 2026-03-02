@@ -1,4 +1,12 @@
-"""Tests for session storage."""
+"""세션 저장소 테스트.
+
+SessionStore 클래스의 핵심 기능 검증:
+- 세션 생성/조회
+- 메시지 추가
+- 멀티 세션 관리
+- 세션 전환
+- 기존 데이터 마이그레이션
+"""
 
 import json
 import tempfile
@@ -11,7 +19,7 @@ from src.claude.session import SessionStore
 
 @pytest.fixture
 def temp_session_file():
-    """Create a temporary session file."""
+    """임시 세션 파일 생성."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         json.dump({}, f)
         return Path(f.name)
@@ -19,20 +27,24 @@ def temp_session_file():
 
 @pytest.fixture
 def session_store(temp_session_file):
-    """Create a session store with temp file."""
+    """테스트용 세션 저장소 생성."""
     return SessionStore(file_path=temp_session_file, timeout_hours=24)
 
 
 class TestSessionStore:
+    """SessionStore 단위 테스트."""
+
     def test_create_session(self, session_store):
+        """새 세션 생성 시 UUID 반환 및 현재 세션 설정 확인."""
         user_id = "test_user"
         session_id = session_store.create_session(user_id, "Hello")
         
         assert session_id is not None
-        assert len(session_id) == 36  # UUID length
+        assert len(session_id) == 36  # UUID 길이
         assert session_store.get_current_session_id(user_id) == session_id
     
     def test_add_message(self, session_store):
+        """메시지 추가 시 히스토리에 정상 저장 확인."""
         user_id = "test_user"
         session_store.create_session(user_id, "First message")
         session_store.add_message(user_id, "Second message")
@@ -43,9 +55,9 @@ class TestSessionStore:
         assert history[1] == "Second message"
     
     def test_list_sessions(self, session_store):
+        """여러 세션 생성 후 목록 조회 확인."""
         user_id = "test_user"
         
-        # Create multiple sessions
         session_store.create_session(user_id, "Session 1")
         session_store.clear_current(user_id)
         session_store.create_session(user_id, "Session 2")
@@ -54,31 +66,27 @@ class TestSessionStore:
         assert len(sessions) == 2
     
     def test_switch_session(self, session_store):
+        """세션 전환 기능 확인."""
         user_id = "test_user"
         
-        # Create first session
         first_id = session_store.create_session(user_id, "First")
         session_store.clear_current(user_id)
-        
-        # Create second session
         second_id = session_store.create_session(user_id, "Second")
         
-        # Switch back to first
         assert session_store.switch_session(user_id, first_id[:8])
         assert session_store.get_current_session_id(user_id) == first_id
     
     def test_get_session_info(self, session_store):
+        """세션 정보 조회 (짧은 ID) 확인."""
         user_id = "test_user"
         
-        # No session
         assert session_store.get_current_session_info(user_id) == "없음"
         
-        # With session
         session_id = session_store.create_session(user_id, "Test")
         assert session_store.get_current_session_info(user_id) == session_id[:8]
     
     def test_migration_old_format(self, temp_session_file):
-        # Write old format data
+        """기존 단일 세션 형식 → 멀티 세션 형식 마이그레이션 확인."""
         old_data = {
             "user123": {
                 "session_id": "abc-123-def",
@@ -90,7 +98,6 @@ class TestSessionStore:
         with open(temp_session_file, 'w') as f:
             json.dump(old_data, f)
         
-        # Load with new store - should migrate
         store = SessionStore(file_path=temp_session_file, timeout_hours=24)
         
         sessions = store.list_sessions("user123")
