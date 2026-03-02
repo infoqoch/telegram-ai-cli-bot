@@ -1,45 +1,21 @@
-# AI Bot - Project Rules
-
-이 프로젝트에서 Claude와 협업 시 따르는 규칙입니다.
+# AI Bot - 프로젝트 규칙
 
 ## 개발 루틴
 
-### 1. 개발 시작
+### 시작
 ```bash
-# 봇 상태 확인
-ps aux | grep "src.main" | grep -v grep
-
-# 봇 실행 (필요 시)
+ps aux | grep "src.main" | grep -v grep  # 봇 상태 확인
 source venv/bin/activate && nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
 ```
 
-### 2. 개발 중
-- 변경사항은 즉시 적용
-- 테스트 필요 시: `pytest`
-- 로그 확인: `tail -f /tmp/telegram-bot.log`
-
-### 3. 개발 완료 시 (필수)
-다음 순서를 **반드시** 수행:
-
+### 완료 (필수 수행)
 ```bash
-# 1. 테스트
-pytest
-
-# 2. 커밋 (conventional commits)
-git add -A
-git commit -m "type: description
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-
-# 3. 푸시 (force)
-git push --force origin main
-
-# 4. 봇 재시작
-pkill -9 -f "src.main"; sleep 1
-source venv/bin/activate && nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
-
-# 5. 개발 리포트 전송
-python -m src.notify "변경1" "변경2" -- "file1.py" "file2.py"
+pytest                                    # 1. 테스트
+git add -A && git commit -m "type: msg"   # 2. 커밋
+git push --force origin main              # 3. 푸시
+pkill -9 -f "src.main"; sleep 1 && \
+  nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &  # 4. 재시작
+python -m src.notify "변경1" -- "file1"   # 5. 리포트
 ```
 
 ## 커밋 컨벤션
@@ -53,21 +29,18 @@ python -m src.notify "변경1" "변경2" -- "file1.py" "file2.py"
 | `test` | 테스트 |
 | `chore` | 기타 |
 
+```
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+```
+
 ## 코드 규칙
 
 ### 구조
 ```
 src/
-├── main.py         # 엔트리포인트
-├── config.py       # 설정 (Pydantic)
-├── notify.py       # 개발 알림
-├── bot/            # 텔레그램 관련
-│   ├── handlers.py
-│   ├── middleware.py
-│   └── formatters.py
-└── claude/         # AI CLI 관련
-    ├── client.py
-    └── session.py
+├── main.py, config.py, notify.py
+├── bot/     # 텔레그램 (handlers, middleware, formatters)
+└── claude/  # AI CLI (client, session)
 ```
 
 ### 네이밍
@@ -77,24 +50,10 @@ src/
 - 상수: `UPPER_SNAKE_CASE`
 
 ### 비동기
-- I/O 작업은 `async/await` 사용
+- I/O → `async/await`
 - subprocess → `asyncio.create_subprocess_exec`
 
-### 타입 힌트
-```python
-def function(param: str) -> dict:
-    ...
-```
-
-## 설정 파일
-
-| 파일 | 용도 | Git |
-|------|------|-----|
-| `.env` | 시크릿 | ❌ |
-| `.env.example` | 템플릿 | ✅ |
-| `.data/` | 런타임 데이터 | ❌ |
-
-## 주요 환경변수
+## 환경변수
 
 | 변수 | 설명 |
 |------|------|
@@ -102,10 +61,9 @@ def function(param: str) -> dict:
 | `ALLOWED_CHAT_IDS` | 허용 채팅 ID |
 | `MAINTAINER_CHAT_ID` | 개발 리포트 수신 |
 | `AI_COMMAND` | AI CLI 명령어 |
-| `REQUIRE_AUTH` | 인증 필요 여부 |
 
-## 금지 사항
+## 금지
 
-- `.env` 파일 커밋 금지
-- `data/sessions.json` 커밋 금지
-- 토큰/시크릿 하드코딩 금지
+- `.env` 커밋 금지
+- `.data/` 커밋 금지
+- 토큰 하드코딩 금지
