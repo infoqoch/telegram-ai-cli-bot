@@ -89,9 +89,16 @@ telegram-claude-bot/
 │   └── loader.py              # Plugin 기본 클래스 + PluginLoader
 └── plugins/
     ├── builtin/               # Git 관리 ✅ (내장 플러그인)
-    │   └── memo.py
+    │   ├── memo/
+    │   │   ├── __init__.py
+    │   │   └── plugin.py
+    │   └── weather/
+    │       ├── __init__.py
+    │       └── plugin.py
     └── custom/                # Git 무시 ❌ (개인용)
-        └── my_plugin.py
+        └── my_plugin/
+            ├── __init__.py
+            └── plugin.py
 ```
 
 ### 플러그인 클래스 구조
@@ -179,7 +186,7 @@ PluginResult.response 즉시 반환 (Claude 호출 없음)
 | 파일 | 용도 |
 |------|------|
 | `src/plugins/loader.py` | Plugin 기본 클래스, PluginLoader |
-| `plugins/builtin/memo.py` | 참고용 플러그인 구현체 |
+| `plugins/builtin/memo/` | 참고용 플러그인 구현체 |
 | `src/bot/handlers.py` | 플러그인 호출 위치 (process_message) |
 
 ## 금지
