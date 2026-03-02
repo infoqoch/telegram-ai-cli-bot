@@ -86,7 +86,7 @@ class ClaudeClient:
         self,
         message: str,
         session_id: Optional[str] = None,
-    ) -> tuple[str, Optional[str], Optional[str]]:
+    ) -> ChatResponse:
         """
         Send a message to Claude.
 
@@ -95,30 +95,18 @@ class ClaudeClient:
             session_id: Claude's session ID (always use --resume if provided)
 
         Returns:
-            Tuple of (response_text, error_message, session_id)
+            ChatResponse with text, error, and session_id
         """
         cmd = self._build_command(message, session_id)
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            output, error, returncode = await self._run_command(cmd, self.timeout)
 
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout,
-            )
-
-            output = stdout.decode("utf-8").strip()
-            error = stderr.decode("utf-8").strip()
-
-            if process.returncode != 0:
+            if returncode != 0:
                 if "not found" in error.lower() or "invalid" in error.lower():
-                    return "", "SESSION_NOT_FOUND", None
+                    return ChatResponse("", ChatError.SESSION_NOT_FOUND, None)
                 logger.warning(f"Claude CLI error: {error}")
-                return error or "(오류)", None, None
+                return ChatResponse(error or "(오류)", ChatError.CLI_ERROR, None)
 
             # JSON 파싱
             try:
@@ -126,18 +114,18 @@ class ClaudeClient:
                 result = data.get("result", "(응답 없음)")
                 new_session_id = data.get("session_id")
                 logger.info(f"Claude response - session_id: {new_session_id}")
-                return result, None, new_session_id
+                return ChatResponse(result, None, new_session_id)
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 원본 반환
                 logger.warning(f"JSON parse failed, output: {output[:200]}")
-                return output or "(응답 없음)", None, None
+                return ChatResponse(output or "(응답 없음)", None, None)
 
         except asyncio.TimeoutError:
             logger.error(f"Claude CLI timeout after {self.timeout}s")
-            return "", "TIMEOUT", None
+            return ChatResponse("", ChatError.TIMEOUT, None)
         except Exception as e:
             logger.exception("Claude CLI error")
-            return "", str(e), None
+            return ChatResponse("", ChatError.CLI_ERROR, None)
 
     def _build_command(
         self,
@@ -181,19 +169,8 @@ class ClaudeClient:
         ]
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(),
-                timeout=60,
-            )
-
-            summary = stdout.decode("utf-8").strip()
-            return summary[:300] if summary else "(요약 실패)"
+            output, _, _ = await self._run_command(cmd, timeout=60)
+            return output[:300] if output else "(요약 실패)"
 
         except Exception:
             first_q = questions[0][:50]
