@@ -216,7 +216,11 @@ class BotHandlers:
         # 플러그인 안내
         plugin_section = ""
         if self.plugins and self.plugins.plugins:
-            plugin_section = "/plugins - 플러그인 목록 + 사용법\n"
+            plugin_section = (
+                "\n🔌 플러그인\n"
+                "/plugins - 플러그인 목록\n"
+                "/ai &lt;질문&gt; - 플러그인 건너뛰고 Claude에게 직접 질문\n"
+            )
 
         await update.message.reply_text(
             "📖 <b>명령어 목록</b>\n\n"
@@ -224,10 +228,10 @@ class BotHandlers:
             "💬 세션\n"
             "/new - 새 Claude 세션 시작\n"
             "/session - 현재 세션 정보 + 대화 내용\n"
-            "/session_list - 세션 목록 + AI 요약\n\n"
+            "/session_list - 세션 목록 + AI 요약\n"
+            f"{plugin_section}\n"
             "ℹ️ 기타\n"
             "/chatid - 내 채팅 ID 확인\n"
-            f"{plugin_section}"
             "/help - 이 도움말",
             parse_mode="HTML"
         )
