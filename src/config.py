@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     
     @property
     def data_dir(self) -> Path:
-        return self.base_dir / "data"
+        return self.base_dir / ".data"
     
     @property
     def sessions_file(self) -> Path:

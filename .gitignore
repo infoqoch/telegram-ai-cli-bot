@@ -16,8 +16,8 @@ htmlcov/
 dist/
 build/
 
-# Data (runtime)
-data/sessions.json
+# Runtime data
+.data/
 
 # IDE
 .idea/
