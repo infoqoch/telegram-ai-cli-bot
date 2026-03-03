@@ -79,14 +79,14 @@ def _log_format(record: dict) -> str:
     user_id = get_user_id()
     session_id = get_session_id()
 
-    # 컬러 포맷 (| 대신 - 사용)
+    # 컬러 포맷
     return (
-        "<green>{time:HH:mm:ss.SSS}</green> - "
-        "<level>{level: <8}</level> - "
-        f"<cyan>{trace_id}</cyan> - "
-        f"<yellow>{user_id: <12}</yellow> - "
-        f"<magenta>{session_id: <8}</magenta> - "
-        "<blue>{name}</blue>:<blue>{function}</blue>:<blue>{line}</blue> - "
+        "<green>{time:HH:mm:ss.SSS}</green> | "
+        "<level>{level: <8}</level> | "
+        f"<cyan>{trace_id}</cyan> | "
+        f"<yellow>{user_id: <12}</yellow> | "
+        f"<magenta>{session_id: <8}</magenta> | "
+        "<blue>{name}</blue>:<blue>{function}</blue>:<blue>{line}</blue> | "
         "<level>{message}</level>\n"
         "{exception}"
     )
@@ -99,12 +99,12 @@ def _log_format_file(record: dict) -> str:
     session_id = get_session_id()
 
     return (
-        "{time:YYYY-MM-DD HH:mm:ss.SSS} - "
-        "{level: <8} - "
-        f"{trace_id} - "
-        f"{user_id: <12} - "
-        f"{session_id: <8} - "
-        "{name}:{function}:{line} - "
+        "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+        "{level: <8} | "
+        f"{trace_id} | "
+        f"{user_id: <12} | "
+        f"{session_id: <8} | "
+        "{name}:{function}:{line} | "
         "{message}\n"
         "{exception}"
     )
