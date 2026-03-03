@@ -161,6 +161,10 @@ def create_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r'^/history_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/d_'), handlers.delete_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/delete_'), handlers.delete_session_command))
+
+    # 알 수 없는 명령어 처리 (/ai 제외 - 이미 등록됨)
+    app.add_handler(MessageHandler(filters.COMMAND, handlers.unknown_command))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
 
     app.add_error_handler(handlers.error_handler)

@@ -279,7 +279,7 @@ class BotHandlers:
             "/new_haiku_speedy - 🚀 Speedy\n"
             "/new_opus_smarty - 🧠 Smarty\n"
             "/model - 현재 세션 모델 변경\n"
-            "/rename_새이름 - 세션 이름 변경\n"
+            "/rename_MyName - 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
             "/session_list - 세션 목록\n"
             "/delete_&lt;id&gt; - 세션 삭제\n"
@@ -1423,6 +1423,22 @@ class BotHandlers:
                 await update.message.reply_text(chunk, parse_mode="HTML")
             except Exception:
                 await update.message.reply_text(chunk)
+
+    async def unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle unknown commands starting with /."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+
+        text = update.message.text
+        command = text.split()[0] if text else ""
+        logger.info(f"알 수 없는 명령어: {command}")
+
+        await update.message.reply_text(
+            f"❓ 알 수 없는 명령어: <code>{command}</code>\n\n"
+            f"/help 명령어 목록 확인",
+            parse_mode="HTML"
+        )
+        clear_context()
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle errors."""
