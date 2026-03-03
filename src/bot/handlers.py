@@ -1,6 +1,7 @@
 """Telegram bot command handlers."""
 
 import asyncio
+import re
 import subprocess
 import time
 from collections import defaultdict
@@ -13,6 +14,10 @@ from telegram.ext import ContextTypes
 from src.logging_config import logger, set_trace_id, set_user_id, set_session_id, clear_context
 from .formatters import format_session_quick_list, truncate_message
 
+# ACTION 패턴 (매니저 세션용)
+ACTION_DELETE_PATTERN = re.compile(r'\[ACTION:DELETE:([a-zA-Z0-9]+)\]')
+ACTION_RENAME_PATTERN = re.compile(r'\[ACTION:RENAME:([a-zA-Z0-9]+):([^\]]+)\]')
+
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
     from src.claude.session import SessionStore
@@ -21,23 +26,29 @@ if TYPE_CHECKING:
 
 # 매니저 세션 시스템 프롬프트
 MANAGER_SYSTEM_PROMPT = """[세션 관리자 역할]
-너는 사용자의 Claude 세션을 관리하는 비서야.
+너는 사용자의 Claude 세션을 관리하는 비서야. 모든 세션 관리 권한을 가지고 있어.
 
 [가능한 작업]
 1. 세션 검색: 히스토리 내용으로 세션 찾기
-2. 세션 정리: 오래된/불필요한 세션 삭제 추천
-3. 작업 요약: 최근 작업 내용 정리
-4. 세션 추천: 어떤 세션으로 돌아갈지 추천
+2. 세션 삭제: 오래된/불필요한 세션 직접 삭제
+3. 세션 이름 변경: 세션에 이름 부여
+4. 작업 요약: 최근 작업 내용 정리
+5. 세션 추천: 어떤 세션으로 돌아갈지 추천
+
+[명령어 실행 방법]
+세션을 직접 관리하려면 다음 형식으로 응답해:
+- 삭제: [ACTION:DELETE:세션ID]
+- 이름변경: [ACTION:RENAME:세션ID:새이름]
+
+예시:
+- [ACTION:DELETE:a1b2c3d4]
+- [ACTION:RENAME:a1b2c3d4:API작업]
 
 [응답 규칙]
 - 간결하게 답변 (3-5줄)
 - 세션 ID는 8자리 코드로 표시
-- 삭제 추천 시 /delete_<id> 형식으로 안내
-- 세션 이동 추천 시 /s_<id> 형식으로 안내
-
-[주의사항]
-- 직접 세션을 수정하지 않음 (사용자가 명령어로 실행)
-- 확실하지 않으면 확인 질문"""
+- 작업 실행 전 확인 질문 (예: "삭제할까요?")
+- 사용자가 확인하면 [ACTION:...] 형식으로 실행"""
 
 
 @dataclass
@@ -1505,11 +1516,12 @@ class BotHandlers:
             model: 사용할 모델 (opus, sonnet, haiku)
         """
         start_time = time.time()
-        short_msg = message[:50] + "..." if len(message) > 50 else message
 
+        # 전체 질문 로깅
         logger.info(f"Claude 호출 시작 - session={session_id[:8]}, model={model}")
-        logger.trace(f"메시지: '{short_msg}'")
-        logger.trace(f"새 세션: {is_new_session}")
+        logger.info(f"===== 사용자 질문 (START) =====")
+        logger.info(message)
+        logger.info(f"===== 사용자 질문 (END) =====")
 
         try:
             # 매니저 세션인지 확인
@@ -1533,10 +1545,11 @@ class BotHandlers:
 
             elapsed = time.time() - start_time
             logger.info(f"Claude 응답 완료 - session={session_id[:8]}, elapsed={elapsed:.1f}s, length={len(response)}")
-            logger.debug(f"===== Claude 응답 전체 (START) =====")
-            logger.debug(response)
-            logger.debug(f"===== Claude 응답 전체 (END) =====")
-            logger.trace(f"에러: {error}")
+            logger.info(f"===== Claude 응답 (START) =====")
+            logger.info(response)
+            logger.info(f"===== Claude 응답 (END) =====")
+            if error:
+                logger.warning(f"Claude 에러: {error}")
 
             # 기존 세션이면 메시지 추가 (명시적 session_id 사용)
             if not is_new_session:
@@ -1550,6 +1563,51 @@ class BotHandlers:
             elif error and error != "SESSION_NOT_FOUND":
                 logger.error(f"Claude 오류: {error}")
                 response = f"❌ 오류 발생: {error}"
+
+            # ACTION 패턴 처리 (매니저 세션)
+            action_results = []
+            if is_manager and response:
+                # DELETE 액션 처리
+                for match in ACTION_DELETE_PATTERN.finditer(response):
+                    target_id = match.group(1)
+                    logger.info(f"ACTION:DELETE 감지 - target={target_id}")
+                    target_info = self.sessions.get_session_by_prefix(user_id, target_id)
+                    if target_info:
+                        if self.sessions.delete_session(user_id, target_info["full_session_id"]):
+                            action_results.append(f"✅ 세션 {target_id} 삭제됨")
+                            logger.info(f"ACTION:DELETE 성공 - {target_id}")
+                        else:
+                            action_results.append(f"❌ 세션 {target_id} 삭제 실패")
+                            logger.warning(f"ACTION:DELETE 실패 - {target_id}")
+                    else:
+                        action_results.append(f"❌ 세션 {target_id} 찾을 수 없음")
+                        logger.warning(f"ACTION:DELETE 세션 없음 - {target_id}")
+
+                # RENAME 액션 처리
+                for match in ACTION_RENAME_PATTERN.finditer(response):
+                    target_id = match.group(1)
+                    new_name = match.group(2).strip()
+                    logger.info(f"ACTION:RENAME 감지 - target={target_id}, name={new_name}")
+                    target_info = self.sessions.get_session_by_prefix(user_id, target_id)
+                    if target_info:
+                        if self.sessions.rename_session(user_id, target_info["full_session_id"], new_name):
+                            action_results.append(f"✅ 세션 {target_id} → {new_name}")
+                            logger.info(f"ACTION:RENAME 성공 - {target_id} -> {new_name}")
+                        else:
+                            action_results.append(f"❌ 세션 {target_id} 이름 변경 실패")
+                            logger.warning(f"ACTION:RENAME 실패 - {target_id}")
+                    else:
+                        action_results.append(f"❌ 세션 {target_id} 찾을 수 없음")
+                        logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
+
+                # ACTION 태그 제거 (사용자에게는 깔끔하게 표시)
+                response = ACTION_DELETE_PATTERN.sub('', response)
+                response = ACTION_RENAME_PATTERN.sub('', response)
+                response = response.strip()
+
+                # 액션 결과 추가
+                if action_results:
+                    response += "\n\n📋 <b>실행 결과</b>\n" + "\n".join(action_results)
 
             # 세션 정보 prefix 추가
             session_info = self.sessions.get_session_info(user_id, session_id)
