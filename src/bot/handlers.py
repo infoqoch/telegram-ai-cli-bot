@@ -621,6 +621,21 @@ class BotHandlers:
         context.args = ["haiku"]
         await self.new_session(update, context)
 
+    async def model_opus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /model_opus command - shortcut for /model opus."""
+        context.args = ["opus"]
+        await self.model_command(update, context)
+
+    async def model_sonnet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /model_sonnet command - shortcut for /model sonnet."""
+        context.args = ["sonnet"]
+        await self.model_command(update, context)
+
+    async def model_haiku_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /model_haiku command - shortcut for /model haiku."""
+        context.args = ["haiku"]
+        await self.model_command(update, context)
+
     async def model_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /model command - change current session's model.
 
@@ -771,7 +786,9 @@ class BotHandlers:
             f"• ID: <code>{session_id[:8]}</code>\n"
             f"• 모델: {model_emoji} {model}\n"
             f"• 질문: {count}개\n\n"
-            f"<b>대화 내용</b> (최근 10개)\n{history_text}",
+            f"<b>대화 내용</b> (최근 10개)\n{history_text}\n\n"
+            f"<b>모델 변경</b>\n"
+            f"/model_opus 🧠 | /model_sonnet ⚡ | /model_haiku 🚀",
             parse_mode="HTML"
         )
         logger.trace("/session 완료")

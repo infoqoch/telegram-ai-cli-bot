@@ -79,16 +79,20 @@ def format_session_quick_list(sessions: list[dict], histories: dict[str, list[st
     """Format quick session list with last messages."""
     if not sessions:
         return "📭 저장된 세션이 없습니다."
-    
+
+    model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}
+
     lines = []
     for s in sessions:
         history = histories.get(s["full_session_id"], [])
         last_msg = truncate_message(history[-1]) if history else "-"
         current_mark = " ⬅️" if s.get("is_current") else ""
-        
+        model = s.get("model", "sonnet")
+        emoji = model_emoji.get(model, "")
+
         lines.append(
-            f"/s_{s['session_id']} ({s['history_count']}개){current_mark}\n"
+            f"/s_{s['session_id']} {emoji}{model} ({s['history_count']}개){current_mark}\n"
             f"   └ 최근: {last_msg}"
         )
-    
+
     return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)
