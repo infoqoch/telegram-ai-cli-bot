@@ -1206,7 +1206,11 @@ class BotHandlers:
             active_count = self.get_active_task_count(user_id)
             logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
             await update.message.reply_text(
-                f"⏳ 현재 {active_count}개 요청 처리 중입니다. 잠시 후 다시 시도해주세요."
+                f"⚠️ <b>메시지 처리 불가</b>\n\n"
+                f"현재 {active_count}개 요청이 처리 중이에요.\n"
+                f"이 메시지는 <b>처리되지 않습니다</b>.\n\n"
+                f"완료 후 다시 보내주세요!",
+                parse_mode="HTML"
             )
             clear_context()
             return
@@ -1339,7 +1343,11 @@ class BotHandlers:
             active_count = self.get_active_task_count(user_id)
             logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
             await update.message.reply_text(
-                f"⏳ 현재 {active_count}개 요청 처리 중입니다. 잠시 후 다시 시도해주세요."
+                f"⚠️ <b>메시지 처리 불가</b>\n\n"
+                f"현재 {active_count}개 요청이 처리 중이에요.\n"
+                f"이 메시지는 <b>처리되지 않습니다</b>.\n\n"
+                f"완료 후 다시 보내주세요!",
+                parse_mode="HTML"
             )
             clear_context()
             return
