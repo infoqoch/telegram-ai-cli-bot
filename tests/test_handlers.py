@@ -170,10 +170,11 @@ class TestProcessClaudeRequest:
             session_id="session-123",
             message="테스트 질문",
             is_new_session=False,
+            model="sonnet",
         )
 
-        # Claude 호출 확인
-        mock_claude_client.chat.assert_called_once_with("테스트 질문", "session-123")
+        # Claude 호출 확인 (model 포함)
+        mock_claude_client.chat.assert_called_once_with("테스트 질문", "session-123", model="sonnet")
 
         # 기존 세션이므로 메시지 추가 확인
         mock_session_store.add_message.assert_called_once_with(
