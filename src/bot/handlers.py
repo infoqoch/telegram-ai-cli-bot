@@ -1012,12 +1012,24 @@ class BotHandlers:
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-            response = await self.claude.chat(full_message, manager_session_id, model="opus")
-            if response.error:
-                await update.message.reply_text(f"❌ 오류: {response.error.value}")
+            response, error, _ = await self.claude.chat(full_message, manager_session_id, model="opus")
+            if error:
+                await update.message.reply_text(f"❌ 오류: {error}")
             else:
+                # ACTION 패턴 처리
+                action_results = await self._process_manager_actions(
+                    user_id, manager_session_id, response
+                )
+
+                # ACTION 태그 제거
+                response = remove_action_tags(response)
+
+                # 액션 결과 추가
+                if action_results:
+                    response += "\n\n📋 <b>실행 결과</b>\n" + "\n".join(action_results)
+
                 await update.message.reply_text(
-                    f"📋 <b>Manager</b>\n\n{response.text}",
+                    f"📋 <b>Manager</b>\n\n{response}",
                     parse_mode="HTML"
                 )
             clear_context()

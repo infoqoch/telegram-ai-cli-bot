@@ -225,8 +225,18 @@ class SessionStore:
             logger.trace("현재 세션 클리어됨")
 
     def get_session_info(self, user_id: str, session_id: str) -> str:
-        """Return short session ID (first 8 chars)."""
-        result = session_id[:8] if session_id else "없음"
+        """Return short session ID (first 8 chars) with optional name."""
+        if not session_id:
+            return "없음"
+
+        short_id = session_id[:8]
+        name = self.get_session_name(user_id, session_id)
+
+        if name:
+            result = f"{short_id}|{name}"
+        else:
+            result = short_id
+
         logger.trace(f"get_session_info() - user={user_id} -> {result}")
         return result
 
