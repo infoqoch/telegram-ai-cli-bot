@@ -1572,20 +1572,20 @@ class BotHandlers:
             # ACTION 패턴 처리 (매니저 세션)
             action_results = []
             if is_manager and response:
-                # DELETE 액션 처리
+                # DELETE 액션 처리 (include_deleted=True로 soft-deleted 세션도 찾음)
                 for match in ACTION_DELETE_PATTERN.finditer(response):
                     target_id = match.group(1)
                     logger.info(f"ACTION:DELETE 감지 - target={target_id}")
-                    target_info = self.sessions.get_session_by_prefix(user_id, target_id)
+                    target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
                     if target_info:
-                        if self.sessions.delete_session(user_id, target_info["full_session_id"]):
-                            action_results.append(f"✅ 세션 {target_id} 삭제됨")
+                        if self.sessions.hard_delete_session(user_id, target_info["full_session_id"]):
+                            action_results.append(f"✅ {target_id} 삭제됨")
                             logger.info(f"ACTION:DELETE 성공 - {target_id}")
                         else:
-                            action_results.append(f"❌ 세션 {target_id} 삭제 실패")
+                            action_results.append(f"❌ {target_id} 삭제 실패")
                             logger.warning(f"ACTION:DELETE 실패 - {target_id}")
                     else:
-                        action_results.append(f"❌ 세션 {target_id} 찾을 수 없음")
+                        action_results.append(f"❌ {target_id} 찾을 수 없음")
                         logger.warning(f"ACTION:DELETE 세션 없음 - {target_id}")
 
                 # RENAME 액션 처리
@@ -1593,16 +1593,16 @@ class BotHandlers:
                     target_id = match.group(1)
                     new_name = match.group(2).strip()
                     logger.info(f"ACTION:RENAME 감지 - target={target_id}, name={new_name}")
-                    target_info = self.sessions.get_session_by_prefix(user_id, target_id)
+                    target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
                     if target_info:
                         if self.sessions.rename_session(user_id, target_info["full_session_id"], new_name):
-                            action_results.append(f"✅ 세션 {target_id} → {new_name}")
+                            action_results.append(f"✅ {target_id} → {new_name}")
                             logger.info(f"ACTION:RENAME 성공 - {target_id} -> {new_name}")
                         else:
-                            action_results.append(f"❌ 세션 {target_id} 이름 변경 실패")
+                            action_results.append(f"❌ {target_id} 이름 변경 실패")
                             logger.warning(f"ACTION:RENAME 실패 - {target_id}")
                     else:
-                        action_results.append(f"❌ 세션 {target_id} 찾을 수 없음")
+                        action_results.append(f"❌ {target_id} 찾을 수 없음")
                         logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
 
                 # ACTION 태그 제거 (사용자에게는 깔끔하게 표시)

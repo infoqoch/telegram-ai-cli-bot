@@ -74,7 +74,7 @@ def clear_context() -> None:
 
 
 def _log_format(record: dict) -> str:
-    """로그 포맷 생성 (trace_id, user_id, session_id 포함)."""
+    """로그 포맷 생성 (user_id, session_id, trace_id 포함)."""
     trace_id = get_trace_id()
     user_id = get_user_id()
     session_id = get_session_id()
@@ -83,9 +83,9 @@ def _log_format(record: dict) -> str:
     return (
         "<green>{time:HH:mm:ss.SSS}</green> | "
         "<level>{level: <8}</level> | "
-        f"<cyan>{trace_id}</cyan> | "
         f"<yellow>{user_id: <12}</yellow> | "
         f"<magenta>{session_id: <8}</magenta> | "
+        f"<cyan>{trace_id}</cyan> | "
         "<blue>{name}</blue>:<blue>{function}</blue>:<blue>{line}</blue> | "
         "<level>{message}</level>\n"
         "{exception}"
@@ -101,9 +101,9 @@ def _log_format_file(record: dict) -> str:
     return (
         "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
         "{level: <8} | "
-        f"{trace_id} | "
         f"{user_id: <12} | "
         f"{session_id: <8} | "
+        f"{trace_id} | "
         "{name}:{function}:{line} | "
         "{message}\n"
         "{exception}"

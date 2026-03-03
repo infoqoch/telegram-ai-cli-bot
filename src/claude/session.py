@@ -290,9 +290,15 @@ class SessionStore:
         logger.trace("매칭 세션 없음 -> False")
         return False
 
-    def get_session_by_prefix(self, user_id: str, prefix: str) -> Optional[dict]:
-        """Find session info by ID prefix."""
-        logger.trace(f"get_session_by_prefix() - user={user_id}, prefix={prefix}")
+    def get_session_by_prefix(self, user_id: str, prefix: str, include_deleted: bool = False) -> Optional[dict]:
+        """Find session info by ID prefix.
+
+        Args:
+            user_id: User ID
+            prefix: Session ID prefix to match
+            include_deleted: If True, also search in soft-deleted sessions
+        """
+        logger.trace(f"get_session_by_prefix() - user={user_id}, prefix={prefix}, include_deleted={include_deleted}")
 
         user_data = self._data.get(user_id)
         if not user_data:
@@ -300,7 +306,8 @@ class SessionStore:
             return None
 
         for session_id, data in user_data.get("sessions", {}).items():
-            if data.get("deleted", False):
+            is_deleted = data.get("deleted", False)
+            if is_deleted and not include_deleted:
                 continue
             if session_id.startswith(prefix):
                 result = {
@@ -310,8 +317,9 @@ class SessionStore:
                     "last_used": data.get("last_used", "")[:19],
                     "history_count": len(data.get("history", [])),
                     "name": data.get("name", ""),
+                    "deleted": is_deleted,
                 }
-                logger.trace(f"세션 찾음: {result['session_id']}")
+                logger.trace(f"세션 찾음: {result['session_id']} (deleted={is_deleted})")
                 return result
 
         logger.trace("매칭 세션 없음 -> None")
@@ -373,6 +381,37 @@ class SessionStore:
 
         self._save()
         logger.info(f"세션 삭제됨 (soft) - session={session_id[:8]}")
+        return True
+
+    def hard_delete_session(self, user_id: str, session_id: str) -> bool:
+        """Hard delete a session (permanently remove data)."""
+        logger.trace(f"hard_delete_session() - user={user_id}, session={session_id[:8]}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            logger.trace("사용자 없음 -> False")
+            return False
+
+        sessions = user_data.get("sessions", {})
+        if session_id not in sessions:
+            logger.trace("세션 없음 -> False")
+            return False
+
+        # 현재 세션이면 current 해제
+        if user_data.get("current") == session_id:
+            user_data["current"] = None
+            logger.trace("current 세션 해제됨")
+
+        # 이전 세션이면 previous 해제
+        if user_data.get("previous_session") == session_id:
+            user_data["previous_session"] = None
+            logger.trace("previous 세션 해제됨")
+
+        # 실제 삭제
+        del sessions[session_id]
+
+        self._save()
+        logger.info(f"세션 삭제됨 (hard) - session={session_id[:8]}")
         return True
 
     def get_session_name(self, user_id: str, session_id: str) -> str:
