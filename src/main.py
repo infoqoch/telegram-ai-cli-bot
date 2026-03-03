@@ -135,6 +135,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("new_opus", handlers.new_session_opus))
     app.add_handler(CommandHandler("new_sonnet", handlers.new_session_sonnet))
     app.add_handler(CommandHandler("new_haiku", handlers.new_session_haiku))
+    app.add_handler(CommandHandler("new_haiku_speedy", handlers.new_session_haiku_speedy))
+    app.add_handler(CommandHandler("new_opus_smarty", handlers.new_session_opus_smarty))
     app.add_handler(CommandHandler("model", handlers.model_command))
     app.add_handler(CommandHandler("model_opus", handlers.model_opus_command))
     app.add_handler(CommandHandler("model_sonnet", handlers.model_sonnet_command))

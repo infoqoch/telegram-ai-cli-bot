@@ -276,10 +276,8 @@ class BotHandlers:
             f"{auth_section}"
             "💬 세션\n"
             "/new [모델] [이름] - 새 세션\n"
-            "  예: /new haiku 빠른봇\n"
-            "/new_opus - 🧠 Opus\n"
-            "/new_sonnet - ⚡ Sonnet\n"
-            "/new_haiku - 🚀 Haiku\n"
+            "/new_haiku_speedy - 🚀 Speedy\n"
+            "/new_opus_smarty - 🧠 Smarty\n"
             "/model - 현재 세션 모델 변경\n"
             "/rename - 현재 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
@@ -626,6 +624,16 @@ class BotHandlers:
     async def new_session_haiku(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /new_haiku command - shortcut for /new haiku."""
         context.args = ["haiku"]
+        await self.new_session(update, context)
+
+    async def new_session_haiku_speedy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /new_haiku_speedy command - quick haiku session with name."""
+        context.args = ["haiku", "Speedy"]
+        await self.new_session(update, context)
+
+    async def new_session_opus_smarty(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /new_opus_smarty command - smart opus session with name."""
+        context.args = ["opus", "Smarty"]
         await self.new_session(update, context)
 
     async def model_opus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
