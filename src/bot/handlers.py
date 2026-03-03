@@ -674,20 +674,37 @@ class BotHandlers:
             return
 
         logger.trace(f"세션 히스토리 조회 - session={session_id[:8]}")
-        history = self.sessions.get_session_history(user_id, session_id)
-        count = len(history)
+        history_entries = self.sessions.get_session_history_entries(user_id, session_id)
+        count = len(history_entries)
         model = self.sessions.get_session_model(user_id, session_id)
         model_emoji = get_model_emoji(model)
         session_name = self.sessions.get_session_name(user_id, session_id)
         logger.trace(f"히스토리 수: {count}, 모델: {model}, 이름: {session_name or '(없음)'}")
 
-        # Recent 10 messages
-        recent = history[-10:]
+        # Recent 10 messages with processor info
+        recent = history_entries[-10:]
         history_lines = []
-        start_idx = len(history) - len(recent) + 1
-        for i, q in enumerate(recent, start=start_idx):
-            short_q = truncate_message(q, 40)
-            history_lines.append(f"{i}. {short_q}")
+        start_idx = len(history_entries) - len(recent) + 1
+
+        # processor 이모지 매핑
+        processor_emoji = {
+            "claude": "🤖",
+            "command": "⌨️",
+            "rejected": "❌",
+        }
+
+        for i, entry in enumerate(recent, start=start_idx):
+            msg = entry.get("message", "") if isinstance(entry, dict) else str(entry)
+            processor = entry.get("processor", "claude") if isinstance(entry, dict) else "claude"
+
+            # plugin:memo 형태면 🔌 사용
+            if processor.startswith("plugin:"):
+                emoji = "🔌"
+            else:
+                emoji = processor_emoji.get(processor, "")
+
+            short_q = truncate_message(msg, 35)
+            history_lines.append(f"{i}. {emoji} {short_q}")
 
         history_text = "\n".join(history_lines) if history_lines else "(없음)"
 
