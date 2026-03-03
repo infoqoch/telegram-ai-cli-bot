@@ -17,6 +17,7 @@ class SessionData(TypedDict):
     model: str  # opus, sonnet, haiku
     name: str  # 사용자 지정 세션 이름 (선택)
     deleted: bool  # soft delete 상태
+    is_manager: bool  # 매니저 세션 여부
 
 
 # 지원하는 모델 목록
@@ -262,6 +263,7 @@ class SessionStore:
                 "is_current": session_id == current_id,
                 "model": data.get("model", DEFAULT_MODEL),
                 "name": data.get("name", ""),
+                "is_manager": data.get("is_manager", False),
             })
 
         sessions.sort(key=lambda x: x["last_used"], reverse=True)
@@ -385,3 +387,85 @@ class SessionStore:
         name = session.get("name", "") if session else ""
         logger.trace(f"세션 이름: {name or '(없음)'}")
         return name
+
+    # ===== Manager Session Methods =====
+
+    def get_manager_session_id(self, user_id: str) -> Optional[str]:
+        """Get manager session ID for user (None if not exists)."""
+        logger.trace(f"get_manager_session_id() - user={user_id}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            return None
+
+        for session_id, data in user_data.get("sessions", {}).items():
+            if data.get("deleted", False):
+                continue
+            if data.get("is_manager", False):
+                logger.trace(f"매니저 세션 찾음: {session_id[:8]}")
+                return session_id
+
+        logger.trace("매니저 세션 없음")
+        return None
+
+    def create_manager_session(self, user_id: str, session_id: str, model: str = "sonnet") -> None:
+        """Create a manager session."""
+        logger.trace(f"create_manager_session() - user={user_id}, session={session_id[:8]}, model={model}")
+
+        user_data = self._ensure_user(user_id)
+        now = datetime.now().isoformat()
+
+        user_data["sessions"][session_id] = {
+            "created_at": now,
+            "last_used": now,
+            "history": ["(매니저 세션 시작)"],
+            "model": model,
+            "name": "📋 Manager",
+            "is_manager": True,
+        }
+
+        self._save()
+        logger.info(f"매니저 세션 생성됨 - user={user_id}, session={session_id[:8]}")
+
+    def get_previous_session_id(self, user_id: str) -> Optional[str]:
+        """Get previous session ID (stored when switching to manager)."""
+        logger.trace(f"get_previous_session_id() - user={user_id}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            return None
+
+        prev_id = user_data.get("previous_session")
+        logger.trace(f"이전 세션: {prev_id[:8] if prev_id else 'None'}")
+        return prev_id
+
+    def set_previous_session_id(self, user_id: str, session_id: Optional[str]) -> None:
+        """Store previous session ID for /back command."""
+        logger.trace(f"set_previous_session_id() - user={user_id}, session={session_id[:8] if session_id else 'None'}")
+
+        user_data = self._ensure_user(user_id)
+        user_data["previous_session"] = session_id
+        self._save()
+
+    def get_all_sessions_summary(self, user_id: str) -> str:
+        """Get summary of all sessions for manager context."""
+        logger.trace(f"get_all_sessions_summary() - user={user_id}")
+
+        sessions = self.list_sessions(user_id)
+        if not sessions:
+            return "(세션 없음)"
+
+        lines = []
+        for s in sessions:
+            if s.get("is_manager"):
+                continue  # 매니저 세션 제외
+            name = s.get("name", "") or "(이름없음)"
+            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(s.get("model", ""), "")
+            history = self.get_session_history(user_id, s["full_session_id"])
+            last_msg = history[-1][:50] if history else "-"
+            lines.append(
+                f"- {s['session_id']} {name} {model_emoji}{s.get('model', 'sonnet')} "
+                f"({s['history_count']}개, {s['last_used'][:10]})\n  최근: {last_msg}"
+            )
+
+        return "\n".join(lines)

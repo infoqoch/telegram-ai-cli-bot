@@ -282,7 +282,10 @@ class BotHandlers:
             "/rename_MyName - 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
             "/session_list - 세션 목록\n"
-            "/delete_&lt;id&gt; - 세션 삭제\n"
+            "/delete_&lt;id&gt; - 세션 삭제\n\n"
+            "📋 매니저\n"
+            "/m - 매니저 모드 (세션 관리)\n"
+            "/m 질문 - 원샷 질문\n"
             f"{plugin_section}\n"
             "ℹ️ 기타\n"
             "/chatid - 내 채팅 ID 확인\n"
@@ -945,6 +948,173 @@ class BotHandlers:
 
         clear_context()
 
+    async def manager_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /m command - manager session.
+
+        Usage:
+            /m              - 매니저 세션으로 전환
+            /m 질문         - 원샷 질문 (현재 세션 유지)
+        """
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        trace_id = self._setup_request_context(chat_id)
+        logger.info("/m 명령 수신")
+
+        if not self._is_authorized(chat_id):
+            logger.debug("/m 거부 - 권한 없음")
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            clear_context()
+            return
+
+        if not self._is_authenticated(user_id):
+            logger.debug("/m 거부 - 인증 필요")
+            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
+            clear_context()
+            return
+
+        # 매니저 세션 확인/생성
+        manager_session_id = self.sessions.get_manager_session_id(user_id)
+        if not manager_session_id:
+            logger.info("매니저 세션 생성 중...")
+            await update.message.reply_text("📋 매니저 세션 생성 중...")
+            manager_session_id = await self.claude.create_session()
+            if not manager_session_id:
+                await update.message.reply_text("❌ 매니저 세션 생성 실패")
+                clear_context()
+                return
+            self.sessions.create_manager_session(user_id, manager_session_id)
+
+        # 원샷 모드: /m 질문
+        if context.args:
+            message = " ".join(context.args)
+            logger.info(f"매니저 원샷 질문: {message[:50]}")
+
+            # 세션 컨텍스트 주입
+            sessions_summary = self.sessions.get_all_sessions_summary(user_id)
+            full_message = (
+                f"[세션 관리자 모드]\n"
+                f"사용자의 세션 목록:\n{sessions_summary}\n\n"
+                f"질문: {message}"
+            )
+
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+            response = await self.claude.chat(full_message, manager_session_id, model="sonnet")
+            if response.error:
+                await update.message.reply_text(f"❌ 오류: {response.error.value}")
+            else:
+                await update.message.reply_text(
+                    f"📋 <b>Manager</b>\n\n{response.text}",
+                    parse_mode="HTML"
+                )
+            clear_context()
+            return
+
+        # 전환 모드: /m
+        current_session_id = self.sessions.get_current_session_id(user_id)
+        if current_session_id and current_session_id != manager_session_id:
+            self.sessions.set_previous_session_id(user_id, current_session_id)
+
+        self.sessions.set_current(user_id, manager_session_id)
+        set_session_id(manager_session_id)
+
+        await update.message.reply_text(
+            "📋 <b>매니저 모드</b>\n\n"
+            "세션 관리를 도와드릴게요.\n"
+            "• 세션 검색/정리/추천\n"
+            "• 작업 요약\n\n"
+            "/back - 이전 세션으로\n"
+            "/exit - 매니저 종료",
+            parse_mode="HTML"
+        )
+        logger.info(f"매니저 모드 전환됨")
+        clear_context()
+
+    async def back_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /back command - return to previous session."""
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        self._setup_request_context(chat_id)
+        logger.info("/back 명령 수신")
+
+        if not self._is_authorized(chat_id):
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            clear_context()
+            return
+
+        prev_session_id = self.sessions.get_previous_session_id(user_id)
+        if not prev_session_id:
+            await update.message.reply_text(
+                "📭 돌아갈 세션이 없습니다.\n\n"
+                "/session_list 세션 목록 확인"
+            )
+            clear_context()
+            return
+
+        # 이전 세션이 삭제됐는지 확인
+        session_info = self.sessions.get_session_by_prefix(user_id, prev_session_id[:8])
+        if not session_info:
+            await update.message.reply_text("❌ 이전 세션을 찾을 수 없습니다.")
+            self.sessions.set_previous_session_id(user_id, None)
+            clear_context()
+            return
+
+        self.sessions.set_current(user_id, prev_session_id)
+        self.sessions.set_previous_session_id(user_id, None)
+
+        name = self.sessions.get_session_name(user_id, prev_session_id)
+        name_display = f" ({name})" if name else ""
+
+        await update.message.reply_text(
+            f"✅ 세션 복귀!\n\n"
+            f"• ID: <code>{prev_session_id[:8]}</code>{name_display}",
+            parse_mode="HTML"
+        )
+        clear_context()
+
+    async def exit_manager_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /exit command - exit manager mode."""
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        self._setup_request_context(chat_id)
+        logger.info("/exit 명령 수신")
+
+        if not self._is_authorized(chat_id):
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            clear_context()
+            return
+
+        # 매니저 세션인지 확인
+        current_session_id = self.sessions.get_current_session_id(user_id)
+        manager_session_id = self.sessions.get_manager_session_id(user_id)
+
+        if current_session_id != manager_session_id:
+            await update.message.reply_text("ℹ️ 매니저 모드가 아닙니다.")
+            clear_context()
+            return
+
+        # 이전 세션 또는 current 해제
+        prev_session_id = self.sessions.get_previous_session_id(user_id)
+        if prev_session_id:
+            self.sessions.set_current(user_id, prev_session_id)
+            self.sessions.set_previous_session_id(user_id, None)
+            name = self.sessions.get_session_name(user_id, prev_session_id)
+            name_display = f" ({name})" if name else ""
+            await update.message.reply_text(
+                f"✅ 매니저 종료, 세션 복귀!\n\n"
+                f"• ID: <code>{prev_session_id[:8]}</code>{name_display}",
+                parse_mode="HTML"
+            )
+        else:
+            self.sessions.clear_current(user_id)
+            await update.message.reply_text(
+                "✅ 매니저 종료!\n\n"
+                "/new 새 세션 시작\n"
+                "/session_list 세션 목록"
+            )
+
+        clear_context()
+
     async def rename_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /rename command - rename current session."""
         chat_id = update.effective_chat.id
@@ -1322,9 +1492,24 @@ class BotHandlers:
         logger.trace(f"새 세션: {is_new_session}")
 
         try:
+            # 매니저 세션인지 확인
+            manager_session_id = self.sessions.get_manager_session_id(user_id)
+            is_manager = session_id == manager_session_id
+
+            # 매니저 세션이면 세션 정보 주입
+            actual_message = message
+            if is_manager:
+                sessions_summary = self.sessions.get_all_sessions_summary(user_id)
+                actual_message = (
+                    f"[세션 관리자 모드]\n"
+                    f"사용자의 세션 목록:\n{sessions_summary}\n\n"
+                    f"사용자 요청: {message}"
+                )
+                logger.trace("매니저 세션 - 세션 정보 주입됨")
+
             # Claude 호출
             logger.trace(f"claude.chat() 호출 - model={model}")
-            response, error, _ = await self.claude.chat(message, session_id, model=model)
+            response, error, _ = await self.claude.chat(actual_message, session_id, model=model)
 
             elapsed = time.time() - start_time
             logger.info(f"Claude 응답 완료 - session={session_id[:8]}, elapsed={elapsed:.1f}s, length={len(response)}")
@@ -1349,14 +1534,17 @@ class BotHandlers:
             # 세션 정보 prefix 추가
             session_info = self.sessions.get_session_info(user_id, session_id)
             history_count = self.sessions.get_history_count(user_id, session_id)
-            prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
 
-            # 세션 커맨드 suffix 추가
-            suffix = (
-                f"\n\n"
-                f"/s_{session_info} 세션이동\n"
-                f"/h_{session_info} 히스토리"
-            )
+            if is_manager:
+                prefix = f"📋 <b>[Manager|#{history_count}]</b>\n\n"
+                suffix = "\n\n/back 이전세션 | /exit 종료"
+            else:
+                prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
+                suffix = (
+                    f"\n\n"
+                    f"/s_{session_info} 세션이동\n"
+                    f"/h_{session_info} 히스토리"
+                )
 
             full_response = prefix + response + suffix
             logger.trace(f"최종 응답 길이: {len(full_response)}")
