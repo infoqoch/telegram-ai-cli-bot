@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Telegram bot interface for Claude Code CLI"
 requires-python = ">=3.11"
 dependencies = [
-    "python-telegram-bot>=21.0",
+    "python-telegram-bot[job-queue]>=21.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

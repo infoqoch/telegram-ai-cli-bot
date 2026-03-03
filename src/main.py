@@ -59,6 +59,50 @@ from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
 
+# Todo 스케줄러 (옵션)
+_todo_scheduler = None
+
+
+def _setup_todo_scheduler(app, settings, plugin_loader) -> None:
+    """Todo 스케줄러 설정."""
+    global _todo_scheduler
+
+    try:
+        from plugins.builtin.todo.scheduler import TodoScheduler
+        from plugins.builtin.todo.manager import TodoManager
+
+        # 데이터 디렉토리
+        data_dir = settings.base_dir / ".data" / "todo"
+
+        # TodoManager 생성
+        todo_manager = TodoManager(data_dir)
+
+        # 알림 받을 chat_ids (allowed_chat_ids 또는 maintainer_chat_id)
+        chat_ids = settings.allowed_chat_ids.copy() if settings.allowed_chat_ids else []
+        if settings.maintainer_chat_id and settings.maintainer_chat_id not in chat_ids:
+            chat_ids.append(settings.maintainer_chat_id)
+
+        # 스케줄러 생성 및 설정
+        _todo_scheduler = TodoScheduler(
+            todo_manager=todo_manager,
+            chat_ids=chat_ids,
+        )
+        _todo_scheduler.setup_jobs(app)
+
+        # TodoPlugin에 manager 공유 (플러그인이 로드된 경우)
+        if plugin_loader:
+            todo_plugin = plugin_loader.get_plugin_by_name("todo")
+            if todo_plugin:
+                todo_plugin._manager = todo_manager
+                logger.info("Todo 플러그인에 공유 매니저 연결됨")
+
+        logger.info(f"Todo 스케줄러 활성화 - chat_ids: {chat_ids}")
+
+    except ImportError as e:
+        logger.debug(f"Todo 스케줄러 비활성화 (모듈 없음): {e}")
+    except Exception as e:
+        logger.warning(f"Todo 스케줄러 초기화 실패: {e}")
+
 
 def create_app() -> Application:
     """Create and configure the Telegram application."""
@@ -124,6 +168,9 @@ def create_app() -> Application:
     logger.trace("Application 빌드 시작")
     app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
     logger.trace("Application 빌드 완료 - concurrent_updates=True")
+
+    # Todo 스케줄러 설정 (job_queue 사용)
+    _setup_todo_scheduler(app, settings, plugin_loader)
 
     # Register handlers
     logger.trace("핸들러 등록 시작")
