@@ -5,6 +5,7 @@ import subprocess
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from telegram import Update
@@ -221,6 +222,23 @@ class BotHandlers:
         result = self.auth.is_authenticated(user_id)
         logger.trace(f"인증 체크 결과: {result}")
         return result
+
+    def _build_manager_context(self, user_id: str, message: str) -> str:
+        """매니저 세션용 컨텍스트 메시지 생성 (세션 목록 + 파일 경로 힌트)."""
+        sessions_summary = self.sessions.get_all_sessions_summary(user_id)
+
+        # Claude 세션 파일 경로 힌트 (시스템 독립적)
+        project_path = Path.cwd().as_posix().replace("/", "-")[1:]
+        claude_sessions_dir = f"~/.claude/projects/{project_path}/"
+
+        return (
+            f"{MANAGER_SYSTEM_PROMPT}\n\n"
+            f"[Claude 세션 파일 경로]\n"
+            f"{claude_sessions_dir}{{session_id}}.jsonl\n"
+            f"(세션 분석 요청 시 해당 파일을 읽어 대화 내용 확인 가능)\n\n"
+            f"[현재 세션 목록]\n{sessions_summary}\n\n"
+            f"[사용자 요청]\n{message}"
+        )
 
     # ==================== 정보 명령어 ====================
 
@@ -989,13 +1007,8 @@ class BotHandlers:
             message = " ".join(context.args)
             logger.info(f"매니저 원샷 질문: {message[:50]}")
 
-            # 세션 컨텍스트 주입
-            sessions_summary = self.sessions.get_all_sessions_summary(user_id)
-            full_message = (
-                f"{MANAGER_SYSTEM_PROMPT}\n\n"
-                f"[현재 세션 목록]\n{sessions_summary}\n\n"
-                f"[사용자 요청]\n{message}"
-            )
+            # 세션 컨텍스트 + 파일 경로 힌트 주입
+            full_message = self._build_manager_context(user_id, message)
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
@@ -1409,16 +1422,11 @@ class BotHandlers:
             manager_session_id = self.sessions.get_manager_session_id(user_id)
             is_manager = session_id == manager_session_id
 
-            # 매니저 세션이면 세션 정보 주입
+            # 매니저 세션이면 세션 정보 + 파일 경로 힌트 주입
             actual_message = message
             if is_manager:
-                sessions_summary = self.sessions.get_all_sessions_summary(user_id)
-                actual_message = (
-                    f"{MANAGER_SYSTEM_PROMPT}\n\n"
-                    f"[현재 세션 목록]\n{sessions_summary}\n\n"
-                    f"[사용자 요청]\n{message}"
-                )
-                logger.trace("매니저 세션 - 세션 정보 주입됨")
+                actual_message = self._build_manager_context(user_id, message)
+                logger.trace("매니저 세션 - 세션 정보 + 파일 경로 힌트 주입됨")
 
             # Claude 호출
             logger.trace(f"claude.chat() 호출 - model={model}")

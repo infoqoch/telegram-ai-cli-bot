@@ -1,6 +1,6 @@
-# 아키텍처 및 설계 결정
+# 아키텍처
 
-> 이 문서는 시스템의 내부 구조와 설계 결정 과정을 설명합니다.
+> 시스템의 내부 구조와 설계를 설명합니다.
 
 ---
 
@@ -12,10 +12,11 @@
 │   Client    │◀────│                 │◀────│  (Local)    │
 └─────────────┘     └─────────────────┘     └─────────────┘
                             │
-                            ▼
-                    ┌───────────────┐
-                    │ sessions.json │
-                    └───────────────┘
+                    ┌───────┴───────┐
+                    ▼               ▼
+            ┌───────────────┐ ┌───────────────┐
+            │ sessions.json │ │   Plugins     │
+            └───────────────┘ └───────────────┘
 ```
 
 ### 핵심 설계 원칙
@@ -25,137 +26,166 @@
 | **CLI 래퍼** | Claude API 직접 호출 ❌, CLI subprocess 실행 ✅ |
 | **Fire-and-Forget** | 핸들러는 즉시 반환, 응답은 백그라운드에서 전송 |
 | **세션 = Claude session_id** | 자체 UUID 생성 ❌, Claude의 session_id를 그대로 사용 |
+| **2-Track 응답** | 플러그인(즉시) vs Claude(백그라운드) |
 
 ---
 
-## 2. 핵심 컴포넌트
+## 2. 프로젝트 구조
 
-### 2.1 BotHandlers (`src/bot/handlers.py`)
+```
+src/
+├── main.py              # 엔트리포인트
+├── config.py            # Pydantic 설정
+├── logging_config.py    # loguru + contextvars (MDC)
+├── bot/
+│   ├── handlers.py      # 텔레그램 핸들러 (Fire-and-Forget)
+│   ├── middleware.py    # 인증/권한 데코레이터
+│   ├── constants.py     # ACTION 패턴, 상수
+│   ├── prompts/         # 시스템 프롬프트
+│   └── formatters.py    # 메시지 포맷팅
+├── claude/
+│   ├── client.py        # Claude CLI 비동기 클라이언트
+│   └── session.py       # 세션 저장소 (Atomic Write)
+└── plugins/
+    └── loader.py        # 플러그인 시스템
+
+plugins/
+├── builtin/             # 내장 플러그인 (memo, weather)
+└── custom/              # 사용자 플러그인 (git ignored)
+```
+
+---
+
+## 3. 핵심 컴포넌트
+
+### 3.1 BotHandlers (`src/bot/handlers.py`)
 
 텔레그램 메시지를 처리하는 핸들러 클래스.
 
 ```python
 class BotHandlers:
-    _user_locks: dict[str, Lock]        # 세션 생성 시 Race Condition 방지
-    _user_semaphores: dict[str, Semaphore]  # 동시 요청 제한 (최대 3개)
-    _active_tasks: dict[int, TaskInfo]  # 실행 중인 태스크 추적
-    _watchdog_task: Task                # 좀비 태스크 정리 루프
+    _user_locks: dict[str, Lock]           # 세션 생성 시 Race Condition 방지
+    _user_semaphores: dict[str, Semaphore] # 동시 요청 제한 (최대 3개)
+    _active_tasks: dict[int, TaskInfo]     # 실행 중인 태스크 추적
+    _watchdog_task: Task                   # 좀비 태스크 정리 루프
 ```
 
-### 2.2 ClaudeClient (`src/claude/client.py`)
+**동시성 처리:**
+- `_user_locks`: 세션 생성 구간을 유저별로 직렬화하여 중복 생성 방지
+- `_user_semaphores`: 유저당 동시 요청 3개로 제한
+- `_watchdog_task`: 30분 초과 태스크 자동 정리
+
+### 3.2 ClaudeClient (`src/claude/client.py`)
 
 Claude CLI를 비동기로 실행하는 클라이언트.
 
 ```python
 class ClaudeClient:
-    async def chat(message, session_id) -> ChatResponse
+    async def chat(message, session_id, model) -> ChatResponse
     async def create_session() -> str  # 새 세션 생성
     async def summarize(questions) -> str  # AI 요약
 ```
 
-### 2.3 SessionStore (`src/claude/session.py`)
+### 3.3 SessionStore (`src/claude/session.py`)
 
-세션 데이터를 JSON 파일로 관리.
+세션 데이터를 JSON 파일로 관리. Atomic Write로 파일 손상 방지.
 
 ```python
 # 데이터 구조
 {
     "user_id": {
         "current": "claude_session_id",
+        "previous_session": "...",  # /back용
         "sessions": {
             "claude_session_id": {
                 "created_at": "...",
                 "last_used": "...",
-                "history": ["질문1", "질문2"]
+                "history": ["질문1", "질문2"],
+                "model": "opus",      # opus/sonnet/haiku
+                "name": "주식분석",    # 사용자 지정 이름
+                "is_manager": false   # 매니저 세션 여부
             }
         }
     }
 }
 ```
 
----
+### 3.4 PluginLoader (`src/plugins/loader.py`)
 
-## 3. 해결한 문제들
-
-### 3.1 Race Condition - 세션 중복 생성
-
-**문제:** 동일 유저가 빠르게 메시지 2개를 보내면 세션이 2개 생성됨
-
-```
-메시지1 ──▶ 세션 없음? ──▶ 세션 생성 (A)
-메시지2 ──▶ 세션 없음? ──▶ 세션 생성 (B)  ← 중복!
-```
-
-**해결:** 유저별 Lock으로 세션 결정 구간 보호
+플러그인 시스템. Claude 호출 없이 빠른 응답.
 
 ```python
-async with self._user_locks[user_id]:
-    session_id = self.sessions.get_current_session_id(user_id)
-    if not session_id:
-        session_id = await self.claude.create_session()
-        self.sessions.create_session(user_id, session_id, message)
-```
-
-### 3.2 핸들러 블로킹 - 응답 지연
-
-**문제:** Claude 응답(수 분)을 기다리는 동안 다른 메시지 처리 불가
-
-**해결:** Fire-and-Forget 패턴
-
-```python
-# 핸들러는 즉시 반환
-asyncio.create_task(self._process_claude_request(...))
-
-# 백그라운드에서 처리 후 chat_id로 직접 응답
-async def _process_claude_request(self, bot, chat_id, ...):
-    response = await self.claude.chat(message, session_id)
-    await bot.send_message(chat_id=chat_id, text=response)
-```
-
-### 3.3 좀비 태스크 - 리소스 누수
-
-**문제:** 장시간 실행되는 태스크가 정리되지 않음
-
-**해결:** Watchdog 루프 (1분마다 체크, 30분 초과 시 kill)
-
-```python
-async def _watchdog_loop(self):
-    while True:
-        await asyncio.sleep(60)
-        for task_id, info in self._active_tasks.items():
-            if time.time() - info.started_at > 30 * 60:
-                info.task.cancel()
-                await self._kill_claude_process(info.session_id)
-```
-
-### 3.4 동시 요청 폭주 - DoS
-
-**문제:** 악의적 사용자가 메시지 폭탄 전송
-
-**해결:** 유저별 Semaphore로 동시 3개 제한
-
-```python
-async with self._user_semaphores[user_id]:
-    await self._process_claude_request(...)
-```
-
-### 3.5 파일 I/O 충돌 - 데이터 손상
-
-**문제:** 동시 저장 시 JSON 파일 손상 가능
-
-**해결:** Atomic Write (임시 파일 → replace)
-
-```python
-def _save(self):
-    temp_file = self.file_path.with_suffix('.tmp')
-    with open(temp_file, "w") as f:
-        json.dump(self._data, f)
-    temp_file.replace(self.file_path)  # 원자적 교체
+class PluginLoader:
+    async def process_message(message, chat_id) -> PluginResult
+    # can_handle() → True인 첫 번째 플러그인이 처리
 ```
 
 ---
 
-## 4. 보호 메커니즘 요약
+## 4. 매니저 세션 & ACTION 패턴
+
+### 4.1 매니저 세션
+
+세션 관리를 자연어로 처리하는 특수 세션 (Opus 모델 사용).
+
+```
+사용자: /m                    → 매니저 모드 진입
+사용자: "주식돌이 오푸스로 만들어"
+매니저: "생성! [ACTION:CREATE:opus:주식돌이]"
+봇: ACTION 패턴 파싱 → 세션 생성 메서드 호출 → 결과 표시
+```
+
+### 4.2 ACTION 패턴
+
+매니저가 출력하면 봇이 실제로 실행하는 명령어:
+
+| 패턴 | 예시 | 동작 |
+|------|------|------|
+| `[ACTION:DELETE:id]` | `[ACTION:DELETE:abc12345]` | 세션 삭제 |
+| `[ACTION:RENAME:id:name]` | `[ACTION:RENAME:abc12345:주식분석]` | 이름 변경 |
+| `[ACTION:CREATE:model:name]` | `[ACTION:CREATE:opus:코딩도우미]` | 세션 생성 |
+| `[ACTION:SWITCH:id]` | `[ACTION:SWITCH:abc12345]` | 세션 전환 |
+
+### 4.3 컨텍스트 주입
+
+매니저 호출 시 세션 목록과 파일 경로 힌트를 주입:
+
+```python
+def _build_manager_context(self, user_id, message):
+    return (
+        f"{MANAGER_SYSTEM_PROMPT}\n\n"
+        f"[Claude 세션 파일 경로]\n"
+        f"~/.claude/projects/{project_path}/{{session_id}}.jsonl\n\n"
+        f"[현재 세션 목록]\n{sessions_summary}\n\n"
+        f"[사용자 요청]\n{message}"
+    )
+```
+
+---
+
+## 5. 로깅 시스템
+
+### MDC 스타일 (contextvars)
+
+Java의 MDC처럼 요청별 컨텍스트 유지:
+
+```python
+# logging_config.py
+_trace_id: ContextVar[str] = ContextVar("trace_id", default="-")
+_user_id: ContextVar[str] = ContextVar("user_id", default="-")
+_session_id: ContextVar[str] = ContextVar("session_id", default="-")
+```
+
+### 로그 포맷
+
+```
+22:15:30.123 | INFO     | 123456789    | a1b2c3d4 | 8f9e0d1c | handlers:handle_message:1364 | 메시지 수신
+               ↑ level    ↑ user_id     ↑ session  ↑ trace_id   ↑ location
+```
+
+---
+
+## 6. 보호 메커니즘
 
 | 계층 | 위협 | 보호 |
 |------|------|------|
@@ -166,32 +196,3 @@ def _save(self):
 | 리소스 | 좀비 태스크 | Watchdog (30분) |
 | 데이터 | 파일 손상 | Atomic Write |
 | DoS | 긴 메시지 | `MAX_MESSAGE_LENGTH` (4096) |
-
----
-
-## 5. 테스트
-
-```bash
-./run.sh test  # 100개 테스트 실행
-```
-
-### 테스트 범위
-
-| 모듈 | 테스트 수 | 주요 검증 |
-|------|----------|----------|
-| `test_session.py` | 21 | Atomic write, datetime 파싱, 세션 관리 |
-| `test_client.py` | 22 | ChatResponse, 타임아웃, JSON 파싱 |
-| `test_middleware.py` | 30 | 인증, 데코레이터, 만료 정리 |
-| `test_handlers.py` | 24 | Fire-and-Forget, Lock, 메시지 분할 |
-| `test_formatters.py` | 11 | HTML 변환, 메시지 자르기 |
-
----
-
-## 6. 의도적으로 구현하지 않은 것
-
-| 항목 | 이유 |
-|------|------|
-| **CLI 인젝션 방지** | `subprocess_exec`는 shell=False 기본, 이미 안전 |
-| **Lock 메모리 정리** | Lock 객체 수십 바이트, ALLOWED_CHAT_IDS로 제한됨 |
-| **세션 암호화** | 개인 봇, 서버 접근자 = 운영자 본인 |
-| **Graceful Shutdown** | 재시작 빈도 낮음, 필요 시 TODO.md 참조 |
