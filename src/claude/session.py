@@ -447,25 +447,50 @@ class SessionStore:
         user_data["previous_session"] = session_id
         self._save()
 
-    def get_all_sessions_summary(self, user_id: str) -> str:
-        """Get summary of all sessions for manager context."""
-        logger.trace(f"get_all_sessions_summary() - user={user_id}")
+    def get_all_sessions_summary(self, user_id: str, include_deleted: bool = True) -> str:
+        """Get summary of all sessions for manager context.
 
-        sessions = self.list_sessions(user_id)
-        if not sessions:
+        Args:
+            user_id: User ID
+            include_deleted: If True, includes soft-deleted sessions (for manager)
+        """
+        logger.trace(f"get_all_sessions_summary() - user={user_id}, include_deleted={include_deleted}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
             return "(세션 없음)"
 
-        lines = []
-        for s in sessions:
-            if s.get("is_manager"):
+        active_lines = []
+        deleted_lines = []
+
+        for session_id, data in user_data.get("sessions", {}).items():
+            if data.get("is_manager"):
                 continue  # 매니저 세션 제외
-            name = s.get("name", "") or "(이름없음)"
-            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(s.get("model", ""), "")
-            history = self.get_session_history(user_id, s["full_session_id"])
+
+            is_deleted = data.get("deleted", False)
+            name = data.get("name", "") or "(이름없음)"
+            model = data.get("model", DEFAULT_MODEL)
+            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "")
+            history = data.get("history", [])
+            history_count = len(history)
+            last_used = data.get("last_used", "")[:10]
             last_msg = history[-1][:50] if history else "-"
-            lines.append(
-                f"- {s['session_id']} {name} {model_emoji}{s.get('model', 'sonnet')} "
-                f"({s['history_count']}개, {s['last_used'][:10]})\n  최근: {last_msg}"
+
+            line = (
+                f"- {session_id[:8]} {name} {model_emoji}{model} "
+                f"({history_count}개, {last_used})\n  최근: {last_msg}"
             )
 
-        return "\n".join(lines)
+            if is_deleted:
+                if include_deleted:
+                    deleted_lines.append(line)
+            else:
+                active_lines.append(line)
+
+        result_parts = []
+        if active_lines:
+            result_parts.append("[활성 세션]\n" + "\n".join(active_lines))
+        if deleted_lines:
+            result_parts.append(f"[삭제된 세션 ({len(deleted_lines)}개)]\n" + "\n".join(deleted_lines))
+
+        return "\n\n".join(result_parts) if result_parts else "(세션 없음)"
