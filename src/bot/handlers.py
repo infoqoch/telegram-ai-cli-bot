@@ -1547,6 +1547,7 @@ class BotHandlers:
 
             # 세션 정보 prefix 추가
             session_info = self.sessions.get_session_info(user_id, session_id)
+            session_short_id = session_id[:8]  # 명령어용 ID (이름 제외)
             history_count = self.sessions.get_history_count(user_id, session_id)
 
             if is_manager:
@@ -1556,8 +1557,8 @@ class BotHandlers:
                 prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
                 suffix = (
                     f"\n\n"
-                    f"/s_{session_info} 세션이동\n"
-                    f"/h_{session_info} 히스토리"
+                    f"/s_{session_short_id} 세션이동\n"
+                    f"/h_{session_short_id} 히스토리"
                 )
 
             full_response = prefix + response + suffix
