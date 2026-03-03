@@ -155,7 +155,9 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("rename", handlers.rename_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/history_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/d_'), handlers.delete_session_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/delete_'), handlers.delete_session_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
 
     app.add_error_handler(handlers.error_handler)

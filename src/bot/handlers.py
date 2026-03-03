@@ -283,7 +283,7 @@ class BotHandlers:
             "/rename - 현재 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
             "/session_list - 세션 목록\n"
-            "/d_&lt;id&gt; - 세션 삭제\n"
+            "/delete_&lt;id&gt; - 세션 삭제\n"
             f"{plugin_section}\n"
             "ℹ️ 기타\n"
             "/chatid - 내 채팅 ID 확인\n"
@@ -793,7 +793,9 @@ class BotHandlers:
             f"• 질문: {count}개\n\n"
             f"<b>대화 내용</b> (최근 10개)\n{history_text}\n\n"
             f"<b>모델 변경</b>\n"
-            f"/model_opus 🧠 | /model_sonnet ⚡ | /model_haiku 🚀",
+            f"/model_opus 🧠 | /model_sonnet ⚡ | /model_haiku 🚀\n\n"
+            f"<b>세션 관리</b>\n"
+            f"/history_{session_id[:8]} | /delete_{session_id[:8]}",
             parse_mode="HTML"
         )
         logger.trace("/session 완료")
@@ -1006,12 +1008,15 @@ class BotHandlers:
             return
 
         text = update.message.text
-        if not text.startswith("/d_"):
+        if text.startswith("/delete_"):
+            target = text[8:]  # /delete_xxxxx
+        elif text.startswith("/d_"):
+            target = text[3:]  # /d_xxxxx
+        else:
             clear_context()
             return
 
-        target = text[3:]  # Extract session prefix
-        logger.info(f"세션 삭제 요청: /d_{target}")
+        logger.info(f"세션 삭제 요청: {target}")
 
         target_info = self.sessions.get_session_by_prefix(user_id, target)
         if not target_info:
@@ -1056,12 +1061,15 @@ class BotHandlers:
             return
 
         text = update.message.text
-        if not text.startswith("/h_"):
+        if text.startswith("/history_"):
+            target = text[9:]  # /history_xxxxx
+        elif text.startswith("/h_"):
+            target = text[3:]  # /h_xxxxx
+        else:
             clear_context()
             return
 
-        target = text[3:]  # Extract session prefix
-        logger.info(f"히스토리 조회 요청: /h_{target}")
+        logger.info(f"히스토리 조회 요청: {target}")
 
         logger.trace(f"세션 검색 중 - prefix={target}")
         target_info = self.sessions.get_session_by_prefix(user_id, target)

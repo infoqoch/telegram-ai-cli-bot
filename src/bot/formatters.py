@@ -95,7 +95,7 @@ def format_session_quick_list(sessions: list[dict], histories: dict[str, list[st
         lines.append(
             f"/s_{s['session_id']}{name_display} {emoji}{model} ({s['history_count']}개){current_mark}\n"
             f"   └ 최근: {last_msg}\n"
-            f"   └ /h_{s['session_id']} /d_{s['session_id']}"
+            f"   └ /history_{s['session_id']} /delete_{s['session_id']}"
         )
 
     return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)
