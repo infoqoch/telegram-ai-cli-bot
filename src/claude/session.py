@@ -15,6 +15,8 @@ class SessionData(TypedDict):
     last_used: str
     history: list[str]
     model: str  # opus, sonnet, haiku
+    name: str  # 사용자 지정 세션 이름 (선택)
+    deleted: bool  # soft delete 상태
 
 
 # 지원하는 모델 목록
@@ -247,6 +249,9 @@ class SessionStore:
         sessions = []
 
         for session_id, data in user_data.get("sessions", {}).items():
+            # soft deleted 세션 제외
+            if data.get("deleted", False):
+                continue
             sessions.append({
                 "session_id": session_id[:8],
                 "full_session_id": session_id,
@@ -255,6 +260,7 @@ class SessionStore:
                 "history_count": len(data.get("history", [])),
                 "is_current": session_id == current_id,
                 "model": data.get("model", DEFAULT_MODEL),
+                "name": data.get("name", ""),
             })
 
         sessions.sort(key=lambda x: x["last_used"], reverse=True)
@@ -270,7 +276,9 @@ class SessionStore:
             logger.trace("사용자 없음 -> False")
             return False
 
-        for session_id in user_data.get("sessions", {}).keys():
+        for session_id, data in user_data.get("sessions", {}).items():
+            if data.get("deleted", False):
+                continue
             if session_id.startswith(session_prefix):
                 self.set_current(user_id, session_id)
                 logger.info(f"세션 전환됨 - user={user_id}, session={session_id[:8]}")
@@ -289,6 +297,8 @@ class SessionStore:
             return None
 
         for session_id, data in user_data.get("sessions", {}).items():
+            if data.get("deleted", False):
+                continue
             if session_id.startswith(prefix):
                 result = {
                     "session_id": session_id[:8],
@@ -296,6 +306,7 @@ class SessionStore:
                     "created_at": data.get("created_at", "")[:19],
                     "last_used": data.get("last_used", "")[:19],
                     "history_count": len(data.get("history", [])),
+                    "name": data.get("name", ""),
                 }
                 logger.trace(f"세션 찾음: {result['session_id']}")
                 return result
@@ -316,3 +327,60 @@ class SessionStore:
         history = session.get("history", []) if session else []
         logger.trace(f"히스토리 반환: {len(history)}개")
         return history
+
+    def rename_session(self, user_id: str, session_id: str, name: str) -> bool:
+        """Rename a session."""
+        logger.trace(f"rename_session() - user={user_id}, session={session_id[:8]}, name={name}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            logger.trace("사용자 없음 -> False")
+            return False
+
+        session = user_data.get("sessions", {}).get(session_id)
+        if not session or session.get("deleted", False):
+            logger.trace("세션 없거나 삭제됨 -> False")
+            return False
+
+        session["name"] = name
+        self._save()
+        logger.info(f"세션 이름 변경됨 - session={session_id[:8]}, name={name}")
+        return True
+
+    def delete_session(self, user_id: str, session_id: str) -> bool:
+        """Soft delete a session."""
+        logger.trace(f"delete_session() - user={user_id}, session={session_id[:8]}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            logger.trace("사용자 없음 -> False")
+            return False
+
+        session = user_data.get("sessions", {}).get(session_id)
+        if not session:
+            logger.trace("세션 없음 -> False")
+            return False
+
+        session["deleted"] = True
+
+        # 현재 세션이면 current 해제
+        if user_data.get("current") == session_id:
+            user_data["current"] = None
+            logger.trace("current 세션 해제됨")
+
+        self._save()
+        logger.info(f"세션 삭제됨 (soft) - session={session_id[:8]}")
+        return True
+
+    def get_session_name(self, user_id: str, session_id: str) -> str:
+        """Get session name."""
+        logger.trace(f"get_session_name() - user={user_id}, session={session_id[:8] if session_id else 'None'}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            return ""
+
+        session = user_data.get("sessions", {}).get(session_id)
+        name = session.get("name", "") if session else ""
+        logger.trace(f"세션 이름: {name or '(없음)'}")
+        return name

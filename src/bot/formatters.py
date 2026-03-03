@@ -89,10 +89,13 @@ def format_session_quick_list(sessions: list[dict], histories: dict[str, list[st
         current_mark = " ⬅️" if s.get("is_current") else ""
         model = s.get("model", "sonnet")
         emoji = model_emoji.get(model, "")
+        name = s.get("name", "")
+        name_display = f" <b>{name}</b>" if name else ""
 
         lines.append(
-            f"/s_{s['session_id']} {emoji}{model} ({s['history_count']}개){current_mark}\n"
-            f"   └ 최근: {last_msg}"
+            f"/s_{s['session_id']}{name_display} {emoji}{model} ({s['history_count']}개){current_mark}\n"
+            f"   └ 최근: {last_msg}\n"
+            f"   └ /h_{s['session_id']} /d_{s['session_id']}"
         )
 
     return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)

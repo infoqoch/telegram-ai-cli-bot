@@ -280,8 +280,10 @@ class BotHandlers:
             "/new_sonnet - ⚡ Sonnet 세션 (균형)\n"
             "/new_haiku - 🚀 Haiku 세션 (빠름)\n"
             "/model - 현재 세션 모델 변경\n"
+            "/rename - 현재 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
             "/session_list - 세션 목록\n"
+            "/d_&lt;id&gt; - 세션 삭제\n"
             f"{plugin_section}\n"
             "ℹ️ 기타\n"
             "/chatid - 내 채팅 ID 확인\n"
@@ -769,7 +771,8 @@ class BotHandlers:
         count = len(history)
         model = self.sessions.get_session_model(user_id, session_id)
         model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "")
-        logger.trace(f"히스토리 수: {count}, 모델: {model}")
+        session_name = self.sessions.get_session_name(user_id, session_id)
+        logger.trace(f"히스토리 수: {count}, 모델: {model}, 이름: {session_name or '(없음)'}")
 
         # Recent 10 messages
         recent = history[-10:]
@@ -781,9 +784,11 @@ class BotHandlers:
 
         history_text = "\n".join(history_lines) if history_lines else "(없음)"
 
+        name_line = f"• 이름: {session_name}\n" if session_name else ""
         await update.message.reply_text(
             f"📊 <b>현재 세션</b>\n\n"
             f"• ID: <code>{session_id[:8]}</code>\n"
+            f"{name_line}"
             f"• 모델: {model_emoji} {model}\n"
             f"• 질문: {count}개\n\n"
             f"<b>대화 내용</b> (최근 10개)\n{history_text}\n\n"
@@ -922,6 +927,112 @@ class BotHandlers:
         else:
             logger.error(f"세션 전환 실패: {target}")
             await update.message.reply_text("❌ 세션 전환 실패")
+
+        clear_context()
+
+    async def rename_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /rename command - rename current session."""
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        self._setup_request_context(chat_id)
+        logger.info("/rename 명령 수신")
+
+        if not self._is_authorized(chat_id):
+            logger.debug("/rename 거부 - 권한 없음")
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            clear_context()
+            return
+
+        if not self._is_authenticated(user_id):
+            logger.debug("/rename 거부 - 인증 필요")
+            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
+            clear_context()
+            return
+
+        session_id = self.sessions.get_current_session_id(user_id)
+        if not session_id:
+            logger.trace("활성 세션 없음")
+            await update.message.reply_text("📭 활성 세션이 없습니다.")
+            clear_context()
+            return
+
+        if not context.args:
+            current_name = self.sessions.get_session_name(user_id, session_id)
+            logger.trace(f"현재 이름: {current_name or '(없음)'}")
+            await update.message.reply_text(
+                f"✏️ <b>세션 이름 변경</b>\n\n"
+                f"• 현재: {current_name or '(이름 없음)'}\n"
+                f"• 세션: <code>{session_id[:8]}</code>\n\n"
+                f"사용법: <code>/rename 새이름</code>",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
+        new_name = " ".join(context.args)
+        if len(new_name) > 50:
+            await update.message.reply_text("❌ 이름이 너무 깁니다. (최대 50자)")
+            clear_context()
+            return
+
+        if self.sessions.rename_session(user_id, session_id, new_name):
+            await update.message.reply_text(
+                f"✅ 세션 이름 변경 완료!\n\n"
+                f"• 세션: <code>{session_id[:8]}</code>\n"
+                f"• 이름: {new_name}",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text("❌ 이름 변경 실패")
+
+        clear_context()
+
+    async def delete_session_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /d_<id> command for deleting a session."""
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        self._setup_request_context(chat_id)
+
+        if not self._is_authorized(chat_id):
+            logger.debug("세션 삭제 거부 - 권한 없음")
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            clear_context()
+            return
+
+        if not self._is_authenticated(user_id):
+            logger.debug("세션 삭제 거부 - 인증 필요")
+            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
+            clear_context()
+            return
+
+        text = update.message.text
+        if not text.startswith("/d_"):
+            clear_context()
+            return
+
+        target = text[3:]  # Extract session prefix
+        logger.info(f"세션 삭제 요청: /d_{target}")
+
+        target_info = self.sessions.get_session_by_prefix(user_id, target)
+        if not target_info:
+            logger.debug(f"세션 없음: {target}")
+            await update.message.reply_text(f"❌ 세션 '{target}'을 찾을 수 없습니다.")
+            clear_context()
+            return
+
+        full_session_id = target_info["full_session_id"]
+        session_name = target_info.get("name", "")
+
+        if self.sessions.delete_session(user_id, full_session_id):
+            name_info = f" ({session_name})" if session_name else ""
+            await update.message.reply_text(
+                f"🗑️ 세션 삭제 완료!\n\n"
+                f"• ID: <code>{target_info['session_id']}</code>{name_info}\n"
+                f"• 질문: {target_info['history_count']}개",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text("❌ 세션 삭제 실패")
 
         clear_context()
 

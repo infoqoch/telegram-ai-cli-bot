@@ -152,8 +152,10 @@ def create_app() -> Application:
             app.add_handler(CommandHandler(name, handlers.plugin_help_command))
         logger.trace(f"플러그인 명령어 등록: {plugin_names}")
 
+    app.add_handler(CommandHandler("rename", handlers.rename_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/d_'), handlers.delete_session_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
 
     app.add_error_handler(handlers.error_handler)
