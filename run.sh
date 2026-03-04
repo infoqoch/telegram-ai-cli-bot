@@ -90,6 +90,13 @@ case "$1" in
         echo ""
         echo "프로세스:"
         ps aux | grep -E "python.*src\.(supervisor|main)" | grep -v grep
+        # 중복 프로세스 경고
+        proc_count=$(pgrep -f "python.*src\.(supervisor|main)" 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$proc_count" -gt 2 ]; then
+            echo ""
+            echo "⚠️  경고: 중복 프로세스 감지! ($proc_count개)"
+            echo "   './run.sh restart'로 정리하세요."
+        fi
         echo ""
         echo "락 파일:"
         ls -la /tmp/telegram-bot*.lock 2>/dev/null || echo "  (없음)"
