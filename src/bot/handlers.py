@@ -1529,6 +1529,9 @@ class BotHandlers:
             elif error and error != "SESSION_NOT_FOUND":
                 logger.error(f"Claude 오류: {error}")
                 response = f"❌ 오류 발생: {error}"
+            elif not response or not response.strip():
+                logger.warning("Claude 빈 응답")
+                response = "⚠️ 응답이 비어있습니다. 다시 시도해주세요."
 
             # ACTION 패턴 처리 (매니저 세션)
             action_results = []
