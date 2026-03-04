@@ -1,5 +1,9 @@
 #!/bin/bash
 # AI Bot 실행 스크립트 - 싱글톤 보장
+#
+# [운영 정책] 기본 DEBUG 모드로 실행
+# - 문제 추적을 위해 항상 DEBUG 레벨로 운영
+# - 필요 시 ./run.sh trace로 TRACE 모드 사용
 
 cd "$(dirname "$0")"
 
@@ -49,11 +53,11 @@ case "$1" in
     rm -f "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock" "$PID_FILE"
     source venv/bin/activate
     # supervisor로 시작 (크래시 시 자동 재시작)
-    # LOG_LEVEL 환경변수로 조정 (기본: INFO)
-    # - INFO: 일반 운영
-    # - DEBUG: 상세 로그
-    # - TRACE: 최상세 로그 (디버깅용)
-    LOG_LEVEL="${LOG_LEVEL:-INFO}" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
+    # LOG_LEVEL 환경변수로 조정 (기본: DEBUG)
+    # - INFO: 일반 운영 (최소 로그)
+    # - DEBUG: 상세 로그 (기본값 - 문제 추적용)
+    # - TRACE: 최상세 로그 (외부 라이브러리 포함)
+    LOG_LEVEL="${LOG_LEVEL:-DEBUG}" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
     sleep 2

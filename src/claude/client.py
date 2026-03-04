@@ -179,13 +179,23 @@ class ClaudeClient:
 
             # JSON 파싱
             logger.trace("JSON 파싱 시도")
+            logger.debug(f"[RAW OUTPUT] length={len(output)}, preview={repr(output[:300]) if output else 'EMPTY'}")
             try:
                 data = json.loads(output)
-                result = data.get("result", "(응답 없음)")
+                result = data.get("result", "")
                 new_session_id = data.get("session_id")
 
                 logger.trace(f"파싱 성공 - session_id={new_session_id}")
-                logger.trace(f"result length={len(result)}")
+                logger.debug(f"[PARSED] result type={type(result)}, length={len(result) if result else 0}")
+                logger.debug(f"[PARSED] result preview={repr(result[:200]) if result else 'EMPTY/NONE'}")
+                logger.debug(f"[PARSED] all keys={list(data.keys())}")
+
+                # 빈 result 감지 - 원인 추적
+                if not result or not result.strip():
+                    logger.warning(f"[EMPTY RESULT] Claude returned empty result!")
+                    logger.warning(f"  raw data keys: {list(data.keys())}")
+                    logger.warning(f"  raw data: {json.dumps(data, ensure_ascii=False)[:500]}")
+
                 logger.info(f"Claude 응답 - session_id={new_session_id}")
 
                 return ChatResponse(result, None, new_session_id)
@@ -193,7 +203,7 @@ class ClaudeClient:
             except json.JSONDecodeError as e:
                 # JSON 파싱 실패 시 원본 반환
                 logger.warning(f"JSON 파싱 실패: {e}")
-                logger.trace(f"원본 output: {output[:200]}")
+                logger.warning(f"[JSON ERROR] 원본 output: {repr(output[:500]) if output else 'EMPTY'}")
                 return ChatResponse(output or "(응답 없음)", None, None)
 
         except Exception as e:

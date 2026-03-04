@@ -29,6 +29,7 @@ from .constants import (
 from .formatters import format_session_quick_list, truncate_message
 from .middleware import authorized_only, authenticated_only
 from .prompts import MANAGER_SYSTEM_PROMPT
+from .session_queue import session_queue_manager, QueuedMessage
 
 # Re-export for backwards compatibility (tests import from here)
 __all__ = [
@@ -78,18 +79,15 @@ class BotHandlers:
         lambda: asyncio.Semaphore(3)
     )
 
-    # 세션별 Lock: 같은 세션에 동시 요청 방지 (Claude 컨텍스트 보호)
-    _session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-    # 태스크 추적
+    # 태스크 추적 (watchdog용 - 세션 락은 session_queue_manager가 관리)
     _active_tasks: dict[int, TaskInfo] = {}  # task_id -> TaskInfo
     _watchdog_task: Optional[asyncio.Task] = None
 
     # 세션 생성 중인 유저 추적 (메시지 블로킹용)
     _creating_sessions: set[str] = set()  # user_id set
 
-    # 대기 중인 메시지 (세션 락 충돌 시 대체 세션 선택용)
-    _pending_messages: dict[str, PendingMessage] = {}  # key(4자리) -> PendingMessage
+    # NOTE: _session_locks, _pending_messages 제거됨
+    # 세션 락 및 대기열은 session_queue_manager가 단일 진실 소스로 관리
 
     def __init__(
         self,
@@ -1002,8 +1000,8 @@ class BotHandlers:
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
                 is_current = "👉 " if sid == current_session_id else ""
-                # 락 상태 확인 (_active_tasks 기준 - 단일 진실 소스)
-                is_locked = any(info.session_id == sid for info in self._active_tasks.values())
+                # 락 상태 확인 (session_queue_manager가 단일 진실 소스)
+                is_locked = session_queue_manager.is_locked(sid)
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
@@ -1469,11 +1467,12 @@ class BotHandlers:
 
         self._ensure_watchdog()
 
-        # 세션별 락 체크 (같은 세션에 동시 요청 방지 - Claude 컨텍스트 보호)
-        session_lock = self._session_locks[session_id]
-        if session_lock.locked():
-            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 대체 세션 UI 표시")
-            await self._show_alternative_sessions(update, user_id, message, session_id)
+        # 세션별 락 체크 (session_queue_manager가 단일 진실 소스)
+        if session_queue_manager.is_locked(session_id):
+            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 세션 선택 UI 표시")
+            await self._show_session_selection_ui(
+                update, user_id, message, session_id, model, is_new_session, project_path
+            )
             clear_context()
             return
 
@@ -1580,33 +1579,41 @@ class BotHandlers:
 
         # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
         if self.plugins:
-            logger.trace(f"플러그인 처리 시도 - 로드된 플러그인: {len(self.plugins.plugins)}개")
+            logger.debug(f"[PLUGIN] 처리 시도 - 로드된 플러그인: {len(self.plugins.plugins)}개")
+            logger.debug(f"[PLUGIN] 메시지: {message[:100]}")
             try:
                 result = await self.plugins.process_message(message, chat_id)
+                logger.debug(f"[PLUGIN] result={result}, handled={result.handled if result else 'N/A'}")
                 if result and result.handled:
                     plugin_name = result.plugin_name if hasattr(result, 'plugin_name') else "plugin"
-                    logger.info(f"플러그인 처리 완료: {plugin_name}")
+                    logger.info(f"[PLUGIN] 처리 완료: {plugin_name}")
+                    logger.debug(f"[PLUGIN] response length={len(result.response) if result.response else 0}")
                     # 플러그인 처리도 히스토리에 기록
                     session_id = self.sessions.get_current_session_id(user_id)
                     if session_id:
                         self.sessions.add_message(user_id, session_id, message, processor=f"plugin:{plugin_name}")
                     if result.response:
+                        logger.debug(f"[PLUGIN] 응답 전송 시작")
                         try:
                             await update.message.reply_text(
                                 result.response,
                                 parse_mode="HTML",
                                 reply_markup=result.reply_markup if hasattr(result, 'reply_markup') else None
                             )
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"[PLUGIN] HTML 파싱 실패, 재시도: {e}")
                             await update.message.reply_text(result.response)
+                        logger.debug(f"[PLUGIN] 응답 전송 완료")
+                    else:
+                        logger.warning(f"[PLUGIN] handled=True지만 response가 비어있음!")
                     clear_context()
                     return
-                logger.trace("플러그인 매칭 없음 → Claude 처리")
+                logger.debug("[PLUGIN] 매칭 없음 → Claude 처리로 진행")
             except Exception as e:
-                logger.error(f"플러그인 처리 오류: {e}", exc_info=True)
+                logger.error(f"[PLUGIN] 처리 오류: {e}", exc_info=True)
                 # 플러그인 오류 시 Claude로 fallback
         else:
-            logger.trace("플러그인 로더 없음")
+            logger.debug("[PLUGIN] 플러그인 로더 없음")
 
         if not self._is_authenticated(user_id):
             logger.debug("메시지 거부 - 인증 필요")
@@ -1671,11 +1678,12 @@ class BotHandlers:
         # Watchdog 지연 시작
         self._ensure_watchdog()
 
-        # 세션별 락 체크 (같은 세션에 동시 요청 방지 - Claude 컨텍스트 보호)
-        session_lock = self._session_locks[session_id]
-        if session_lock.locked():
-            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 대체 세션 UI 표시")
-            await self._show_alternative_sessions(update, user_id, message, session_id)
+        # 세션별 락 체크 (session_queue_manager가 단일 진실 소스)
+        if session_queue_manager.is_locked(session_id):
+            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 세션 선택 UI 표시")
+            await self._show_session_selection_ui(
+                update, user_id, message, session_id, model, is_new_session, project_path
+            )
             clear_context()
             return
 
@@ -1740,8 +1748,14 @@ class BotHandlers:
         set_session_id(session_id)
         logger.trace(f"_process_claude_request_with_semaphore 시작 - model={model}")
 
-        # 세션 락 + 유저 세마포어 동시 획득
-        async with self._session_locks[session_id]:
+        # 세션 락 획득 (session_queue_manager 사용)
+        locked = await session_queue_manager.try_lock(session_id, user_id, message)
+        if not locked:
+            logger.warning(f"세션 락 획득 실패 - session={session_id[:8]}")
+            clear_context()
+            return
+
+        try:
             logger.trace(f"세션 락 획득됨 - session={session_id[:8]}")
             async with self._user_semaphores[user_id]:
                 logger.trace("Semaphore 획득됨")
@@ -1753,6 +1767,15 @@ class BotHandlers:
                     message=message,
                     is_new_session=is_new_session,
                     model=model,
+                )
+        finally:
+            # 락 해제 및 대기열 처리
+            next_msg = await session_queue_manager.unlock(session_id)
+            if next_msg:
+                logger.info(f"대기열에서 다음 메시지 처리 - session={session_id[:8]}, user={next_msg.user_id}")
+                # 다음 메시지를 새 태스크로 처리
+                asyncio.create_task(
+                    self._process_queued_message(bot, next_msg)
                 )
 
         logger.trace("_process_claude_request_with_semaphore 완료")
@@ -1862,9 +1885,16 @@ class BotHandlers:
                 logger.error(f"Claude 오류: {error}")
                 response = f"❌ 오류 발생: {error}"
             elif not response or not response.strip():
-                logger.warning(f"Claude 빈 응답 감지 - response={repr(response)}, error={error}")
-                logger.warning(f"  session_id={session_id[:8]}, model={model}, is_manager={is_manager}")
-                logger.warning(f"  message={short_message}")
+                logger.error(f"[EMPTY RESPONSE] Claude 빈 응답 감지!")
+                logger.error(f"  response type: {type(response)}")
+                logger.error(f"  response repr: {repr(response)}")
+                logger.error(f"  error: {error}")
+                logger.error(f"  session_id: {session_id[:8]}")
+                logger.error(f"  model: {model}")
+                logger.error(f"  is_manager: {is_manager}")
+                logger.error(f"  is_new_session: {is_new_session}")
+                logger.error(f"  actual_message preview: {actual_message[:200]}")
+                logger.error(f"  project_path: {project_path}")
                 response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
 
             # ACTION 패턴 처리 (매니저 세션)
@@ -2062,55 +2092,32 @@ class BotHandlers:
 
         return action_results
 
-    def _generate_pending_key(self) -> str:
-        """4자리 랜덤 키 생성."""
-        import random
-        import string
-        while True:
-            key = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-            if key not in self._pending_messages:
-                return key
-
-    def _store_pending_message(self, user_id: str, message: str) -> str:
-        """대기 메시지 저장 후 키 반환."""
-        # 만료된 메시지 정리
-        now = time.time()
-        expired_keys = [k for k, v in self._pending_messages.items() if v.expires_at < now]
-        for k in expired_keys:
-            del self._pending_messages[k]
-
-        key = self._generate_pending_key()
-        self._pending_messages[key] = PendingMessage(user_id=user_id, message=message)
-        logger.trace(f"대기 메시지 저장 - key={key}, user={user_id}")
-        return key
-
-    def _get_pending_message(self, key: str, user_id: str) -> Optional[str]:
-        """대기 메시지 조회 후 삭제. 만료/없으면 None."""
-        pending = self._pending_messages.get(key)
-        if not pending:
-            return None
-        if pending.user_id != user_id:
-            return None
-        if pending.expires_at < time.time():
-            del self._pending_messages[key]
-            return None
-        # 조회 후 삭제 (일회용)
-        del self._pending_messages[key]
-        return pending.message
-
-    async def _show_alternative_sessions(
+    async def _show_session_selection_ui(
         self,
         update: Update,
         user_id: str,
         message: str,
         current_session_id: str,
+        model: str,
+        is_new_session: bool,
+        project_path: str,
     ) -> None:
-        """세션 락 충돌 시 대체 세션 선택 UI 표시."""
+        """세션 락 충돌 시 세션 선택 UI 표시 (개선된 버전).
+
+        옵션:
+        1. 이 세션에서 대기 (추천) - 현재 세션 완료 후 자동 처리
+        2. 다른 세션 선택 - 바로 사용 가능한 세션 목록
+        3. 새 세션 생성
+        4. 취소
+        """
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        # 메시지 저장
-        pending_key = self._store_pending_message(user_id, message)
         message_preview = truncate_message(message, 40)
+        chat_id = update.effective_chat.id
+
+        # 현재 세션 상태 정보
+        current_state = session_queue_manager.get_status(current_session_id)
+        queue_size = current_state.get_queue_size() if current_state else 0
 
         # 사용 가능한 세션 찾기 (락 안 걸린 세션)
         all_sessions = self.sessions.list_sessions(user_id)
@@ -2121,9 +2128,7 @@ class BotHandlers:
             if sid == current_session_id:
                 continue  # 현재 세션 제외
             # 락 안 걸린 세션만
-            is_locked = any(info.session_id == sid for info in self._active_tasks.values())
-            if not is_locked:
-                # 최근 히스토리 2개 가져오기
+            if not session_queue_manager.is_locked(sid):
                 history = self.sessions.get_session_history(user_id, sid)
                 recent = history[-2:] if history else []
                 available_sessions.append({
@@ -2133,52 +2138,111 @@ class BotHandlers:
 
         # UI 구성
         lines = [
-            f"⚠️ <b>현재 세션이 처리 중입니다</b>\n",
-            f"💬 <code>{message_preview}</code>\n",
+            f"⏳ <b>현재 세션이 처리 중입니다</b>",
+            f"",
+            f"💬 <code>{message_preview}</code>",
+            f"",
         ]
 
         buttons = []
 
+        # 1. 이 세션에서 대기 (추천)
+        wait_label = f"🔄 이 세션에서 대기"
+        if queue_size > 0:
+            wait_label += f" (대기 {queue_size}개)"
+        buttons.append([
+            InlineKeyboardButton(
+                wait_label + " (추천)",
+                callback_data=f"sq:wait:{current_session_id[:16]}"
+            )
+        ])
+        lines.append(f"🔄 <b>이 세션에서 대기</b>: 완료 후 자동 처리")
+
+        # 2. 사용 가능한 다른 세션
         if available_sessions:
-            lines.append("\n📂 <b>사용 가능한 세션:</b>")
-            for s in available_sessions[:5]:  # 최대 5개
+            lines.append(f"")
+            lines.append(f"📂 <b>바로 사용 가능한 세션:</b>")
+            for s in available_sessions[:4]:  # 최대 4개
                 sid = s["full_session_id"]
                 short_id = s["session_id"]
                 name = s.get("name") or f"세션 {short_id}"
-                model = s.get("model", "sonnet")
-                model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
+                sess_model = s.get("model", "sonnet")
+                model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(sess_model, "⚡")
 
-                # 최근 메시지 표시
                 recent_msgs = s.get("recent", [])
                 if recent_msgs:
-                    recent_preview = " / ".join(truncate_message(m, 15) for m in recent_msgs[-2:])
-                    lines.append(f"• {model_emoji} <b>{name}</b>: {recent_preview}")
+                    recent_preview = " / ".join(truncate_message(m, 12) for m in recent_msgs[-2:])
+                    lines.append(f"• {model_emoji} <b>{name[:10]}</b>: {recent_preview}")
                 else:
-                    lines.append(f"• {model_emoji} <b>{name}</b>: (비어있음)")
+                    lines.append(f"• {model_emoji} <b>{name[:10]}</b>")
 
                 buttons.append([
                     InlineKeyboardButton(
-                        f"{model_emoji} {name[:12]}",
-                        callback_data=f"alt:s:{sid[:16]}:{pending_key}"
+                        f"{model_emoji} {name[:15]}",
+                        callback_data=f"sq:switch:{sid[:16]}"
                     )
                 ])
 
-        lines.append("\n➕ <b>새 세션으로 처리:</b>")
+        # 3. 새 세션 생성
+        lines.append(f"")
+        lines.append(f"➕ <b>새 세션 생성:</b>")
         buttons.append([
-            InlineKeyboardButton("🧠 Opus", callback_data=f"alt:n:opus:{pending_key}"),
-            InlineKeyboardButton("⚡ Sonnet", callback_data=f"alt:n:sonnet:{pending_key}"),
-            InlineKeyboardButton("🚀 Haiku", callback_data=f"alt:n:haiku:{pending_key}"),
+            InlineKeyboardButton("🧠 Opus", callback_data="sq:new:opus"),
+            InlineKeyboardButton("⚡ Sonnet", callback_data="sq:new:sonnet"),
+            InlineKeyboardButton("🚀 Haiku", callback_data="sq:new:haiku"),
         ])
 
-        # 취소 버튼
+        # 4. 취소
         buttons.append([
-            InlineKeyboardButton("❌ 취소", callback_data=f"alt:cancel:{pending_key}"),
+            InlineKeyboardButton("❌ 취소", callback_data="sq:cancel"),
         ])
+
+        # 메시지 정보를 session_queue에 임시 저장 (콜백에서 사용)
+        # 콜백 데이터 크기 제한으로 메시지는 별도 저장
+        self._temp_pending = {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "message": message,
+            "model": model,
+            "is_new_session": is_new_session,
+            "project_path": project_path,
+            "current_session_id": current_session_id,
+        }
 
         await update.message.reply_text(
             "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
+        )
+
+    async def _process_queued_message(self, bot, queued_msg: QueuedMessage) -> None:
+        """대기열에서 꺼낸 메시지 처리."""
+        trace_id = self._setup_request_context(queued_msg.chat_id)
+        set_user_id(queued_msg.user_id)
+        set_session_id(queued_msg.session_id)
+
+        logger.info(f"대기열 메시지 처리 시작 - session={queued_msg.session_id[:8]}, user={queued_msg.user_id}")
+
+        # 대기 완료 알림
+        try:
+            await bot.send_message(
+                chat_id=queued_msg.chat_id,
+                text=f"🔄 <b>대기 완료!</b>\n💬 <code>{truncate_message(queued_msg.message, 30)}</code>\n\n처리를 시작합니다...",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"대기 완료 알림 실패: {e}")
+
+        # Claude 호출
+        await self._process_claude_request_with_semaphore(
+            bot=bot,
+            chat_id=queued_msg.chat_id,
+            user_id=queued_msg.user_id,
+            session_id=queued_msg.session_id,
+            message=queued_msg.message,
+            is_new_session=queued_msg.is_new_session,
+            trace_id=trace_id,
+            model=queued_msg.model,
         )
 
     async def _send_message_to_chat(
@@ -2333,7 +2397,12 @@ class BotHandlers:
             await self._handle_lock_callback(query, chat_id)
             return
 
-        # 대체 세션 선택 콜백 처리
+        # 세션 큐 콜백 처리 (새 방식)
+        if callback_data.startswith("sq:"):
+            await self._handle_session_queue_callback(query, chat_id, callback_data)
+            return
+
+        # 대체 세션 선택 콜백 처리 (레거시 - 호환성 유지)
         if callback_data.startswith("alt:"):
             await self._handle_alternative_session_callback(query, chat_id, callback_data)
             return
@@ -2829,8 +2898,8 @@ class BotHandlers:
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
                 is_current = "👉 " if sid == current_session_id else ""
-                # 락 상태 확인 (_active_tasks 기준 - 단일 진실 소스)
-                is_locked = any(info.session_id == sid for info in self._active_tasks.values())
+                # 락 상태 확인 (session_queue_manager가 단일 진실 소스)
+                is_locked = session_queue_manager.is_locked(sid)
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
@@ -3040,17 +3109,156 @@ class BotHandlers:
 
         logger.info(f"대체 세션 처리 시작 - session={session_id[:8]}, model={model}")
 
-        # 세션 락 + 세마포어 획득 후 처리
-        async with self._session_locks[session_id]:
-            async with self._user_semaphores[user_id]:
-                await self._process_claude_request(
+        # 세마포어 + session_queue_manager 사용
+        await self._process_claude_request_with_semaphore(
+            bot=bot,
+            chat_id=chat_id,
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            is_new_session=is_new_session,
+            trace_id=trace_id,
+            model=model,
+        )
+
+        clear_context()
+
+    async def _handle_session_queue_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """세션 큐 콜백 처리 (새 방식).
+
+        callback_data 형식:
+        - sq:wait:{session_id} - 이 세션에서 대기
+        - sq:switch:{session_id} - 다른 세션으로 전환
+        - sq:new:{model} - 새 세션 생성
+        - sq:cancel - 취소
+        """
+        user_id = str(query.from_user.id)
+        parts = callback_data.split(":")
+        action = parts[1] if len(parts) > 1 else ""
+
+        # 임시 저장된 pending 정보 확인
+        pending = getattr(self, '_temp_pending', None)
+        if not pending or pending.get("user_id") != user_id:
+            await query.edit_message_text(
+                "⏰ <b>요청이 만료되었습니다</b>\n\n메시지를 다시 보내주세요.",
+                parse_mode="HTML"
+            )
+            return
+
+        message = pending["message"]
+        model = pending["model"]
+        is_new_session = pending["is_new_session"]
+        project_path = pending["project_path"]
+        current_session_id = pending["current_session_id"]
+        bot = query.get_bot()
+
+        if action == "cancel":
+            self._temp_pending = None
+            await query.edit_message_text("❌ 요청이 취소되었습니다.")
+            return
+
+        if action == "wait":
+            # 현재 세션 대기열에 추가
+            target_session_id = current_session_id
+            # full session_id 복원
+            for s in self.sessions.list_sessions(user_id):
+                if s["full_session_id"].startswith(parts[2]):
+                    target_session_id = s["full_session_id"]
+                    break
+
+            position = await session_queue_manager.add_to_waiting(
+                session_id=target_session_id,
+                user_id=user_id,
+                chat_id=chat_id,
+                message=message,
+                model=model,
+                is_new_session=is_new_session,
+                project_path=project_path,
+            )
+
+            self._temp_pending = None
+            await query.edit_message_text(
+                f"🔄 <b>대기열에 추가되었습니다</b>\n\n"
+                f"💬 <code>{truncate_message(message, 40)}</code>\n\n"
+                f"📍 대기 순번: {position}번째\n"
+                f"현재 작업이 완료되면 자동으로 처리됩니다.",
+                parse_mode="HTML"
+            )
+            return
+
+        if action == "switch":
+            # 다른 세션으로 전환 후 즉시 처리
+            target_prefix = parts[2]
+            target_session = None
+            for s in self.sessions.list_sessions(user_id):
+                if s["full_session_id"].startswith(target_prefix):
+                    target_session = s
+                    break
+
+            if not target_session:
+                await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+                return
+
+            target_session_id = target_session["full_session_id"]
+            target_model = target_session.get("model", "sonnet")
+
+            # 세션 전환
+            self.sessions.set_current(user_id, target_session_id)
+
+            self._temp_pending = None
+            await query.edit_message_text(
+                f"⚡ <b>세션 전환됨</b>\n\n"
+                f"💬 <code>{truncate_message(message, 40)}</code>\n\n"
+                f"처리를 시작합니다...",
+                parse_mode="HTML"
+            )
+
+            # 백그라운드에서 처리
+            asyncio.create_task(
+                self._process_alternative_session(
                     bot=bot,
                     chat_id=chat_id,
                     user_id=user_id,
-                    session_id=session_id,
+                    session_id=target_session_id,
                     message=message,
-                    is_new_session=is_new_session,
-                    model=model,
+                    model=target_model,
+                    is_new_session=False,
                 )
+            )
+            return
 
-        clear_context()
+        if action == "new":
+            # 새 세션 생성
+            new_model = parts[2] if len(parts) > 2 else "sonnet"
+
+            self._temp_pending = None
+            await query.edit_message_text(
+                f"➕ <b>새 {new_model} 세션 생성 중...</b>\n\n"
+                f"💬 <code>{truncate_message(message, 40)}</code>",
+                parse_mode="HTML"
+            )
+
+            # 새 세션 생성
+            new_session_id = await self.claude.create_session()
+            if not new_session_id:
+                await query.message.reply_text("❌ 세션 생성 실패. 다시 시도해주세요.")
+                return
+
+            # 세션 저장 및 전환
+            self.sessions.create_session(user_id, new_session_id, message, model=new_model)
+
+            # 백그라운드에서 처리
+            asyncio.create_task(
+                self._process_alternative_session(
+                    bot=bot,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    session_id=new_session_id,
+                    message=message,
+                    model=new_model,
+                    is_new_session=True,
+                )
+            )
+            return
+
+        await query.edit_message_text("❌ 알 수 없는 명령입니다.")
