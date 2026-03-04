@@ -2124,7 +2124,7 @@ class BotHandlers:
             is_locked = any(info.session_id == sid for info in self._active_tasks.values())
             if not is_locked:
                 # 최근 히스토리 2개 가져오기
-                history = self.sessions.get_history(user_id, sid)
+                history = self.sessions.get_session_history(user_id, sid)
                 recent = history[-2:] if history else []
                 available_sessions.append({
                     **s,
