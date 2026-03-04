@@ -136,6 +136,25 @@ class Settings(BaseSettings):
                     return True
         return False
 
+    def list_available_projects(self) -> list[dict]:
+        """Scan allowed directories and return list of available projects."""
+        projects = []
+        for pattern in self.allowed_project_paths:
+            expanded_pattern = Path(pattern).expanduser()
+            # /path/* 패턴 처리
+            if str(expanded_pattern).endswith("/*"):
+                parent_dir = Path(str(expanded_pattern)[:-2])
+                if parent_dir.exists() and parent_dir.is_dir():
+                    for child in sorted(parent_dir.iterdir()):
+                        if child.is_dir() and not child.name.startswith("."):
+                            has_claude = (child / "CLAUDE.md").exists() or (child / ".claude").exists()
+                            projects.append({
+                                "path": str(child),
+                                "name": child.name,
+                                "has_claude": has_claude,
+                            })
+        return projects
+
     def validate_project_path(self, path: str) -> tuple[bool, str]:
         """Validate project path and return (is_valid, error_message)."""
         expanded = Path(path).expanduser().resolve()

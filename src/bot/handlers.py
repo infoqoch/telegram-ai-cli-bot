@@ -228,12 +228,26 @@ class BotHandlers:
         return result
 
     def _build_manager_context(self, user_id: str, message: str) -> str:
-        """매니저 세션용 컨텍스트 메시지 생성 (세션 목록 + 파일 경로 힌트)."""
+        """매니저 세션용 컨텍스트 메시지 생성 (세션 목록 + 프로젝트 목록 + 파일 경로 힌트)."""
+        from src.config import get_settings
+
         sessions_summary = self.sessions.get_all_sessions_summary(user_id)
 
         # Claude 세션 파일 경로 힌트 (시스템 독립적)
         project_path = Path.cwd().as_posix().replace("/", "-")[1:]
         claude_sessions_dir = f"~/.claude/projects/{project_path}/"
+
+        # 허용된 프로젝트 디렉토리 목록
+        settings = get_settings()
+        available_projects = settings.list_available_projects()
+        if available_projects:
+            project_lines = []
+            for i, p in enumerate(available_projects, 1):
+                status = "✅" if p["has_claude"] else "⚠️"
+                project_lines.append(f"{i}. {status} {p['name']} ({p['path']})")
+            projects_summary = "\n".join(project_lines)
+        else:
+            projects_summary = "(허용된 프로젝트 없음)"
 
         return (
             f"{MANAGER_SYSTEM_PROMPT}\n\n"
@@ -241,6 +255,8 @@ class BotHandlers:
             f"{claude_sessions_dir}{{session_id}}.jsonl\n"
             f"(세션 분석 요청 시 해당 파일을 읽어 대화 내용 확인 가능)\n\n"
             f"[현재 세션 목록]\n{sessions_summary}\n\n"
+            f"[허용된 프로젝트 디렉토리]\n{projects_summary}\n"
+            f"(프로젝트 세션 생성 시 위 목록에서 선택하거나 전체 경로 사용)\n\n"
             f"[사용자 요청]\n{message}"
         )
 

@@ -36,10 +36,16 @@ MANAGER_SYSTEM_PROMPT = """[필수 규칙 - 반드시 준수]
 - 바로 ACTION 실행
 - 세션 ID는 8자리
 
+[프로젝트 세션 생성 시]
+- 사용자가 "프로젝트 세션 만들어"라고 하면 [허용된 프로젝트 디렉토리] 목록을 보여주고 선택 요청
+- 번호나 이름으로 선택하면 해당 경로로 ACTION:CREATE_PROJECT 실행
+- 모델 미지정 시 기본 sonnet 사용
+
 [예시]
 "주식돌이 오푸스로 만들어" → "생성! [ACTION:CREATE:opus:주식돌이]"
 "주식돌이 오푸스로 만들고 전환해" → "생성+전환! [ACTION:CREATE_AND_SWITCH:opus:주식돌이]"
-"~/Projects/my-app 프로젝트 세션 만들어" → "프로젝트 세션! [ACTION:CREATE_PROJECT:sonnet:~/Projects/my-app:my-app]"
+"프로젝트 세션 만들어줘" → "[허용된 프로젝트 디렉토리] 목록을 보여주며 어떤 프로젝트인지 물어봄"
+"1번" 또는 "telegram-claude-bot" → "[ACTION:CREATE_PROJECT:sonnet:/Users/bae/AiSandbox/telegram-claude-bot:telegram-claude-bot]"
 "a1b2c3d4로 전환" → "전환! [ACTION:SWITCH:a1b2c3d4]"
 "파일 찾아줘" → "❌ 세션 관리만 가능해요. 세션 전환 후 질문해주세요."
 """
