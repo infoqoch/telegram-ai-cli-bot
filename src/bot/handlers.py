@@ -1884,11 +1884,14 @@ class BotHandlers:
             session_short_id = session_id[:8]  # 명령어용 ID (이름 제외)
             history_count = self.sessions.get_history_count(user_id, session_id)
 
+            # 질문 미리보기 (최대 30자)
+            question_preview = truncate_message(message, 30)
+
             if is_manager:
-                prefix = f"📋 <b>[Manager|#{history_count}]</b>\n\n"
+                prefix = f"📋 <b>[Manager|#{history_count}]</b>\n💬 <code>{question_preview}</code>\n\n"
                 suffix = "\n\n/back 이전세션 | /exit 종료"
             else:
-                prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
+                prefix = f"<b>[{session_info}|#{history_count}]</b>\n💬 <code>{question_preview}</code>\n\n"
                 suffix = (
                     f"\n\n"
                     f"/s_{session_short_id} 세션이동\n"
