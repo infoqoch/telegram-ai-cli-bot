@@ -206,6 +206,8 @@ class TodoPlugin(Plugin):
             # td:week:2026-03-04 (해당 날짜 기준 ±3일)
             date_str = parts[2] if len(parts) > 2 else None
             return self._handle_week_view(chat_id, date_str)
+        elif action == "today_full":
+            return self._handle_today_full(chat_id)
         else:
             return {"text": "❌ 알 수 없는 명령", "edit": True}
 
@@ -289,6 +291,7 @@ class TodoPlugin(Plugin):
             InlineKeyboardButton("내일 ▶️", callback_data=f"td:date:{tomorrow}"),
         ])
         buttons.append([
+            InlineKeyboardButton("📋 오늘 전체", callback_data="td:today_full"),
             InlineKeyboardButton("➕ 추가", callback_data="td:add"),
             InlineKeyboardButton("🔄 새로고침", callback_data="td:list"),
         ])
@@ -737,6 +740,51 @@ class TodoPlugin(Plugin):
             InlineKeyboardButton("📅 오늘", callback_data="td:list"),
             InlineKeyboardButton("다음 주 ▶️", callback_data=f"td:week:{next_week}"),
         ])
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(buttons),
+            "edit": True,
+        }
+
+    def _handle_today_full(self, chat_id: int) -> dict:
+        """오늘 할일 전체 보기 (버튼 없이 깔끔하게)."""
+        daily = self.manager.get_today(chat_id)
+        all_tasks = daily.get_all_tasks()
+
+        lines = [f"📋 <b>{daily.date} (오늘) 전체 할일</b>\n"]
+
+        total = 0
+        done_count = 0
+
+        for slot in [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING]:
+            tasks = all_tasks.get(slot.value, [])
+            slot_name = self.SLOT_NAMES[slot]
+
+            if tasks:
+                lines.append(f"\n<b>{slot_name}</b>")
+                for task in tasks:
+                    total += 1
+                    status = "✅" if task.done else "⬜"
+                    if task.done:
+                        done_count += 1
+                    lines.append(f"{status} {task.text}")
+            else:
+                lines.append(f"\n<b>{slot_name}</b>")
+                lines.append("• (없음)")
+
+        if total == 0:
+            lines.append("\n등록된 할일이 없어요.")
+        else:
+            lines.append(f"\n📊 <b>진행 상황</b>: {done_count}/{total} 완료 ({int(done_count/total*100)}%)")
+
+        # 간단한 버튼만
+        buttons = [
+            [
+                InlineKeyboardButton("⬅️ 돌아가기", callback_data="td:list"),
+                InlineKeyboardButton("➕ 추가", callback_data="td:add"),
+            ]
+        ]
 
         return {
             "text": "\n".join(lines),

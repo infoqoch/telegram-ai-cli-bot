@@ -2119,48 +2119,61 @@ class BotHandlers:
 
     async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Todo 플러그인 콜백 처리."""
-        # 플러그인 인스턴스 가져오기
-        todo_plugin = None
-        if self.plugins:
-            todo_plugin = self.plugins.get_plugin_by_name("todo")
-            logger.info(f"Todo 플러그인 조회: {todo_plugin}")
-        else:
-            logger.warning("self.plugins가 None입니다")
+        try:
+            # 플러그인 인스턴스 가져오기
+            todo_plugin = None
+            if self.plugins:
+                todo_plugin = self.plugins.get_plugin_by_name("todo")
+                logger.info(f"Todo 플러그인 조회: {todo_plugin}")
+            else:
+                logger.warning("self.plugins가 None입니다")
 
-        if not todo_plugin or not hasattr(todo_plugin, 'handle_callback'):
-            logger.error(f"Todo 플러그인을 찾을 수 없음: {todo_plugin}")
-            await query.edit_message_text("❌ Todo 플러그인을 찾을 수 없습니다.")
-            return
+            if not todo_plugin or not hasattr(todo_plugin, 'handle_callback'):
+                logger.error(f"Todo 플러그인을 찾을 수 없음: {todo_plugin}")
+                await query.edit_message_text("❌ Todo 플러그인을 찾을 수 없습니다.")
+                return
 
-        # 콜백 처리
-        result = todo_plugin.handle_callback(callback_data, chat_id)
+            # 콜백 처리
+            result = todo_plugin.handle_callback(callback_data, chat_id)
 
-        # ForceReply 처리 (새 메시지로)
-        if result.get("force_reply"):
-            # 기존 메시지 업데이트
-            await query.edit_message_text(
-                text=result.get("text", "할일 입력"),
-                parse_mode="HTML"
-            )
-            # ForceReply 메시지 전송
-            slot_code = result.get("slot_code", "m")
-            await query.message.reply_text(
-                text=f"⬇️ 아래에 할일을 입력하세요 (slot:{slot_code})",
-                reply_markup=result["force_reply"],
-                parse_mode="HTML"
-            )
-            return
+            # ForceReply 처리 (새 메시지로)
+            if result.get("force_reply"):
+                # 기존 메시지 업데이트
+                await query.edit_message_text(
+                    text=result.get("text", "할일 입력"),
+                    parse_mode="HTML"
+                )
+                # ForceReply 메시지 전송
+                slot_code = result.get("slot_code", "m")
+                await query.message.reply_text(
+                    text=f"⬇️ 아래에 할일을 입력하세요 (slot:{slot_code})",
+                    reply_markup=result["force_reply"],
+                    parse_mode="HTML"
+                )
+                return
 
-        # 메시지 수정 또는 전송
-        if result.get("edit", True) and query.message:
-            await query.edit_message_text(
-                text=result.get("text", ""),
-                reply_markup=result.get("reply_markup"),
-                parse_mode="HTML"
-            )
-        else:
-            await query.message.reply_text(
-                text=result.get("text", ""),
-                reply_markup=result.get("reply_markup"),
-                parse_mode="HTML"
-            )
+            # 메시지 수정 또는 전송
+            if result.get("edit", True) and query.message:
+                await query.edit_message_text(
+                    text=result.get("text", ""),
+                    reply_markup=result.get("reply_markup"),
+                    parse_mode="HTML"
+                )
+            else:
+                await query.message.reply_text(
+                    text=result.get("text", ""),
+                    reply_markup=result.get("reply_markup"),
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.exception(f"Todo 콜백 처리 중 오류: {e}")
+            try:
+                await query.edit_message_text(
+                    text=f"❌ 오류가 발생했습니다.\n\n<code>{str(e)}</code>",
+                    parse_mode="HTML"
+                )
+            except:
+                await query.message.reply_text(
+                    text=f"❌ 오류가 발생했습니다.\n\n<code>{str(e)}</code>",
+                    parse_mode="HTML"
+                )
