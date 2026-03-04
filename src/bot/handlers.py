@@ -1521,16 +1521,26 @@ class BotHandlers:
             message = message[:MAX_MESSAGE_LENGTH]
             logger.warning(f"메시지 길이 제한 적용: {original_len} -> {MAX_MESSAGE_LENGTH}")
 
-        # ForceReply 응답 처리 (Todo 할일 입력)
+        # ForceReply 응답 처리
         if update.message.reply_to_message:
             reply_text = update.message.reply_to_message.text or ""
+            import re
+
             # "slot:X" 패턴 확인 (Todo ForceReply)
             if "slot:" in reply_text:
-                import re
                 slot_match = re.search(r"slot:([mae])", reply_text)
                 if slot_match:
                     slot_code = slot_match.group(1)
                     await self._handle_todo_force_reply(update, chat_id, message, slot_code)
+                    clear_context()
+                    return
+
+            # "sess_name:model" 패턴 확인 (세션 생성 ForceReply)
+            if "sess_name:" in reply_text:
+                sess_match = re.search(r"sess_name:(\w+)", reply_text)
+                if sess_match:
+                    model = sess_match.group(1)
+                    await self._handle_new_session_force_reply(update, chat_id, message, model)
                     clear_context()
                     return
 
@@ -2165,6 +2175,43 @@ class BotHandlers:
             parse_mode="HTML"
         )
 
+    async def _handle_new_session_force_reply(self, update: Update, chat_id: int, name: str, model: str) -> None:
+        """세션 생성 ForceReply 응답 처리."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        logger.info(f"세션 생성 ForceReply 처리: model={model}, name={name}")
+
+        user_id = str(chat_id)
+        model_name = model if model in ["opus", "sonnet", "haiku"] else "sonnet"
+
+        # Claude 세션 생성
+        session_id = await self.claude.create_session()
+        if not session_id:
+            await update.message.reply_text("❌ 세션 생성 실패")
+            return
+
+        # 이름 정리 (50자 제한)
+        session_name = name.strip()[:50] if name.strip() else ""
+
+        # 세션 저장
+        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model_name, name=session_name)
+        short_id = session_id[:8]
+
+        model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model_name, "⚡")
+        name_line = f"\n📝 <b>이름:</b> {session_name}" if session_name else ""
+
+        keyboard = [[
+            InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
+        ]]
+
+        await update.message.reply_text(
+            text=f"✅ 새 세션 생성됨!\n\n"
+                 f"{model_emoji} <b>모델:</b> {model_name}\n"
+                 f"🆔 <b>ID:</b> <code>{short_id}</code>{name_line}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+
     async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Todo 플러그인 콜백 처리."""
         try:
@@ -2309,7 +2356,12 @@ class BotHandlers:
             if action == "new":
                 # sess:new:opus
                 model = parts[2] if len(parts) > 2 else "sonnet"
-                await self._handle_new_session_callback(query, chat_id, model)
+                await self._handle_new_session_name_prompt(query, chat_id, model)
+
+            elif action == "new_confirm":
+                # sess:new_confirm:opus (이름 없이 바로 생성)
+                model = parts[2] if len(parts) > 2 else "sonnet"
+                await self._handle_new_session_callback(query, chat_id, model, "")
 
             elif action == "switch":
                 # sess:switch:12345678
@@ -2356,7 +2408,25 @@ class BotHandlers:
             except:
                 pass
 
-    async def _handle_new_session_callback(self, query, chat_id: int, model: str) -> None:
+    async def _handle_new_session_name_prompt(self, query, chat_id: int, model: str) -> None:
+        """새 세션 이름 입력 프롬프트."""
+        from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
+
+        model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
+
+        # 기존 메시지 업데이트
+        await query.edit_message_text(
+            text=f"{model_emoji} <b>{model.upper()}</b> 세션 생성\n\n세션 이름을 입력하세요:",
+            parse_mode="HTML"
+        )
+
+        # ForceReply로 이름 입력 요청
+        await query.message.reply_text(
+            text=f"⬇️ 세션 이름 입력 (sess_name:{model})",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="세션 이름...")
+        )
+
+    async def _handle_new_session_callback(self, query, chat_id: int, model: str, name: str = "") -> None:
         """새 세션 생성 콜백."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -2372,7 +2442,7 @@ class BotHandlers:
             return
 
         # 세션 저장
-        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model_name)
+        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model_name, name=name)
         short_id = session_id[:8]
 
         model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model_name, "⚡")
