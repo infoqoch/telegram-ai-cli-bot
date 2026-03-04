@@ -2586,13 +2586,15 @@ class BotHandlers:
 
     async def _handle_session_list_callback(self, query, chat_id: int, prefix: str = "") -> None:
         """세션 목록 콜백."""
+        from datetime import datetime
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
         user_id = str(chat_id)
         sessions = self.sessions.list_sessions(user_id)
         current_session_id = self.sessions.get_current_session_id(user_id)
 
-        lines = [f"{prefix}📋 <b>세션 목록</b>\n"]
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        lines = [f"{prefix}📋 <b>세션 목록</b> <i>({timestamp})</i>\n"]
         buttons = []
 
         if not sessions:
