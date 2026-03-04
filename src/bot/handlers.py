@@ -2223,11 +2223,18 @@ class BotHandlers:
 
         logger.info(f"대기열 메시지 처리 시작 - session={queued_msg.session_id[:8]}, user={queued_msg.user_id}")
 
-        # 대기 완료 알림
+        # 대기 완료 알림 - 세션 정보 포함
+        session_info = self.sessions.get_session_info(queued_msg.user_id, queued_msg.session_id)
+        model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(queued_msg.model, "⚡")
         try:
             await bot.send_message(
                 chat_id=queued_msg.chat_id,
-                text=f"🔄 <b>대기 완료!</b>\n💬 <code>{truncate_message(queued_msg.message, 30)}</code>\n\n처리를 시작합니다...",
+                text=(
+                    f"🔄 <b>대기 완료!</b>\n\n"
+                    f"💬 <code>{truncate_message(queued_msg.message, 30)}</code>\n\n"
+                    f"📍 세션: {model_emoji} <b>{session_info}</b>\n"
+                    f"처리를 시작합니다..."
+                ),
                 parse_mode="HTML"
             )
         except Exception as e:
@@ -3176,10 +3183,15 @@ class BotHandlers:
                 project_path=project_path,
             )
 
+            # 세션 정보 조회
+            session_info = self.sessions.get_session_info(user_id, target_session_id)
+            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
+
             self._temp_pending = None
             await query.edit_message_text(
                 f"🔄 <b>대기열에 추가되었습니다</b>\n\n"
                 f"💬 <code>{truncate_message(message, 40)}</code>\n\n"
+                f"📍 세션: {model_emoji} <b>{session_info}</b>\n"
                 f"📍 대기 순번: {position}번째\n"
                 f"현재 작업이 완료되면 자동으로 처리됩니다.",
                 parse_mode="HTML"

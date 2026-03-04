@@ -11,7 +11,10 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+
+import httpx
 
 from src.logging_config import logger, setup_logging
 
@@ -25,6 +28,56 @@ CRASH_RESET_TIME = 60  # 60초 이상 정상 실행 시 딜레이 리셋
 _lock_fd = None
 _child_process = None
 _shutdown_requested = False
+_telegram_token = None
+_maintainer_chat_id = None
+
+
+def _load_telegram_config():
+    """환경변수에서 텔레그램 설정 로드."""
+    global _telegram_token, _maintainer_chat_id
+    _telegram_token = os.getenv("TELEGRAM_TOKEN")
+    _maintainer_chat_id = os.getenv("MAINTAINER_CHAT_ID")
+    if _maintainer_chat_id:
+        try:
+            _maintainer_chat_id = int(_maintainer_chat_id)
+        except ValueError:
+            _maintainer_chat_id = None
+
+
+def notify_maintainer(message: str) -> bool:
+    """메인테이너에게 텔레그램 메시지 전송.
+
+    Args:
+        message: 전송할 메시지 (HTML 형식 지원)
+
+    Returns:
+        성공 여부
+    """
+    if not _telegram_token or not _maintainer_chat_id:
+        logger.trace("메인테이너 알림 스킵 - 설정 없음")
+        return False
+
+    try:
+        url = f"https://api.telegram.org/bot{_telegram_token}/sendMessage"
+        data = {
+            "chat_id": _maintainer_chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+        }
+
+        with httpx.Client(timeout=10) as client:
+            response = client.post(url, json=data)
+
+        if response.status_code == 200:
+            logger.debug(f"메인테이너 알림 전송 성공")
+            return True
+        else:
+            logger.warning(f"메인테이너 알림 실패: {response.status_code}")
+            return False
+
+    except Exception as e:
+        logger.warning(f"메인테이너 알림 오류: {e}")
+        return False
 
 
 def acquire_lock() -> bool:
@@ -124,6 +177,9 @@ def main():
 
     logger.trace("main() 시작")
 
+    # 텔레그램 설정 로드
+    _load_telegram_config()
+
     # 싱글톤 락
     if not acquire_lock():
         print("❌ Supervisor가 이미 실행 중입니다.", file=sys.stderr)
@@ -142,6 +198,10 @@ def main():
     logger.info(f"  PID: {os.getpid()}")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info("=" * 60)
+
+    # 시작 알림
+    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    notify_maintainer(f"🟢 <b>봇이 시작되었습니다</b>\n\n<code>{start_time}</code>")
 
     restart_delay = INITIAL_RESTART_DELAY
     restart_count = 0
@@ -196,6 +256,10 @@ def main():
         old_delay = restart_delay
         restart_delay = min(restart_delay * 2, MAX_RESTART_DELAY)
         logger.trace(f"지수 백오프: {old_delay} -> {restart_delay}")
+
+    # 종료 알림
+    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    notify_maintainer(f"🔴 <b>봇이 종료되었습니다</b>\n\n<code>{end_time}</code>")
 
     logger.info("=" * 60)
     logger.info("Supervisor 종료")
