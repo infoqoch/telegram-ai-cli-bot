@@ -76,6 +76,9 @@ class BotHandlers:
     _active_tasks: dict[int, TaskInfo] = {}  # task_id -> TaskInfo
     _watchdog_task: Optional[asyncio.Task] = None
 
+    # 세션 생성 중인 유저 추적 (메시지 블로킹용)
+    _creating_sessions: set[str] = set()  # user_id set
+
     def __init__(
         self,
         session_store: "SessionStore",
@@ -1349,6 +1352,17 @@ class BotHandlers:
             logger.warning(f"메시지 길이 제한 적용: {len(message)} -> {MAX_MESSAGE_LENGTH}")
             message = message[:MAX_MESSAGE_LENGTH]
 
+        # 세션 생성 중이면 메시지 블로킹
+        if user_id in self._creating_sessions:
+            logger.info(f"세션 생성 중 - /ai 블로킹: user={user_id}")
+            await update.message.reply_text(
+                "⏳ <b>세션 준비 중...</b>\n\n"
+                "잠시 후 다시 보내주세요!",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
         # 세션 결정
         logger.trace("세션 결정 시작 - Lock 획득 대기")
         async with self._user_locks[user_id]:
@@ -1358,17 +1372,21 @@ class BotHandlers:
 
             if not session_id:
                 logger.info("새 Claude 세션 생성 중...")
-                session_id = await self.claude.create_session()
+                self._creating_sessions.add(user_id)
+                try:
+                    session_id = await self.claude.create_session()
 
-                if not session_id:
-                    logger.error("Claude 세션 생성 실패")
-                    await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
-                    clear_context()
-                    return
+                    if not session_id:
+                        logger.error("Claude 세션 생성 실패")
+                        await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+                        clear_context()
+                        return
 
-                logger.trace(f"세션 저장 중 - session_id={session_id[:8]}")
-                self.sessions.create_session(user_id, session_id, message)
-                is_new_session = True
+                    logger.trace(f"세션 저장 중 - session_id={session_id[:8]}")
+                    self.sessions.create_session(user_id, session_id, message)
+                    is_new_session = True
+                finally:
+                    self._creating_sessions.discard(user_id)
             else:
                 is_new_session = False
 
@@ -1506,6 +1524,17 @@ class BotHandlers:
             clear_context()
             return
 
+        # 세션 생성 중이면 메시지 블로킹
+        if user_id in self._creating_sessions:
+            logger.info(f"세션 생성 중 - 메시지 블로킹: user={user_id}")
+            await update.message.reply_text(
+                "⏳ <b>세션 준비 중...</b>\n\n"
+                "잠시 후 다시 보내주세요!",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
         # 유저별 Lock으로 세션 결정 (race condition 방지)
         logger.trace("세션 결정 시작 - Lock 획득 대기")
         async with self._user_locks[user_id]:
@@ -1516,18 +1545,22 @@ class BotHandlers:
             if not session_id:
                 # 새 Claude 세션 생성
                 logger.info("새 Claude 세션 생성 중...")
-                session_id = await self.claude.create_session()
+                self._creating_sessions.add(user_id)
+                try:
+                    session_id = await self.claude.create_session()
 
-                if not session_id:
-                    logger.error("Claude 세션 생성 실패")
-                    await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
-                    clear_context()
-                    return
+                    if not session_id:
+                        logger.error("Claude 세션 생성 실패")
+                        await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+                        clear_context()
+                        return
 
-                # 세션 저장 (첫 메시지 포함)
-                logger.trace(f"세션 저장 중 - session_id={session_id[:8]}")
-                self.sessions.create_session(user_id, session_id, message)
-                is_new_session = True
+                    # 세션 저장 (첫 메시지 포함)
+                    logger.trace(f"세션 저장 중 - session_id={session_id[:8]}")
+                    self.sessions.create_session(user_id, session_id, message)
+                    is_new_session = True
+                finally:
+                    self._creating_sessions.discard(user_id)
             else:
                 is_new_session = False
 

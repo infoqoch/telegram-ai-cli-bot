@@ -487,16 +487,18 @@ class TestUserLock:
     async def test_user_lock_prevents_race_condition(
         self, handlers, mock_session_store, mock_claude_client
     ):
-        """동일 사용자의 동시 메시지가 직렬화됨."""
+        """세션 생성 중 두 번째 메시지는 블로킹됨."""
         update1 = MagicMock()
         update1.effective_chat.id = 12345
         update1.message.text = "첫 번째 메시지"
+        update1.message.reply_text = AsyncMock()
         context1 = MagicMock()
         context1.bot.send_chat_action = AsyncMock()
 
         update2 = MagicMock()
         update2.effective_chat.id = 12345
         update2.message.text = "두 번째 메시지"
+        update2.message.reply_text = AsyncMock()
         context2 = MagicMock()
         context2.bot.send_chat_action = AsyncMock()
 
@@ -521,11 +523,13 @@ class TestUserLock:
                 handlers.handle_message(update2, context2),
             )
 
-        # Lock으로 인해 create_session이 순차적으로 실행됨
-        # (start-end-start-end 순서가 아닌 start-start-end-end가 되지 않음)
+        # 세션 생성 중 블로킹으로 인해 create_session은 한 번만 호출됨
+        # 두 번째 메시지는 "세션 준비 중" 메시지로 블로킹됨
         assert call_order == [
             "create_session_start",
             "create_session_end",
-            "create_session_start",
-            "create_session_end",
         ]
+        # 두 번째 메시지에 블로킹 응답이 전송됨
+        assert update2.message.reply_text.called
+        reply_call = update2.message.reply_text.call_args
+        assert "세션 준비 중" in reply_call[0][0]
