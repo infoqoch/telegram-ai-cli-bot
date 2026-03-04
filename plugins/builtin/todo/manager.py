@@ -202,6 +202,39 @@ class TodoManager:
         """오늘 할일 저장."""
         self._save_data(chat_id, daily.to_dict())
 
+    def get_by_date(self, chat_id: int, target_date: date) -> DailyTodo:
+        """특정 날짜의 할일 조회 (읽기 전용, 없으면 빈 데이터)."""
+        # 오늘이면 get_today 사용 (carried tasks 로드 등)
+        if target_date == date.today():
+            return self.get_today(chat_id)
+
+        # 날짜별 파일 경로 (아카이브용)
+        archive_file = self.data_dir / f"{chat_id}_{target_date.isoformat()}.json"
+        if archive_file.exists():
+            try:
+                data = json.loads(archive_file.read_text(encoding="utf-8"))
+                return DailyTodo.from_dict(data)
+            except Exception:
+                pass
+
+        # 현재 파일에서 해당 날짜 확인 (오늘 데이터일 수도 있음)
+        data = self._load_data(chat_id)
+        if data.get("date") == target_date.isoformat():
+            return DailyTodo.from_dict(data)
+
+        # 없으면 빈 데이터
+        return DailyTodo(date=target_date.isoformat())
+
+    def get_date_range(self, chat_id: int, start_date: date, end_date: date) -> list[DailyTodo]:
+        """날짜 범위의 할일 조회."""
+        from datetime import timedelta
+        result = []
+        current = start_date
+        while current <= end_date:
+            result.append(self.get_by_date(chat_id, current))
+            current += timedelta(days=1)
+        return result
+
     def set_pending_input(self, chat_id: int, pending: bool) -> None:
         """입력 대기 상태 설정."""
         daily = self.get_today(chat_id)

@@ -1,6 +1,7 @@
 """Todo 플러그인 - 버튼 기반 할일 관리."""
 
 import re
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -95,11 +96,16 @@ class TodoPlugin(Plugin):
         return False
 
     async def handle(self, message: str, chat_id: int) -> PluginResult:
-        """메시지 처리 - 메인 메뉴 표시."""
+        """메시지 처리 - 바로 리스트 표시."""
         logger.info(f"Todo 플러그인 처리: '{message[:50]}' (chat_id={chat_id})")
 
-        # 메인 메뉴 표시
-        return self.get_main_menu_result(chat_id)
+        # 바로 리스트 표시
+        result = self._handle_list(chat_id)
+        return PluginResult(
+            handled=True,
+            response=result["text"],
+            reply_markup=result.get("reply_markup"),
+        )
 
     def get_main_menu_result(self, chat_id: int) -> PluginResult:
         """메인 메뉴 결과 반환."""
@@ -191,6 +197,15 @@ class TodoPlugin(Plugin):
             return self._handle_carry_all(chat_id)
         elif action == "wrap_done":
             return self._handle_wrap_done(chat_id)
+        # 날짜 이동 관련
+        elif action == "date":
+            # td:date:2026-03-04
+            date_str = parts[2] if len(parts) > 2 else None
+            return self._handle_date_view(chat_id, date_str)
+        elif action == "week":
+            # td:week:2026-03-04 (해당 날짜 기준 ±3일)
+            date_str = parts[2] if len(parts) > 2 else None
+            return self._handle_week_view(chat_id, date_str)
         else:
             return {"text": "❌ 알 수 없는 명령", "edit": True}
 
@@ -263,6 +278,16 @@ class TodoPlugin(Plugin):
             buttons.append([
                 InlineKeyboardButton("📋 멀티선택", callback_data="td:multi"),
             ])
+
+        # 날짜 이동 버튼
+        today = date.today()
+        yesterday = (today - timedelta(days=1)).isoformat()
+        tomorrow = (today + timedelta(days=1)).isoformat()
+        buttons.append([
+            InlineKeyboardButton("◀️ 어제", callback_data=f"td:date:{yesterday}"),
+            InlineKeyboardButton("📅 주간", callback_data=f"td:week:{today.isoformat()}"),
+            InlineKeyboardButton("내일 ▶️", callback_data=f"td:date:{tomorrow}"),
+        ])
         buttons.append([
             InlineKeyboardButton("➕ 추가", callback_data="td:add"),
             InlineKeyboardButton("🔄 새로고침", callback_data="td:list"),
@@ -591,6 +616,131 @@ class TodoPlugin(Plugin):
             "reply_markup": InlineKeyboardMarkup([[
                 InlineKeyboardButton("📄 리스트", callback_data="td:list")
             ]]),
+            "edit": True,
+        }
+
+    # ==================== 날짜 이동 핸들러 ====================
+
+    def _handle_date_view(self, chat_id: int, date_str: str) -> dict:
+        """특정 날짜 할일 조회."""
+        try:
+            target = date.fromisoformat(date_str)
+        except (ValueError, TypeError):
+            target = date.today()
+
+        daily = self.manager.get_by_date(chat_id, target)
+        all_tasks = daily.get_all_tasks()
+
+        # 오늘인지 확인
+        is_today = (target == date.today())
+        date_label = "오늘" if is_today else target.strftime("%m/%d")
+
+        lines = [f"📋 <b>{daily.date} ({date_label}) 할일</b>\n"]
+
+        total = 0
+        done_count = 0
+        for slot in [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING]:
+            tasks = all_tasks.get(slot.value, [])
+            slot_name = self.SLOT_NAMES[slot]
+
+            if tasks:
+                lines.append(f"\n<b>{slot_name}</b>")
+                for task in tasks:
+                    total += 1
+                    status = "✅" if task.done else "⬜"
+                    if task.done:
+                        done_count += 1
+                    lines.append(f"{status} {task.text}")
+
+        if total == 0:
+            lines.append("\n등록된 할일이 없어요.")
+        else:
+            lines.append(f"\n📊 {done_count}/{total} 완료")
+
+        # 날짜 이동 버튼
+        prev_date = (target - timedelta(days=1)).isoformat()
+        next_date = (target + timedelta(days=1)).isoformat()
+        today_str = date.today().isoformat()
+
+        buttons = [
+            [
+                InlineKeyboardButton("◀️ 이전", callback_data=f"td:date:{prev_date}"),
+                InlineKeyboardButton("📅 오늘", callback_data="td:list"),
+                InlineKeyboardButton("다음 ▶️", callback_data=f"td:date:{next_date}"),
+            ],
+            [
+                InlineKeyboardButton("📅 주간", callback_data=f"td:week:{target.isoformat()}"),
+            ]
+        ]
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(buttons),
+            "edit": True,
+        }
+
+    def _handle_week_view(self, chat_id: int, date_str: str) -> dict:
+        """주간 뷰 (기준일 ±3일 = 7일)."""
+        try:
+            center = date.fromisoformat(date_str)
+        except (ValueError, TypeError):
+            center = date.today()
+
+        start = center - timedelta(days=3)
+        end = center + timedelta(days=3)
+
+        dailies = self.manager.get_date_range(chat_id, start, end)
+        today = date.today()
+
+        lines = [f"📅 <b>주간 할일</b> ({start.strftime('%m/%d')} ~ {end.strftime('%m/%d')})\n"]
+
+        for daily in dailies:
+            d = date.fromisoformat(daily.date)
+            is_today = (d == today)
+            day_mark = "👉 " if is_today else ""
+            weekday = ["월", "화", "수", "목", "금", "토", "일"][d.weekday()]
+
+            all_tasks = daily.get_all_tasks()
+            total = sum(len(tasks) for tasks in all_tasks.values())
+            done = sum(1 for tasks in all_tasks.values() for t in tasks if t.done)
+
+            if total == 0:
+                status = "—"
+            elif done == total:
+                status = f"✅ {done}/{total}"
+            else:
+                status = f"⬜ {done}/{total}"
+
+            date_label = f"{d.strftime('%m/%d')}({weekday})"
+            lines.append(f"{day_mark}<b>{date_label}</b>: {status}")
+
+        # 날짜 선택 버튼 (각 날짜로 이동)
+        buttons = []
+        row = []
+        for daily in dailies:
+            d = date.fromisoformat(daily.date)
+            weekday = ["월", "화", "수", "목", "금", "토", "일"][d.weekday()]
+            is_today = (d == today)
+            label = f"{'📍' if is_today else ''}{d.day}({weekday})"
+            row.append(InlineKeyboardButton(label, callback_data=f"td:date:{daily.date}"))
+            if len(row) == 4:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+
+        # 주간 이동 버튼
+        prev_week = (center - timedelta(days=7)).isoformat()
+        next_week = (center + timedelta(days=7)).isoformat()
+        buttons.append([
+            InlineKeyboardButton("◀️ 이전 주", callback_data=f"td:week:{prev_week}"),
+            InlineKeyboardButton("📅 오늘", callback_data="td:list"),
+            InlineKeyboardButton("다음 주 ▶️", callback_data=f"td:week:{next_week}"),
+        ])
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
 

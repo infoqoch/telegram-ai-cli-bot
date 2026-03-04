@@ -228,12 +228,12 @@ class TestTodoPlugin:
         assert await plugin.can_handle("todo 영어로 뭐야", 123) is False
 
     @pytest.mark.asyncio
-    async def test_handle_shows_main_menu(self, plugin):
-        """handle 호출 시 메인 메뉴 표시."""
+    async def test_handle_shows_list(self, plugin):
+        """handle 호출 시 바로 리스트 표시."""
         result = await plugin.handle("할일", 123)
 
         assert result.handled is True
-        assert "할일 관리" in result.response
+        assert "할일" in result.response  # 날짜와 함께 리스트 표시
         assert result.reply_markup is not None
 
     @pytest.mark.asyncio
