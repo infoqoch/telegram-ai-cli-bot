@@ -58,6 +58,15 @@ class TaskInfo:
     task: Optional[asyncio.Task] = None
 
 
+@dataclass
+class PendingMessage:
+    """세션 락 충돌 시 대기 중인 메시지."""
+    user_id: str
+    message: str
+    created_at: float = field(default_factory=time.time)
+    expires_at: float = field(default_factory=lambda: time.time() + 300)  # 5분 후 만료
+
+
 class BotHandlers:
     """Container for all bot command handlers."""
 
@@ -78,6 +87,9 @@ class BotHandlers:
 
     # 세션 생성 중인 유저 추적 (메시지 블로킹용)
     _creating_sessions: set[str] = set()  # user_id set
+
+    # 대기 중인 메시지 (세션 락 충돌 시 대체 세션 선택용)
+    _pending_messages: dict[str, PendingMessage] = {}  # key(4자리) -> PendingMessage
 
     def __init__(
         self,
@@ -1460,16 +1472,8 @@ class BotHandlers:
         # 세션별 락 체크 (같은 세션에 동시 요청 방지 - Claude 컨텍스트 보호)
         session_lock = self._session_locks[session_id]
         if session_lock.locked():
-            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 이미 처리 중")
-            rejected_preview = message[:50] + "..." if len(message) > 50 else message
-            await update.message.reply_text(
-                f"⚠️ <b>같은 세션에 요청 처리 중</b>\n\n"
-                f"이 세션에서 다른 메시지를 처리하고 있어요.\n\n"
-                f"❌ <b>거절된 메시지:</b>\n"
-                f"<code>{rejected_preview}</code>\n\n"
-                f"완료 후 다시 보내주세요!",
-                parse_mode="HTML"
-            )
+            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 대체 세션 UI 표시")
+            await self._show_alternative_sessions(update, user_id, message, session_id)
             clear_context()
             return
 
@@ -1670,16 +1674,8 @@ class BotHandlers:
         # 세션별 락 체크 (같은 세션에 동시 요청 방지 - Claude 컨텍스트 보호)
         session_lock = self._session_locks[session_id]
         if session_lock.locked():
-            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 이미 처리 중")
-            rejected_preview = message[:50] + "..." if len(message) > 50 else message
-            await update.message.reply_text(
-                f"⚠️ <b>같은 세션에 요청 처리 중</b>\n\n"
-                f"이 세션에서 다른 메시지를 처리하고 있어요.\n\n"
-                f"❌ <b>거절된 메시지:</b>\n"
-                f"<code>{rejected_preview}</code>\n\n"
-                f"완료 후 다시 보내주세요!",
-                parse_mode="HTML"
-            )
+            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 대체 세션 UI 표시")
+            await self._show_alternative_sessions(update, user_id, message, session_id)
             clear_context()
             return
 
@@ -1840,10 +1836,16 @@ class BotHandlers:
                     pass
 
             elapsed = time.time() - start_time
-            logger.info(f"Claude 응답 완료 - session={session_id[:8]}, elapsed={elapsed:.1f}s, length={len(response)}")
+            logger.info(f"Claude 응답 완료 - session={session_id[:8]}, elapsed={elapsed:.1f}s, length={len(response) if response else 0}")
             logger.info(f"===== Claude 응답 (START) =====")
-            logger.info(response)
+            logger.info(response if response else "(None 또는 빈 문자열)")
             logger.info(f"===== Claude 응답 (END) =====")
+
+            # 상세 디버깅 정보
+            logger.debug(f"[DEBUG] response type: {type(response)}")
+            logger.debug(f"[DEBUG] response repr: {repr(response)[:200] if response else 'None'}")
+            logger.debug(f"[DEBUG] error: {error}")
+
             if error:
                 logger.warning(f"Claude 에러: {error}")
 
@@ -1860,7 +1862,9 @@ class BotHandlers:
                 logger.error(f"Claude 오류: {error}")
                 response = f"❌ 오류 발생: {error}"
             elif not response or not response.strip():
-                logger.warning("Claude 빈 응답")
+                logger.warning(f"Claude 빈 응답 감지 - response={repr(response)}, error={error}")
+                logger.warning(f"  session_id={session_id[:8]}, model={model}, is_manager={is_manager}")
+                logger.warning(f"  message={short_message}")
                 response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
 
             # ACTION 패턴 처리 (매니저 세션)
@@ -2058,6 +2062,125 @@ class BotHandlers:
 
         return action_results
 
+    def _generate_pending_key(self) -> str:
+        """4자리 랜덤 키 생성."""
+        import random
+        import string
+        while True:
+            key = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            if key not in self._pending_messages:
+                return key
+
+    def _store_pending_message(self, user_id: str, message: str) -> str:
+        """대기 메시지 저장 후 키 반환."""
+        # 만료된 메시지 정리
+        now = time.time()
+        expired_keys = [k for k, v in self._pending_messages.items() if v.expires_at < now]
+        for k in expired_keys:
+            del self._pending_messages[k]
+
+        key = self._generate_pending_key()
+        self._pending_messages[key] = PendingMessage(user_id=user_id, message=message)
+        logger.trace(f"대기 메시지 저장 - key={key}, user={user_id}")
+        return key
+
+    def _get_pending_message(self, key: str, user_id: str) -> Optional[str]:
+        """대기 메시지 조회 후 삭제. 만료/없으면 None."""
+        pending = self._pending_messages.get(key)
+        if not pending:
+            return None
+        if pending.user_id != user_id:
+            return None
+        if pending.expires_at < time.time():
+            del self._pending_messages[key]
+            return None
+        # 조회 후 삭제 (일회용)
+        del self._pending_messages[key]
+        return pending.message
+
+    async def _show_alternative_sessions(
+        self,
+        update: Update,
+        user_id: str,
+        message: str,
+        current_session_id: str,
+    ) -> None:
+        """세션 락 충돌 시 대체 세션 선택 UI 표시."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        # 메시지 저장
+        pending_key = self._store_pending_message(user_id, message)
+        message_preview = truncate_message(message, 40)
+
+        # 사용 가능한 세션 찾기 (락 안 걸린 세션)
+        all_sessions = self.sessions.list_sessions(user_id)
+        available_sessions = []
+
+        for s in all_sessions:
+            sid = s["full_session_id"]
+            if sid == current_session_id:
+                continue  # 현재 세션 제외
+            # 락 안 걸린 세션만
+            is_locked = any(info.session_id == sid for info in self._active_tasks.values())
+            if not is_locked:
+                # 최근 히스토리 2개 가져오기
+                history = self.sessions.get_history(user_id, sid)
+                recent = history[-2:] if history else []
+                available_sessions.append({
+                    **s,
+                    "recent": recent,
+                })
+
+        # UI 구성
+        lines = [
+            f"⚠️ <b>현재 세션이 처리 중입니다</b>\n",
+            f"💬 <code>{message_preview}</code>\n",
+        ]
+
+        buttons = []
+
+        if available_sessions:
+            lines.append("\n📂 <b>사용 가능한 세션:</b>")
+            for s in available_sessions[:5]:  # 최대 5개
+                sid = s["full_session_id"]
+                short_id = s["session_id"]
+                name = s.get("name") or f"세션 {short_id}"
+                model = s.get("model", "sonnet")
+                model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
+
+                # 최근 메시지 표시
+                recent_msgs = s.get("recent", [])
+                if recent_msgs:
+                    recent_preview = " / ".join(truncate_message(m, 15) for m in recent_msgs[-2:])
+                    lines.append(f"• {model_emoji} <b>{name}</b>: {recent_preview}")
+                else:
+                    lines.append(f"• {model_emoji} <b>{name}</b>: (비어있음)")
+
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"{model_emoji} {name[:12]}",
+                        callback_data=f"alt:s:{sid[:16]}:{pending_key}"
+                    )
+                ])
+
+        lines.append("\n➕ <b>새 세션으로 처리:</b>")
+        buttons.append([
+            InlineKeyboardButton("🧠 Opus", callback_data=f"alt:n:opus:{pending_key}"),
+            InlineKeyboardButton("⚡ Sonnet", callback_data=f"alt:n:sonnet:{pending_key}"),
+            InlineKeyboardButton("🚀 Haiku", callback_data=f"alt:n:haiku:{pending_key}"),
+        ])
+
+        # 취소 버튼
+        buttons.append([
+            InlineKeyboardButton("❌ 취소", callback_data=f"alt:cancel:{pending_key}"),
+        ])
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+
     async def _send_message_to_chat(
         self,
         bot,
@@ -2208,6 +2331,11 @@ class BotHandlers:
         # Lock 콜백 처리
         if callback_data.startswith("lock:"):
             await self._handle_lock_callback(query, chat_id)
+            return
+
+        # 대체 세션 선택 콜백 처리
+        if callback_data.startswith("alt:"):
+            await self._handle_alternative_session_callback(query, chat_id, callback_data)
             return
 
         # 다른 플러그인 콜백은 여기에 추가
@@ -2784,3 +2912,145 @@ class BotHandlers:
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
+
+    async def _handle_alternative_session_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """대체 세션 선택 콜백 처리.
+
+        callback_data 형식:
+        - alt:s:{session_id}:{pending_key} - 기존 세션으로 처리
+        - alt:n:{model}:{pending_key} - 새 세션 생성 후 처리
+        - alt:cancel:{pending_key} - 취소
+        """
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        user_id = str(chat_id)
+        parts = callback_data.split(":")
+
+        if len(parts) < 3:
+            await query.edit_message_text("❌ 잘못된 요청입니다.")
+            return
+
+        action = parts[1]
+
+        if action == "cancel":
+            # 취소 - pending 메시지 삭제
+            pending_key = parts[2] if len(parts) > 2 else None
+            if pending_key:
+                self._pending_messages.pop(pending_key, None)
+            await query.edit_message_text("❌ 요청이 취소되었습니다.")
+            return
+
+        if len(parts) < 4:
+            await query.edit_message_text("❌ 잘못된 요청입니다.")
+            return
+
+        target = parts[2]  # session_id 또는 model
+        pending_key = parts[3]
+
+        # pending 메시지 조회
+        message = self._get_pending_message(pending_key, user_id)
+        if not message:
+            logger.warning(f"대체 세션 콜백 - pending 메시지 없음: key={pending_key}")
+            await query.edit_message_text(
+                "⏰ <b>요청이 만료되었습니다</b>\n\n"
+                "메시지를 다시 보내주세요.",
+                parse_mode="HTML"
+            )
+            return
+
+        message_preview = truncate_message(message, 30)
+
+        if action == "s":
+            # 기존 세션으로 처리
+            # session_id는 16자로 잘렸으므로 prefix로 찾기
+            session_info = self.sessions.get_session_by_prefix(user_id, target[:8])
+            if not session_info:
+                await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+                return
+
+            full_session_id = session_info["full_session_id"]
+            session_name = session_info.get("name") or session_info["session_id"]
+            model = session_info.get("model", "sonnet")
+
+            # 메시지 처리 시작 알림
+            await query.edit_message_text(
+                f"✅ <b>{session_name}</b> 세션으로 처리 중...\n\n"
+                f"💬 <code>{message_preview}</code>",
+                parse_mode="HTML"
+            )
+
+            # Claude 호출 (백그라운드)
+            await self._process_alternative_session_request(
+                bot=query.message.get_bot(),
+                chat_id=chat_id,
+                user_id=user_id,
+                session_id=full_session_id,
+                message=message,
+                model=model,
+            )
+
+        elif action == "n":
+            # 새 세션 생성 후 처리
+            model = target  # opus, sonnet, haiku
+
+            await query.edit_message_text(
+                f"✅ 새 <b>{model.upper()}</b> 세션 생성 중...\n\n"
+                f"💬 <code>{message_preview}</code>",
+                parse_mode="HTML"
+            )
+
+            # 새 세션 생성
+            logger.info(f"대체 세션 - 새 {model} 세션 생성")
+            new_session_id = await self.claude.create_session()
+            if not new_session_id:
+                await query.message.reply_text("❌ 세션 생성 실패. 다시 시도해주세요.")
+                return
+
+            # 세션 저장
+            self.sessions.create_session(user_id, new_session_id, message, model=model)
+            logger.info(f"새 세션 생성됨: {new_session_id[:8]}, model={model}")
+
+            # Claude 호출 (백그라운드)
+            await self._process_alternative_session_request(
+                bot=query.message.get_bot(),
+                chat_id=chat_id,
+                user_id=user_id,
+                session_id=new_session_id,
+                message=message,
+                model=model,
+                is_new_session=True,
+            )
+
+        else:
+            await query.edit_message_text("❌ 알 수 없는 액션입니다.")
+
+    async def _process_alternative_session_request(
+        self,
+        bot,
+        chat_id: int,
+        user_id: str,
+        session_id: str,
+        message: str,
+        model: str,
+        is_new_session: bool = False,
+    ) -> None:
+        """대체 세션으로 메시지 처리 (백그라운드)."""
+        trace_id = self._setup_request_context(chat_id)
+        set_session_id(session_id)
+
+        logger.info(f"대체 세션 처리 시작 - session={session_id[:8]}, model={model}")
+
+        # 세션 락 + 세마포어 획득 후 처리
+        async with self._session_locks[session_id]:
+            async with self._user_semaphores[user_id]:
+                await self._process_claude_request(
+                    bot=bot,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    message=message,
+                    is_new_session=is_new_session,
+                    model=model,
+                )
+
+        clear_context()
