@@ -64,10 +64,13 @@ class BotHandlers:
     # 유저별 Lock: 세션 생성 시 race condition 방지
     _user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    # 유저별 Semaphore: 동시 요청 제한
+    # 유저별 Semaphore: 동시 요청 제한 (전체 부하 제한)
     _user_semaphores: dict[str, asyncio.Semaphore] = defaultdict(
         lambda: asyncio.Semaphore(3)
     )
+
+    # 세션별 Lock: 같은 세션에 동시 요청 방지 (Claude 컨텍스트 보호)
+    _session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     # 태스크 추적
     _active_tasks: dict[int, TaskInfo] = {}  # task_id -> TaskInfo
@@ -1379,6 +1382,22 @@ class BotHandlers:
 
         self._ensure_watchdog()
 
+        # 세션별 락 체크 (같은 세션에 동시 요청 방지 - Claude 컨텍스트 보호)
+        session_lock = self._session_locks[session_id]
+        if session_lock.locked():
+            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 이미 처리 중")
+            rejected_preview = message[:50] + "..." if len(message) > 50 else message
+            await update.message.reply_text(
+                f"⚠️ <b>같은 세션에 요청 처리 중</b>\n\n"
+                f"이 세션에서 다른 메시지를 처리하고 있어요.\n\n"
+                f"❌ <b>거절된 메시지:</b>\n"
+                f"<code>{rejected_preview}</code>\n\n"
+                f"완료 후 다시 보내주세요!",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
         # 동시 요청 제한 체크 (Semaphore._value가 0이면 모든 슬롯 사용 중)
         semaphore = self._user_semaphores[user_id]
         logger.trace(f"Semaphore 상태 - available={semaphore._value}")
@@ -1525,6 +1544,22 @@ class BotHandlers:
         # Watchdog 지연 시작
         self._ensure_watchdog()
 
+        # 세션별 락 체크 (같은 세션에 동시 요청 방지 - Claude 컨텍스트 보호)
+        session_lock = self._session_locks[session_id]
+        if session_lock.locked():
+            logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 이미 처리 중")
+            rejected_preview = message[:50] + "..." if len(message) > 50 else message
+            await update.message.reply_text(
+                f"⚠️ <b>같은 세션에 요청 처리 중</b>\n\n"
+                f"이 세션에서 다른 메시지를 처리하고 있어요.\n\n"
+                f"❌ <b>거절된 메시지:</b>\n"
+                f"<code>{rejected_preview}</code>\n\n"
+                f"완료 후 다시 보내주세요!",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
         # 동시 요청 제한 체크 (Semaphore._value가 0이면 모든 슬롯 사용 중)
         semaphore = self._user_semaphores[user_id]
         logger.trace(f"Semaphore 상태 - available={semaphore._value}")
@@ -1579,24 +1614,27 @@ class BotHandlers:
         trace_id: str,
         model: str = None,
     ) -> None:
-        """Semaphore로 동시 요청 제한 후 Claude 호출."""
+        """Semaphore + 세션 락으로 동시 요청 제한 후 Claude 호출."""
         # 백그라운드 태스크에서 컨텍스트 재설정
         set_trace_id(trace_id)
         set_user_id(user_id)
         set_session_id(session_id)
         logger.trace(f"_process_claude_request_with_semaphore 시작 - model={model}")
 
-        async with self._user_semaphores[user_id]:
-            logger.trace("Semaphore 획득됨")
-            await self._process_claude_request(
-                bot=bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                is_new_session=is_new_session,
-                model=model,
-            )
+        # 세션 락 + 유저 세마포어 동시 획득
+        async with self._session_locks[session_id]:
+            logger.trace(f"세션 락 획득됨 - session={session_id[:8]}")
+            async with self._user_semaphores[user_id]:
+                logger.trace("Semaphore 획득됨")
+                await self._process_claude_request(
+                    bot=bot,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    message=message,
+                    is_new_session=is_new_session,
+                    model=model,
+                )
 
         logger.trace("_process_claude_request_with_semaphore 완료")
         clear_context()
