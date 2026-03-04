@@ -3227,7 +3227,7 @@ class BotHandlers:
 
             # 백그라운드에서 처리
             asyncio.create_task(
-                self._process_alternative_session(
+                self._process_alternative_session_request(
                     bot=bot,
                     chat_id=chat_id,
                     user_id=user_id,
@@ -3261,7 +3261,7 @@ class BotHandlers:
 
             # 백그라운드에서 처리
             asyncio.create_task(
-                self._process_alternative_session(
+                self._process_alternative_session_request(
                     bot=bot,
                     chat_id=chat_id,
                     user_id=user_id,
