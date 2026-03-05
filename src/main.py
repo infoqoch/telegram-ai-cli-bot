@@ -249,8 +249,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("new_haiku", handlers.new_session_haiku))
     app.add_handler(CommandHandler("new_haiku_speedy", handlers.new_session_haiku_speedy))
     app.add_handler(CommandHandler("new_opus_smarty", handlers.new_session_opus_smarty))
-    app.add_handler(CommandHandler("new_project", handlers.new_project_session))
-    app.add_handler(CommandHandler("np", handlers.new_project_session))  # 단축 명령어
+    app.add_handler(CommandHandler("new_workspace", handlers.new_workspace_session))
+    app.add_handler(CommandHandler("nw", handlers.new_workspace_session))  # 단축 명령어
     app.add_handler(CommandHandler("model", handlers.model_command))
     app.add_handler(CommandHandler("model_opus", handlers.model_opus_command))
     app.add_handler(CommandHandler("model_sonnet", handlers.model_sonnet_command))

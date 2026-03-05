@@ -317,7 +317,7 @@ class BotHandlers:
             f"{auth_section}"
             "💬 세션\n"
             "/new [모델] [이름] - 새 세션\n"
-            "/np 경로 [모델] [이름] - 프로젝트 세션\n"
+            "/nw 경로 [모델] [이름] - 워크스페이스 세션\n"
             "/new_haiku_speedy - 🚀 Speedy\n"
             "/new_opus_smarty - 🧠 Smarty\n"
             "/model - 현재 세션 모델 변경\n"
@@ -419,7 +419,7 @@ class BotHandlers:
             schedules = self._schedule_manager.list_by_user(user_id)
             for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
                 status = "✅" if s.enabled else "⏸"
-                type_icon = "📁" if s.type == "project" else "💬"
+                type_icon = "📁" if s.type == "workspace" else "💬"
                 buttons.append([
                     InlineKeyboardButton(
                         f"{status} {s.time_str} {type_icon} {s.name[:10]}",
@@ -431,7 +431,7 @@ class BotHandlers:
         # 추가/새로고침 버튼
         buttons.append([
             InlineKeyboardButton("💬 Claude", callback_data="sched:add:claude"),
-            InlineKeyboardButton("📁 프로젝트", callback_data="sched:add:project"),
+            InlineKeyboardButton("📁 워크스페이스", callback_data="sched:add:workspace"),
         ])
         buttons.append([
             InlineKeyboardButton("🔄 새로고침", callback_data="sched:refresh"),
@@ -439,13 +439,13 @@ class BotHandlers:
 
         return buttons
 
-    def _get_allowed_project_paths(self) -> list[str]:
-        """허용된 프로젝트 경로 목록 반환."""
+    def _get_allowed_workspace_paths(self) -> list[str]:
+        """허용된 워크스페이스 경로 목록 반환."""
         import os
         from pathlib import Path
 
-        # 환경변수에서 허용 경로 가져오기
-        allowed = os.getenv("ALLOWED_PROJECT_PATHS", "")
+        # 환경변수에서 허용 경로 가져오기 (하위 호환성: ALLOWED_PROJECT_PATHS도 지원)
+        allowed = os.getenv("ALLOWED_WORKSPACE_PATHS", "") or os.getenv("ALLOWED_PROJECT_PATHS", "")
         if not allowed:
             # 기본값: AiSandbox, Projects
             home = Path.home()
@@ -553,11 +553,11 @@ class BotHandlers:
             await query.answer()
             return
 
-        # 추가 - Project 타입 (경로 선택)
-        if action == "add:project":
-            paths = self._get_allowed_project_paths()
+        # 추가 - Workspace 타입 (경로 선택)
+        if action == "add:workspace":
+            paths = self._get_allowed_workspace_paths()
             if not paths:
-                await query.answer("❌ 허용된 프로젝트 경로가 없습니다.")
+                await query.answer("❌ 허용된 워크스페이스 경로가 없습니다.")
                 return
 
             buttons = []
@@ -578,8 +578,8 @@ class BotHandlers:
             ])
 
             await query.edit_message_text(
-                "📅 <b>프로젝트 스케줄 추가</b>\n\n"
-                "📁 프로젝트 경로를 선택하세요:",
+                "📅 <b>워크스페이스 스케줄 추가</b>\n\n"
+                "📁 워크스페이스 경로를 선택하세요:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
             )
@@ -596,15 +596,15 @@ class BotHandlers:
                 await query.answer("❌ 잘못된 경로")
                 return
 
-            project_path = paths[path_idx]
-            project_name = project_path.split("/")[-1]
+            workspace_path = paths[path_idx]
+            workspace_name = workspace_path.split("/")[-1]
 
             buttons = []
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
                     f"{hour:02d}:00",
-                    callback_data=f"sched:time:project:{path_idx}:{hour}"
+                    callback_data=f"sched:time:workspace:{path_idx}:{hour}"
                 ))
                 if len(row) == 4:
                     buttons.append(row)
@@ -616,9 +616,9 @@ class BotHandlers:
             ])
 
             await query.edit_message_text(
-                f"📅 <b>프로젝트 스케줄 추가</b>\n\n"
-                f"📁 프로젝트: <b>{project_name}</b>\n"
-                f"<code>{project_path}</code>\n\n"
+                f"📅 <b>워크스페이스 스케줄 추가</b>\n\n"
+                f"📁 워크스페이스: <b>{workspace_name}</b>\n"
+                f"<code>{workspace_path}</code>\n\n"
                 f"실행 시간을 선택하세요 (매일 반복):",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -641,11 +641,11 @@ class BotHandlers:
             pending["hour"] = hour
             pending["minute"] = 0
 
-            if schedule_type == "project" and path_idx != "_":
+            if schedule_type == "workspace" and path_idx != "_":
                 paths = pending.get("paths", [])
                 idx = int(path_idx)
                 if idx < len(paths):
-                    pending["project_path"] = paths[idx]
+                    pending["workspace_path"] = paths[idx]
                     pending["name"] = paths[idx].split("/")[-1]
 
             self._pending_schedule_input[user_id] = pending
@@ -660,8 +660,8 @@ class BotHandlers:
                 [InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")],
             ]
 
-            type_label = "프로젝트" if schedule_type == "project" else "Claude"
-            path_info = f"\n📁 경로: <code>{pending.get('project_path', '')}</code>" if schedule_type == "project" else ""
+            type_label = "워크스페이스" if schedule_type == "workspace" else "스케줄"
+            path_info = f"\n📁 경로: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
                 f"📅 <b>{type_label} 스케줄 추가</b>\n\n"
@@ -682,8 +682,8 @@ class BotHandlers:
 
             schedule_type = pending.get("type", "claude")
             hour = pending.get("hour", 9)
-            type_label = "프로젝트" if schedule_type == "project" else "Claude"
-            path_info = f"\n📁 경로: <code>{pending.get('project_path', '')}</code>" if schedule_type == "project" else ""
+            type_label = "워크스페이스" if schedule_type == "workspace" else "스케줄"
+            path_info = f"\n📁 경로: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
                 f"📅 <b>{type_label} 스케줄 추가</b>\n\n"
@@ -1020,13 +1020,13 @@ class BotHandlers:
 
     @authorized_only
     @authenticated_only
-    async def new_project_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /new_project command - create project-bound session.
+    async def new_workspace_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /new_workspace command - create workspace-bound session.
 
         Usage:
-            /new_project /path/to/project           - 기본 모델 (sonnet)
-            /new_project /path/to/project opus      - Opus 모델
-            /new_project /path/to/project haiku 이름 - Haiku 모델 + 세션 이름
+            /new_workspace /path/to/workspace           - 기본 모델 (sonnet)
+            /new_workspace /path/to/workspace opus      - Opus 모델
+            /new_workspace /path/to/workspace haiku 이름 - Haiku 모델 + 세션 이름
         """
         from src.config import get_settings
 
@@ -1036,22 +1036,22 @@ class BotHandlers:
 
         if not args:
             await update.message.reply_text(
-                "📁 <b>프로젝트 세션 사용법</b>\n\n"
-                "<code>/new_project 경로 [모델] [이름]</code>\n\n"
+                "📁 <b>워크스페이스 세션 사용법</b>\n\n"
+                "<code>/new_workspace 경로 [모델] [이름]</code>\n\n"
                 "예시:\n"
-                "• <code>/new_project ~/Projects/my-app</code>\n"
-                "• <code>/new_project ~/AiSandbox/bot opus</code>\n"
-                "• <code>/new_project ~/work/api haiku API봇</code>",
+                "• <code>/new_workspace ~/Projects/my-app</code>\n"
+                "• <code>/new_workspace ~/AiSandbox/bot opus</code>\n"
+                "• <code>/new_workspace ~/work/api haiku API봇</code>",
                 parse_mode="HTML"
             )
             return
 
         # 첫 번째 인자: 경로
-        project_path = args[0]
+        workspace_path = args[0]
 
         # 경로 검증
         settings = get_settings()
-        is_valid, error_msg = settings.validate_project_path(project_path)
+        is_valid, error_msg = settings.validate_project_path(workspace_path)
         if not is_valid:
             await update.message.reply_text(f"❌ {error_msg}", parse_mode="HTML")
             return
@@ -1069,24 +1069,24 @@ class BotHandlers:
             else:
                 session_name = " ".join(args[1:])
 
-        # 경로에서 프로젝트 이름 추출
+        # 경로에서 워크스페이스 이름 추출
         from pathlib import Path
-        expanded_path = str(Path(project_path).expanduser().resolve())
-        project_name = Path(expanded_path).name
-        display_name = session_name or f"📁{project_name}"
+        expanded_path = str(Path(workspace_path).expanduser().resolve())
+        workspace_name = Path(expanded_path).name
+        display_name = session_name or f"📁{workspace_name}"
 
-        logger.info(f"/new_project - path={expanded_path}, model={model}, name={display_name}")
+        logger.info(f"/new_workspace - path={expanded_path}, model={model}, name={display_name}")
 
-        # Claude 세션 생성 (프로젝트 경로에서 생성해야 올바른 위치에 저장됨)
-        session_id = await self.claude.create_session(project_path=expanded_path)
+        # Claude 세션 생성 (워크스페이스 경로에서 생성해야 올바른 위치에 저장됨)
+        session_id = await self.claude.create_session(workspace_path=expanded_path)
         if not session_id:
             await update.message.reply_text("❌ 세션 생성 실패", parse_mode="HTML")
             return
 
-        # 세션 저장 (project_path 포함)
+        # 세션 저장 (workspace_path 포함)
         self.sessions.create_session(
-            user_id, session_id, f"(프로젝트: {project_name})",
-            model=model, name=display_name, project_path=expanded_path
+            user_id, session_id, f"(워크스페이스: {workspace_name})",
+            model=model, name=display_name, workspace_path=expanded_path
         )
 
         model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model or "sonnet", "⚡")
@@ -1097,12 +1097,12 @@ class BotHandlers:
         config_status = "✅ CLAUDE.md" if claude_md_exists else ("✅ .claude/" if claude_dir_exists else "⚠️ 설정 없음")
 
         await update.message.reply_text(
-            f"📁 <b>프로젝트 세션 생성됨</b>\n\n"
+            f"📁 <b>워크스페이스 세션 생성됨</b>\n\n"
             f"• 경로: <code>{expanded_path}</code>\n"
             f"• 모델: {model_emoji} {model or 'sonnet'}\n"
             f"• 이름: {display_name}\n"
             f"• 설정: {config_status}\n\n"
-            f"이 세션에서는 프로젝트의 CLAUDE.md 규칙이 적용됩니다.",
+            f"이 세션에서는 워크스페이스의 CLAUDE.md 규칙이 적용됩니다.",
             parse_mode="HTML"
         )
 
@@ -1736,13 +1736,13 @@ class BotHandlers:
             else:
                 is_new_session = False
 
-        # 세션 모델 및 프로젝트 경로 가져오기
+        # 세션 모델 및 워크스페이스 경로 가져오기
         model = self.sessions.get_session_model(user_id, session_id)
-        project_path = self.sessions.get_session_project_path(user_id, session_id)
+        workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
 
         # 세션 ID 컨텍스트 설정
         set_session_id(session_id)
-        logger.info(f"세션 결정 완료 - model={model}, new={is_new_session}, project={project_path or '(없음)'}")
+        logger.info(f"세션 결정 완료 - model={model}, new={is_new_session}, workspace={workspace_path or '(없음)'}")
 
         self._ensure_watchdog()
 
@@ -1750,7 +1750,7 @@ class BotHandlers:
         if session_queue_manager.is_locked(session_id):
             logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 세션 선택 UI 표시")
             await self._show_session_selection_ui(
-                update, user_id, message, session_id, model, is_new_session, project_path
+                update, user_id, message, session_id, model, is_new_session, workspace_path
             )
             clear_context()
             return
@@ -1950,15 +1950,15 @@ class BotHandlers:
             else:
                 is_new_session = False
 
-        # 세션 모델 및 프로젝트 경로 가져오기
+        # 세션 모델 및 워크스페이스 경로 가져오기
         model = self.sessions.get_session_model(user_id, session_id)
-        project_path = self.sessions.get_session_project_path(user_id, session_id)
+        workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
 
         # 세션 ID 컨텍스트 설정
         set_session_id(session_id)
 
         # 로깅 (session_id 확정 후)
-        logger.info(f"메시지 접수: model={model}, new={is_new_session}, project={project_path or '(없음)'}")
+        logger.info(f"메시지 접수: model={model}, new={is_new_session}, workspace={workspace_path or '(없음)'}")
 
         # Watchdog 지연 시작
         self._ensure_watchdog()
@@ -1967,7 +1967,7 @@ class BotHandlers:
         if session_queue_manager.is_locked(session_id):
             logger.warning(f"세션 락 충돌 - session={session_id[:8]}, 세션 선택 UI 표시")
             await self._show_session_selection_ui(
-                update, user_id, message, session_id, model, is_new_session, project_path
+                update, user_id, message, session_id, model, is_new_session, workspace_path
             )
             clear_context()
             return
@@ -2038,7 +2038,7 @@ class BotHandlers:
         if not locked:
             logger.warning(f"세션 락 획득 실패 - session={session_id[:8]}")
             # 세션 선택 UI 표시 (다른 세션으로 처리하거나 대기 선택)
-            project_path = self.sessions.get_session_project_path(user_id, session_id) or ""
+            workspace_path = self.sessions.get_session_workspace_path(user_id, session_id) or ""
             await self._show_session_selection_ui(
                 update=None,  # 백그라운드이므로 update 없음
                 user_id=user_id,
@@ -2046,7 +2046,7 @@ class BotHandlers:
                 current_session_id=session_id,
                 model=model or "sonnet",
                 is_new_session=is_new_session,
-                project_path=project_path,
+                workspace_path=workspace_path,
                 bot=bot,
                 chat_id=chat_id,
             )
@@ -2110,10 +2110,10 @@ class BotHandlers:
         logger.info(f"===== 사용자 질문 (END) =====")
 
         try:
-            # 프로젝트 세션 경로 가져오기
-            project_path = self.sessions.get_session_project_path(user_id, session_id)
-            if project_path:
-                logger.trace(f"프로젝트 세션 - project_path={project_path}")
+            # 워크스페이스 세션 경로 가져오기
+            workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
+            if workspace_path:
+                logger.trace(f"워크스페이스 세션 - workspace_path={workspace_path}")
 
             # 장시간 작업 알림 태스크
             long_task_notified = False
@@ -2138,7 +2138,7 @@ class BotHandlers:
             # Claude 호출
             logger.trace(f"claude.chat() 호출 - model={model}")
             try:
-                response, error, _ = await self.claude.chat(message, session_id, model=model, project_path=project_path or None)
+                response, error, _ = await self.claude.chat(message, session_id, model=model, workspace_path=workspace_path or None)
             finally:
                 # Claude 완료 시 알림 태스크 취소
                 notify_task.cancel()
@@ -2182,7 +2182,7 @@ class BotHandlers:
                 logger.error(f"  model: {model}")
                 logger.error(f"  is_new_session: {is_new_session}")
                 logger.error(f"  message preview: {message[:200]}")
-                logger.error(f"  project_path: {project_path}")
+                logger.error(f"  workspace_path: {workspace_path}")
                 response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
 
             # 세션 정보 prefix 추가
@@ -2233,7 +2233,7 @@ class BotHandlers:
         current_session_id: str,
         model: str,
         is_new_session: bool,
-        project_path: str,
+        workspace_path: str,
         *,
         bot=None,
         chat_id: int = None,
@@ -2348,7 +2348,7 @@ class BotHandlers:
             "message": message,
             "model": model,
             "is_new_session": is_new_session,
-            "project_path": project_path,
+            "workspace_path": workspace_path,
             "current_session_id": current_session_id,
         }
 
@@ -2674,7 +2674,7 @@ class BotHandlers:
 
         # 스케줄 타입 및 정보
         schedule_type = pending.get("type", "claude")
-        project_path = pending.get("project_path") if schedule_type == "project" else None
+        workspace_path = pending.get("workspace_path") if schedule_type == "workspace" else None
         name = pending.get("name", "스케줄")
         model = pending.get("model", "sonnet")
 
@@ -2693,7 +2693,7 @@ class BotHandlers:
             message=message,
             schedule_type=schedule_type,
             model=model,
-            project_path=project_path,
+            workspace_path=workspace_path,
         )
 
         # 상태 정리
@@ -2704,8 +2704,8 @@ class BotHandlers:
             InlineKeyboardButton("📅 스케줄 목록", callback_data="sched:refresh"),
         ]]
 
-        type_label = "프로젝트" if schedule_type == "project" else "Claude"
-        path_info = f"\n📁 경로: <code>{project_path}</code>" if project_path else ""
+        type_label = "워크스페이스" if schedule_type == "workspace" else "스케줄"
+        path_info = f"\n📁 경로: <code>{workspace_path}</code>" if workspace_path else ""
 
         await update.message.reply_text(
             f"✅ <b>스케줄 등록 완료!</b>\n\n"
@@ -3425,7 +3425,7 @@ class BotHandlers:
         message = pending["message"]
         model = pending["model"]
         is_new_session = pending["is_new_session"]
-        project_path = pending["project_path"]
+        workspace_path = pending["workspace_path"]
         current_session_id = pending["current_session_id"]
         bot = query.get_bot()
 
@@ -3450,7 +3450,7 @@ class BotHandlers:
                 message=message,
                 model=model,
                 is_new_session=is_new_session,
-                project_path=project_path,
+                workspace_path=workspace_path,
             )
 
             # 세션 정보 조회

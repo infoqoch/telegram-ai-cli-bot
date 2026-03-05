@@ -303,39 +303,46 @@ HistoryEntry = {
 | `/s_{id}` | 세션 전환 | - |
 | `/h_{id}` | 히스토리 보기 | - |
 | `/d_{id}` | 세션 삭제 | - |
-| `/new_project` | 프로젝트 세션 생성 | `/np` |
+| `/new_workspace` | 워크스페이스 세션 생성 | `/nw` |
 
-## 프로젝트 세션
+## 워크스페이스 세션
 
-로컬 프로젝트 디렉토리에 바인딩된 세션. 해당 프로젝트의 CLAUDE.md 규칙을 따르면서 텔레그램 포맷으로 응답.
+로컬 디렉토리에 바인딩된 세션. 해당 워크스페이스의 CLAUDE.md 규칙을 따르면서 텔레그램 포맷으로 응답.
 
 ### 사용법
 
 ```
-/new_project 경로 [모델] [이름]
-/np ~/AiSandbox/my-app opus 마이앱
+/new_workspace 경로 [모델] [이름]
+/nw ~/AiSandbox/my-app opus 마이앱
 ```
 
 ### 동작 방식
 
 | 레이어 | 소스 | 역할 |
 |--------|------|------|
-| 프로젝트 규칙 | `cwd`의 CLAUDE.md | 코드 스타일, 빌드 명령, 커밋 규칙 |
+| 워크스페이스 규칙 | `cwd`의 CLAUDE.md | 코드 스타일, 빌드 명령, 커밋 규칙 |
 | 텔레그램 규칙 | `--append-system-prompt` | HTML 포맷, 간결한 응답 |
 
 ### 매니저 모드에서
 
 ```
-"my-app 프로젝트 세션 만들어"
-→ [ACTION:CREATE_PROJECT:sonnet:~/Projects/my-app:my-app]
+"my-app 워크스페이스 세션 만들어"
+→ [ACTION:CREATE_WORKSPACE:sonnet:~/Projects/my-app:my-app]
 ```
 
 ### 허용 디렉토리
 
 `.env`에서 설정 (기본값):
 ```
-ALLOWED_PROJECT_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
+ALLOWED_WORKSPACE_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
 ```
+
+## 스케줄 타입
+
+| 타입 | 설명 |
+|------|------|
+| `claude` | 일반 스케줄 (새 세션에서 실행) |
+| `workspace` | 워크스페이스 스케줄 (경로의 CLAUDE.md 적용)
 
 ## 프로세스 관리 (CRITICAL)
 
