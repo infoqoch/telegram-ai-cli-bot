@@ -56,30 +56,6 @@ class PendingMessage:
 class BotHandlers:
     """Container for all bot command handlers."""
 
-    # 유저별 Lock: 세션 생성 시 race condition 방지
-    _user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-    # 유저별 Semaphore: 동시 요청 제한 (전체 부하 제한)
-    _user_semaphores: dict[str, asyncio.Semaphore] = defaultdict(
-        lambda: asyncio.Semaphore(3)
-    )
-
-    # 태스크 추적 (watchdog용 - 세션 락은 session_queue_manager가 관리)
-    _active_tasks: dict[int, TaskInfo] = {}  # task_id -> TaskInfo
-    _watchdog_task: Optional[asyncio.Task] = None
-
-    # 세션 생성 중인 유저 추적 (메시지 블로킹용)
-    _creating_sessions: set[str] = set()  # user_id set
-
-    # NOTE: _session_locks, _pending_messages 제거됨
-    # 세션 락 및 대기열은 session_queue_manager가 단일 진실 소스로 관리
-
-    # 스케줄 입력 대기 상태 (ForceReply용)
-    _pending_schedule_input: dict[str, dict] = {}  # user_id -> {type, hour, minute, ...}
-
-    # 예약 스케줄러 (경로 기반)
-    _schedule_manager = None
-
     def __init__(
         self,
         session_store: "SessionStore",
@@ -100,15 +76,32 @@ class BotHandlers:
         self.response_notify_seconds = response_notify_seconds
         self.session_list_ai_summary = session_list_ai_summary
         self.plugins = plugin_loader
+
+        # 인스턴스 변수로 변경 (이전: 클래스 변수 - 모든 인스턴스가 공유하는 버그 있었음)
+        # 유저별 Lock: 세션 생성 시 race condition 방지
+        self._user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # 유저별 Semaphore: 동시 요청 제한 (전체 부하 제한)
+        self._user_semaphores: dict[str, asyncio.Semaphore] = defaultdict(
+            lambda: asyncio.Semaphore(3)
+        )
+        # 태스크 추적 (watchdog용 - 세션 락은 session_queue_manager가 관리)
+        self._active_tasks: dict[int, TaskInfo] = {}
+        self._watchdog_task: Optional[asyncio.Task] = None
+        # 세션 생성 중인 유저 추적 (메시지 블로킹용)
+        self._creating_sessions: set[str] = set()
+        # 스케줄 입력 대기 상태 (ForceReply용)
+        self._pending_schedule_input: dict[str, dict] = {}
+        # 예약 스케줄러 (경로 기반)
+        self._schedule_manager = None
+
         self._watchdog_started = False
         logger.trace(f"BotHandlers 설정 - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
 
     # ==================== 스케줄 매니저 ====================
 
-    @classmethod
-    def set_schedule_manager(cls, manager) -> None:
+    def set_schedule_manager(self, manager) -> None:
         """스케줄 매니저 설정."""
-        cls._schedule_manager = manager
+        self._schedule_manager = manager
         logger.debug("BotHandlers에 ScheduleManager 연결됨")
 
     # ==================== 유틸리티 메서드 ====================

@@ -22,15 +22,23 @@ _get_running_pid() {
             fi
         fi
     done
-    # 락 파일이 없거나 유효하지 않으면 pgrep 사용
-    pgrep -f "python.*src\.(supervisor|main)" 2>/dev/null | head -1
+    # 락 파일이 없거나 유효하지 않으면 pgrep 사용 (macOS 호환)
+    pgrep -f 'python.*src.supervisor' 2>/dev/null | head -1 || \
+    pgrep -f 'python.*src.main' 2>/dev/null | head -1
 }
 
 _kill_all_instances() {
     # 모든 관련 프로세스 강제 종료 (supervisor + main)
-    local pids=$(pgrep -f "python.*src\.(supervisor|main)" 2>/dev/null)
+    # macOS 호환: pgrep 정규식 대신 개별 패턴으로 검색
+    local pids=""
+    pids="$pids $(pgrep -f 'python.*src.supervisor' 2>/dev/null)"
+    pids="$pids $(pgrep -f 'python.*src.main' 2>/dev/null)"
+    pids=$(echo "$pids" | tr ' ' '\n' | grep -v '^$' | sort -u)
+
     if [ -n "$pids" ]; then
-        echo "$pids" | xargs kill -9 2>/dev/null
+        for pid in $pids; do
+            kill -9 "$pid" 2>/dev/null
+        done
         sleep 1
     fi
     rm -f "$PID_FILE" "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock"
@@ -43,10 +51,16 @@ _is_running() {
 case "$1" in
   start)
     # 기존 프로세스 확인 및 정리 (좀비 방지)
-    existing_pids=$(pgrep -f "python.*src\.(supervisor|main)" 2>/dev/null)
+    # macOS 호환: 개별 패턴으로 검색
+    existing_pids=""
+    existing_pids="$existing_pids $(pgrep -f 'python.*src.supervisor' 2>/dev/null)"
+    existing_pids="$existing_pids $(pgrep -f 'python.*src.main' 2>/dev/null)"
+    existing_pids=$(echo "$existing_pids" | tr ' ' '\n' | grep -v '^$' | sort -u)
     if [ -n "$existing_pids" ]; then
         echo "⚠️  기존 프로세스 발견 - 자동 정리 중..."
-        echo "$existing_pids" | xargs kill -9 2>/dev/null
+        for pid in $existing_pids; do
+            kill -9 "$pid" 2>/dev/null
+        done
         sleep 1
     fi
     # 락 파일 정리

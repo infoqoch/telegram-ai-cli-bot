@@ -344,6 +344,7 @@ class SessionStore:
                 "is_current": session_id == current_id,
                 "model": data.get("model", DEFAULT_MODEL),
                 "name": data.get("name", ""),
+                "project_path": data.get("project_path", ""),
             })
 
         sessions.sort(key=lambda x: x["last_used"], reverse=True)
@@ -397,6 +398,8 @@ class SessionStore:
                     "last_used": data.get("last_used", "")[:19],
                     "history_count": len(data.get("history", [])),
                     "name": data.get("name", ""),
+                    "model": data.get("model", "sonnet"),
+                    "project_path": data.get("project_path", ""),
                     "deleted": is_deleted,
                 }
                 logger.trace(f"세션 찾음: {result['session_id']} (deleted={is_deleted})")
