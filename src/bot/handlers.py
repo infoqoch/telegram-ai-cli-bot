@@ -1284,7 +1284,7 @@ class BotHandlers:
             /new opus         - Opus 모델
             /new haiku 이름   - Haiku 모델 + 세션 이름
         """
-        from src.claude.session import SUPPORTED_MODELS, DEFAULT_MODEL
+        from src.constants import SUPPORTED_MODELS, DEFAULT_MODEL
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
         chat_id = update.effective_chat.id
@@ -1428,7 +1428,7 @@ class BotHandlers:
         session_name = ""
         if len(args) > 1:
             potential_model = args[1].lower()
-            from src.claude.session import SUPPORTED_MODELS
+            from src.constants import SUPPORTED_MODELS
             if potential_model in SUPPORTED_MODELS:
                 model = potential_model
                 if len(args) > 2:
@@ -1499,7 +1499,7 @@ class BotHandlers:
             /model sonnet  - Sonnet으로 변경
             /model haiku   - Haiku로 변경
         """
-        from src.claude.session import SUPPORTED_MODELS
+        from src.constants import SUPPORTED_MODELS
 
         chat_id = update.effective_chat.id
         user_id = str(chat_id)
