@@ -332,11 +332,14 @@ def _migrate_todos(repo: Repository, todo_dir: Path) -> int:
 
     File format: .data/todo/{chat_id}.json
     {
-        "2024-01-15": {
-            "morning": [{"text": "...", "done": false}, ...],
+        "date": "2024-01-15",
+        "tasks": {
+            "morning": [{"text": "...", "done": false, "created_at": "..."}, ...],
             "afternoon": [...],
             "evening": [...]
-        }
+        },
+        "pending_input": false,
+        ...
     }
     """
     count = 0
@@ -348,34 +351,41 @@ def _migrate_todos(repo: Repository, todo_dir: Path) -> int:
             chat_id = int(todo_file.stem)
             data = json.loads(todo_file.read_text(encoding="utf-8"))
 
-            for date, slots in data.items():
-                for slot, items in slots.items():
-                    if slot not in ("morning", "afternoon", "evening"):
-                        continue
-                    for item in items:
-                        if isinstance(item, dict):
-                            todo_records.append({
-                                "chat_id": chat_id,
-                                "date": date,
-                                "slot": slot,
-                                "text": item.get("text", ""),
-                                "done": 1 if item.get("done", False) else 0,
-                                "created_at": item.get("created_at", now),
-                                "updated_at": item.get("updated_at", now),
-                            })
-                            count += 1
-                        elif isinstance(item, str):
-                            # Legacy format: just text
-                            todo_records.append({
-                                "chat_id": chat_id,
-                                "date": date,
-                                "slot": slot,
-                                "text": item,
-                                "done": 0,
-                                "created_at": now,
-                                "updated_at": now,
-                            })
-                            count += 1
+            # New format: {date, tasks: {morning, afternoon, evening}, ...}
+            date = data.get("date")
+            tasks = data.get("tasks", {})
+
+            if not date or not tasks:
+                logger.warning(f"Skipping {todo_file}: invalid format")
+                continue
+
+            for slot, items in tasks.items():
+                if slot not in ("morning", "afternoon", "evening"):
+                    continue
+                for item in items:
+                    if isinstance(item, dict):
+                        todo_records.append({
+                            "chat_id": chat_id,
+                            "date": date,
+                            "slot": slot,
+                            "text": item.get("text", ""),
+                            "done": 1 if item.get("done", False) else 0,
+                            "created_at": item.get("created_at", now),
+                            "updated_at": item.get("updated_at", now),
+                        })
+                        count += 1
+                    elif isinstance(item, str):
+                        # Legacy format: just text
+                        todo_records.append({
+                            "chat_id": chat_id,
+                            "date": date,
+                            "slot": slot,
+                            "text": item,
+                            "done": 0,
+                            "created_at": now,
+                            "updated_at": now,
+                        })
+                        count += 1
 
             _backup_file(todo_file)
         except (ValueError, json.JSONDecodeError) as e:

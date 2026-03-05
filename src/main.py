@@ -255,7 +255,7 @@ def create_app() -> Application:
             _schedule_manager.update_run(schedule.id, last_error=str(e))
             logger.error(f"Schedule {schedule.id} failed: {e}")
 
-    _schedule_manager.set_scheduler_manager(scheduler_manager.scheduler)
+    _schedule_manager.set_scheduler_manager(scheduler_manager)
     _schedule_manager.set_executor(schedule_executor)
     _schedule_manager.register_all_to_scheduler()
     logger.info("예약 스케줄러 executor 설정 완료")
