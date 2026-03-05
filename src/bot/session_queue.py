@@ -32,7 +32,7 @@ class QueuedMessage:
     created_at: float = field(default_factory=time.time)
     expires_at: float = field(default_factory=lambda: time.time() + 300)  # 5분 후 만료
     is_new_session: bool = False
-    project_path: str = ""
+    workspace_path: str = ""
 
     def is_expired(self) -> bool:
         """만료 여부 확인."""
@@ -151,7 +151,7 @@ class SessionQueueManager:
         message: str,
         model: str,
         is_new_session: bool = False,
-        project_path: str = "",
+        workspace_path: str = "",
     ) -> int:
         """대기열에 메시지 추가. 대기 순번 반환."""
         async with self._lock:
@@ -163,7 +163,7 @@ class SessionQueueManager:
                 session_id=session_id,
                 model=model,
                 is_new_session=is_new_session,
-                project_path=project_path,
+                workspace_path=workspace_path,
             )
             return state.add_to_queue(queued)
 
