@@ -221,9 +221,13 @@ class ScheduleManagerAdapter:
 
         # Create callback wrapper for telegram job_queue
         async def job_callback(context) -> None:
+            logger.info(f"[ScheduleAdapter] 콜백 실행: {schedule.id} ({schedule.name})")
             repo_schedule = self._repo.get_schedule(schedule.id)
             if repo_schedule and repo_schedule.enabled:
+                logger.info(f"[ScheduleAdapter] executor 호출: {schedule.id}")
                 await self._executor(repo_schedule)
+            else:
+                logger.warning(f"[ScheduleAdapter] 스케줄 비활성화 또는 없음: {schedule.id}")
 
         # Register with SchedulerManager
         self._scheduler_manager.register_daily(
