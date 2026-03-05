@@ -337,8 +337,48 @@ HistoryEntry = {
 ALLOWED_PROJECT_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
 ```
 
+## 프로세스 관리 (CRITICAL)
+
+### 싱글톤 락 시스템
+
+봇은 중복 실행 방지를 위해 파일 락 시스템 사용:
+
+| 락 파일 | 용도 |
+|---------|------|
+| `/tmp/telegram-bot.lock` | main.py 싱글톤 |
+| `/tmp/telegram-bot-supervisor.lock` | supervisor 싱글톤 |
+
+### 프로세스 관리 규칙 (CRITICAL)
+
+**반드시 `./run.sh` 명령어만 사용할 것!**
+
+| 상황 | 올바른 방법 | 금지 |
+|------|-------------|------|
+| 봇 재시작 | `./run.sh restart` | `kill -9 PID` ❌ |
+| 봇 중지 | `./run.sh stop` | `pkill -f src.main` ❌ |
+| 중복 프로세스 정리 | `./run.sh restart` | 수동 kill ❌ |
+
+### 왜 수동 kill이 위험한가?
+
+1. **`kill -9`는 시그널 핸들러 무시** → 락 파일 미정리
+2. **zsh에서 `kill -9 PID`가 실패할 수 있음** → 에러 무시되어 인지 못함
+3. **Supervisor가 자식 프로세스 재생성** → 중복 발생
+
+### 중복 프로세스 발생 시
+
+```bash
+# 상태 확인
+./run.sh status
+
+# 중복 감지되면 restart로 정리
+./run.sh restart
+```
+
+`./run.sh`의 `_kill_all_instances()`가 pgrep + xargs로 안전하게 정리함.
+
 ## 금지
 
 - `.env` 커밋 금지
 - `.data/` 커밋 금지
 - 토큰 하드코딩 금지
+- **수동 `kill -9` 사용 금지** → `./run.sh restart` 사용
