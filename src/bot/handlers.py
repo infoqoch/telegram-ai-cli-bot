@@ -1539,6 +1539,19 @@ class BotHandlers:
         full_session_id = target_info["full_session_id"]
         session_name = target_info.get("name", "")
 
+        # 현재 활성 세션은 삭제 불가
+        current_session_id = self.sessions.get_current_session_id(user_id)
+        if current_session_id == full_session_id:
+            name_info = f" ({session_name})" if session_name else ""
+            await update.message.reply_text(
+                f"⚠️ 현재 사용 중인 세션은 삭제할 수 없습니다.\n\n"
+                f"• ID: <code>{target_info['session_id']}</code>{name_info}\n\n"
+                f"💡 다른 세션으로 전환하거나 /new로 새 세션을 만든 후 삭제하세요.",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
         if self.sessions.delete_session(user_id, full_session_id):
             name_info = f" ({session_name})" if session_name else ""
             await update.message.reply_text(
@@ -3021,6 +3034,19 @@ class BotHandlers:
         short_id = full_session_id[:8]
         name = session.get("name") or f"세션 {short_id}"
 
+        # 현재 활성 세션은 삭제 불가
+        current_session_id = self.sessions.get_current_session_id(user_id)
+        if current_session_id == full_session_id:
+            keyboard = [[InlineKeyboardButton("« 돌아가기", callback_data="sess:list")]]
+            await query.edit_message_text(
+                text=f"⚠️ <b>삭제 불가</b>\n\n"
+                     f"📂 <b>{name}</b>은(는) 현재 사용 중입니다.\n\n"
+                     f"💡 다른 세션으로 전환 후 삭제하세요.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            return
+
         keyboard = [
             [
                 InlineKeyboardButton("✅ 삭제", callback_data=f"sess:confirm_del:{full_session_id}"),
@@ -3039,6 +3065,8 @@ class BotHandlers:
 
     async def _handle_delete_session_execute(self, query, chat_id: int, session_id: str) -> None:
         """세션 삭제 실행."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
@@ -3048,6 +3076,19 @@ class BotHandlers:
         full_session_id = session.get("full_session_id", session_id)
         short_id = full_session_id[:8]
         name = session.get("name") or f"세션 {short_id}"
+
+        # 현재 활성 세션은 삭제 불가 (확인 후 전환된 경우 대비)
+        current_session_id = self.sessions.get_current_session_id(user_id)
+        if current_session_id == full_session_id:
+            keyboard = [[InlineKeyboardButton("« 돌아가기", callback_data="sess:list")]]
+            await query.edit_message_text(
+                text=f"⚠️ <b>삭제 불가</b>\n\n"
+                     f"📂 <b>{name}</b>은(는) 현재 사용 중입니다.\n\n"
+                     f"💡 다른 세션으로 전환 후 삭제하세요.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            return
 
         self.sessions.delete_session(user_id, full_session_id)
 

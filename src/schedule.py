@@ -1,8 +1,8 @@
 """스케줄러 - 경로 기반 예약 작업 관리.
 
 세션 독립적인 스케줄 시스템:
-- claude: 일반 Claude 대화 (새 세션)
-- project: 프로젝트 경로에서 실행 (CLAUDE.md 적용)
+- claude: 일반 스케줄 (새 세션)
+- workspace: 워크스페이스 스케줄 (CLAUDE.md 적용)
 """
 
 import json
@@ -39,14 +39,14 @@ class Schedule:
     message: str
     name: str  # 스케줄 이름 (표시용)
 
-    # 타입: "claude" (일반) 또는 "project" (프로젝트 경로)
+    # 타입: "claude" (일반) 또는 "workspace" (워크스페이스 경로)
     type: str = "claude"
 
     # 모델 선택 (기본: sonnet)
     model: str = "sonnet"
 
-    # project 타입 전용
-    project_path: Optional[str] = None
+    # workspace 타입 전용
+    workspace_path: Optional[str] = None
 
     enabled: bool = True
     created_at: str = field(default_factory=lambda: datetime.now(KST).isoformat())
@@ -67,7 +67,7 @@ class Schedule:
     @property
     def type_emoji(self) -> str:
         """타입 이모지."""
-        return "📁" if self.type == "project" else "💬"
+        return "📁" if self.type == "workspace" else "💬"
 
     def to_dict(self) -> dict:
         """딕셔너리로 변환."""
@@ -89,13 +89,18 @@ class Schedule:
                 name=data.get("session_name", data.get("name", "스케줄")),
                 type="claude",
                 model=data.get("model", "sonnet"),
-                project_path=None,
+                workspace_path=None,
                 enabled=data.get("enabled", True),
                 created_at=data.get("created_at", datetime.now(KST).isoformat()),
                 last_run=data.get("last_run"),
                 last_error=data.get("last_error"),
                 run_count=data.get("run_count", 0),
             )
+        # 하위 호환성: project_path → workspace_path, type: project → workspace
+        if "project_path" in data and "workspace_path" not in data:
+            data["workspace_path"] = data.pop("project_path")
+        if data.get("type") == "project":
+            data["type"] = "workspace"
         return cls(**data)
 
 
@@ -206,8 +211,8 @@ class ScheduleManager:
 
         try:
             # 실행 알림
-            type_label = "프로젝트" if schedule.type == "project" else "Claude"
-            path_info = f"\n📁 경로: <code>{schedule.project_path}</code>" if schedule.project_path else ""
+            type_label = "워크스페이스" if schedule.type == "workspace" else "스케줄"
+            path_info = f"\n📁 경로: <code>{schedule.workspace_path}</code>" if schedule.workspace_path else ""
 
             await self._bot.send_message(
                 chat_id=schedule.chat_id,
@@ -226,7 +231,7 @@ class ScheduleManager:
                 message=schedule.message,
                 session_id=None,  # 항상 새 세션
                 model=schedule.model,
-                project_path=schedule.project_path,  # project 타입이면 경로 전달
+                workspace_path=schedule.workspace_path,  # workspace 타입이면 경로 전달
             )
 
             # 응답 전송
@@ -289,7 +294,7 @@ class ScheduleManager:
         message: str,
         schedule_type: str = "claude",
         model: str = "sonnet",
-        project_path: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> Schedule:
         """새 스케줄 추가."""
         schedule = Schedule(
@@ -302,7 +307,7 @@ class ScheduleManager:
             name=name,
             type=schedule_type,
             model=model,
-            project_path=project_path,
+            workspace_path=workspace_path,
         )
 
         self._schedules[schedule.id] = schedule
@@ -373,7 +378,7 @@ class ScheduleManager:
 
         for s in sorted_schedules:
             status = "✅" if s.enabled else "⏸"
-            type_info = f" 📁" if s.type == "project" else ""
+            type_info = f" 📁" if s.type == "workspace" else ""
             error_indicator = " ⚠️" if s.last_error else ""
             lines.append(
                 f"{status} <b>{s.time_str}</b> → {s.name}{type_info}{error_indicator}\n"

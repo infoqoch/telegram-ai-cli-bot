@@ -106,16 +106,16 @@ class ClaudeClient:
 
         return (stdout_str, stderr_str, process.returncode)
 
-    async def create_session(self, project_path: Optional[str] = None) -> Optional[str]:
+    async def create_session(self, workspace_path: Optional[str] = None) -> Optional[str]:
         """Create a new Claude session and return session_id.
 
         Args:
-            project_path: Project directory path (for project sessions)
+            workspace_path: Workspace directory path (for workspace sessions)
         """
-        logger.trace(f"create_session() 시작 - project_path={project_path or '(없음)'}")
+        logger.trace(f"create_session() 시작 - workspace_path={workspace_path or '(없음)'}")
         logger.info("새 Claude 세션 생성 중")
 
-        response = await self.chat("answer 'hi'", None, project_path=project_path)
+        response = await self.chat("answer 'hi'", None, workspace_path=workspace_path)
 
         if response.error:
             logger.error(f"세션 생성 실패: {response.error.value}")
@@ -130,7 +130,7 @@ class ClaudeClient:
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
-        project_path: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> ChatResponse:
         """
         Send a message to Claude.
@@ -139,21 +139,21 @@ class ClaudeClient:
             message: User message
             session_id: Claude's session ID (always use --resume if provided)
             model: Model to use (opus, sonnet, haiku)
-            project_path: Project directory path (for project sessions)
+            workspace_path: Workspace directory path (for workspace sessions)
 
         Returns:
             ChatResponse with text, error, and session_id
         """
         short_msg = message[:50] + "..." if len(message) > 50 else message
         logger.trace(f"chat() 시작 - msg='{short_msg}'")
-        logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, project={project_path or '(없음)'}")
+        logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or '(없음)'}")
 
-        cmd = self._build_command(message, session_id, model, project_path)
+        cmd = self._build_command(message, session_id, model, workspace_path)
         logger.trace(f"명령어 생성됨 - {len(cmd)} parts")
 
         try:
             logger.trace("CLI 실행 시작")
-            output, error, returncode = await self._run_command(cmd, timeout=None, cwd=project_path)
+            output, error, returncode = await self._run_command(cmd, timeout=None, cwd=workspace_path)
 
             logger.trace(f"CLI 결과 - returncode={returncode}")
 
@@ -215,10 +215,10 @@ class ClaudeClient:
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
-        project_path: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> list[str]:
         """Build Claude CLI command."""
-        logger.trace(f"_build_command() - session={session_id[:8] if session_id else 'None'}, model={model}, project={project_path or '(없음)'}")
+        logger.trace(f"_build_command() - session={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or '(없음)'}")
 
         cmd = list(self.command_parts)
 
@@ -244,8 +244,8 @@ class ClaudeClient:
             cmd.extend(["--system-prompt", self.system_prompt])
             logger.trace("시스템 프롬프트 옵션 추가됨")
 
-        # 프로젝트 세션: 텔레그램 응답 포맷 추가 (프로젝트 CLAUDE.md + 텔레그램 포맷)
-        if project_path:
+        # 워크스페이스 세션: 텔레그램 응답 포맷 추가 (워크스페이스 CLAUDE.md + 텔레그램 포맷)
+        if workspace_path:
             telegram_format_prompt = (
                 "응답 포맷 규칙: "
                 "1) Telegram HTML 사용 (<b>, <i>, <code>, <pre>) "
@@ -254,7 +254,7 @@ class ClaudeClient:
                 "4) 한국어로 응답"
             )
             cmd.extend(["--append-system-prompt", telegram_format_prompt])
-            logger.trace("프로젝트 세션 - 텔레그램 포맷 프롬프트 추가됨")
+            logger.trace("워크스페이스 세션 - 텔레그램 포맷 프롬프트 추가됨")
 
         cmd.append(message)
         logger.trace(f"최종 명령어 길이: {len(cmd)} parts")
