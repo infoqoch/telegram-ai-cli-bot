@@ -582,7 +582,7 @@ class BotHandlers:
 
         # 스케줄 등록 - 시간 선택
         if action.startswith("schedule:"):
-            from src.schedule import AVAILABLE_HOURS
+            from src.constants import AVAILABLE_HOURS
 
             ws_id = action[9:]
             ws = self._workspace_registry.get(ws_id)
@@ -837,7 +837,7 @@ class BotHandlers:
     async def _handle_scheduler_callback(self, query, chat_id: int, callback_data: str) -> None:
         """스케줄 콜백 처리."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
-        from src.schedule import AVAILABLE_HOURS
+        from src.constants import AVAILABLE_HOURS
 
         user_id = str(chat_id)
         action = callback_data[6:]  # "sched:" 제거

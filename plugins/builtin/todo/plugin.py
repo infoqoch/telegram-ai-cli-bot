@@ -44,8 +44,10 @@ class TodoPlugin(Plugin):
     SLOT_CODES = {"morning": "m", "afternoon": "a", "evening": "e"}
     CODE_TO_SLOT = {"m": "morning", "a": "afternoon", "e": "evening"}
 
-    # 멀티 선택 상태 (chat_id -> set of todo_ids)
-    _multi_selections: dict[int, set[int]] = {}
+    def __init__(self):
+        super().__init__()
+        # 멀티 선택 상태 (chat_id -> set of todo_ids)
+        self._multi_selections: dict[int, set[int]] = {}
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """할일 관련 메시지인지 확인."""

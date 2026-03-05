@@ -4,9 +4,12 @@ import importlib.util
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.logging_config import logger
+
+if TYPE_CHECKING:
+    from src.repository import Repository
 
 
 @dataclass
@@ -26,7 +29,7 @@ class Plugin(ABC):
     usage: str = "사용법이 정의되지 않았습니다."
 
     # Repository 인스턴스 (PluginLoader가 주입)
-    _repository: any = None
+    _repository: Optional["Repository"] = None
 
     @property
     def repository(self):
