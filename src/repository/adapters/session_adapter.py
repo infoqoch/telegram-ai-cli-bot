@@ -117,7 +117,7 @@ class SessionStoreAdapter:
             "deleted": session.deleted,
         }
 
-    def get_session_model(self, session_id: str) -> Optional[str]:
+    def get_session_model(self, user_id: str, session_id: str) -> Optional[str]:
         """Get model for session."""
         return self._repo.get_session_model(session_id)
 
@@ -137,6 +137,7 @@ class SessionStoreAdapter:
 
     def get_session_history_entries(
         self,
+        user_id: str,
         session_id: str,
         limit: Optional[int] = None
     ) -> list[HistoryEntryDict]:
@@ -198,6 +199,8 @@ class SessionStoreAdapter:
             history = self._repo.get_session_history_entries(s.id)
             result.append({
                 "id": s.id,
+                "full_session_id": s.id,  # 원본 코드 호환
+                "session_id": s.id[:8],   # 원본 코드 호환 (short ID)
                 "created_at": s.created_at,
                 "last_used": s.last_used,
                 "history": [h.to_dict() for h in history],
@@ -217,7 +220,7 @@ class SessionStoreAdapter:
         """Check if session is a workspace session."""
         return self._repo.is_workspace_session(session_id)
 
-    def get_session_workspace_path(self, session_id: str) -> Optional[str]:
+    def get_session_workspace_path(self, user_id: str, session_id: str) -> Optional[str]:
         """Get workspace path for session."""
         return self._repo.get_session_workspace_path(session_id)
 
