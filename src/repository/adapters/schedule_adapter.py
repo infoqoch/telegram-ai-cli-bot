@@ -200,31 +200,26 @@ class ScheduleManagerAdapter:
 
     def _register_schedule(self, schedule: ScheduleData) -> None:
         """Register single schedule with scheduler."""
+        from datetime import time as dt_time
+
         if not self._scheduler_manager or not self._executor:
             return
 
-        job_id = f"schedule_{schedule.id}"
+        job_name = f"schedule_{schedule.id}"
 
-        # Remove existing job if any
-        try:
-            self._scheduler_manager.remove_job(job_id)
-        except Exception:
-            pass
-
-        # Add new job
-        async def job_wrapper():
+        # Create callback wrapper for telegram job_queue
+        async def job_callback(context) -> None:
             repo_schedule = self._repo.get_schedule(schedule.id)
             if repo_schedule and repo_schedule.enabled:
                 await self._executor(repo_schedule)
 
-        self._scheduler_manager.add_job(
-            job_wrapper,
-            "cron",
-            hour=schedule.hour,
-            minute=schedule.minute,
-            id=job_id,
-            replace_existing=True,
-            timezone="Asia/Seoul"
+        # Register with SchedulerManager
+        self._scheduler_manager.register_daily(
+            name=job_name,
+            callback=job_callback,
+            time_of_day=dt_time(hour=schedule.hour, minute=schedule.minute),
+            owner="ScheduleAdapter",
+            metadata={"schedule_id": schedule.id},
         )
 
     def _unregister_schedule(self, schedule_id: str) -> None:
@@ -232,11 +227,8 @@ class ScheduleManagerAdapter:
         if not self._scheduler_manager:
             return
 
-        job_id = f"schedule_{schedule_id}"
-        try:
-            self._scheduler_manager.remove_job(job_id)
-        except Exception:
-            pass
+        job_name = f"schedule_{schedule_id}"
+        self._scheduler_manager.unregister(job_name)
 
     def get_schedule_summary(self, user_id: str) -> str:
         """Get schedule summary for display."""
