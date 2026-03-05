@@ -369,12 +369,25 @@ class WeatherPlugin(Plugin):
     # ==================== 기존 메서드 ====================
 
     def _get_location_file(self, chat_id: int) -> Path:
-        """위치 설정 파일 경로."""
+        """위치 설정 파일 경로 (레거시 지원)."""
         data_dir = self.get_data_dir(self._base_dir)
         return data_dir / f"{chat_id}.json"
 
     def _load_location(self, chat_id: int) -> Optional[dict]:
-        """저장된 위치 로드."""
+        """저장된 위치 로드 - Repository 우선."""
+        # Repository 사용 가능하면 사용
+        if self.repository:
+            loc = self.repository.get_weather_location(chat_id)
+            if loc:
+                return {
+                    "name": loc.name,
+                    "country": loc.country,
+                    "lat": loc.lat,
+                    "lon": loc.lon,
+                }
+            return None
+
+        # 레거시 JSON 폴백
         file_path = self._get_location_file(chat_id)
         if not file_path.exists():
             return None
@@ -384,7 +397,19 @@ class WeatherPlugin(Plugin):
             return None
 
     def _save_location(self, chat_id: int, location: dict) -> None:
-        """위치 저장."""
+        """위치 저장 - Repository 우선."""
+        # Repository 사용 가능하면 사용
+        if self.repository:
+            self.repository.set_weather_location(
+                chat_id=chat_id,
+                name=location.get("name", "Unknown"),
+                lat=location.get("lat", 0.0),
+                lon=location.get("lon", 0.0),
+                country=location.get("country"),
+            )
+            return
+
+        # 레거시 JSON 폴백
         file_path = self._get_location_file(chat_id)
         file_path.write_text(
             json.dumps(location, ensure_ascii=False, indent=2),

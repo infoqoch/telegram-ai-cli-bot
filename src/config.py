@@ -102,7 +102,11 @@ class Settings(BaseSettings):
     @property
     def data_dir(self) -> Path:
         return self.base_dir / ".data"
-    
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "bot.db"
+
     @property
     def sessions_file(self) -> Path:
         return self.data_dir / "sessions.json"

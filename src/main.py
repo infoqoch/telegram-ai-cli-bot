@@ -1,7 +1,6 @@
 """Main entry point for Telegram Claude Bot."""
 
 import atexit
-import fcntl
 import os
 import signal
 import sys
@@ -19,49 +18,26 @@ from telegram.ext import (
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# 싱글톤 보장을 위한 락 파일
-LOCK_FILE = Path("/tmp/telegram-bot.lock")
-_lock_fd = None
+from src.lock import ProcessLock
 
-
-def acquire_singleton_lock() -> bool:
-    """프로세스 싱글톤 락 획득. 실패 시 False 반환."""
-    global _lock_fd
-    try:
-        _lock_fd = open(LOCK_FILE, "w")
-        fcntl.flock(_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _lock_fd.write(str(os.getpid()))
-        _lock_fd.flush()
-        return True
-    except (IOError, OSError):
-        if _lock_fd:
-            _lock_fd.close()
-        return False
-
-
-def release_singleton_lock():
-    """싱글톤 락 해제."""
-    global _lock_fd
-    if _lock_fd:
-        try:
-            fcntl.flock(_lock_fd.fileno(), fcntl.LOCK_UN)
-            _lock_fd.close()
-            LOCK_FILE.unlink(missing_ok=True)
-        except Exception:
-            pass
-        _lock_fd = None
+# 싱글톤 락
+_process_lock = ProcessLock(Path("/tmp/telegram-bot.lock"))
 
 
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.claude.client import ClaudeClient
-from src.claude.session import SessionStore
 from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
 from src.scheduler_manager import scheduler_manager
-from src.schedule import init_schedule_manager, get_schedule_manager
-from src.workspace import init_workspace_registry, get_workspace_registry
+from src.repository import init_repository, get_repository, shutdown_repository
+from src.repository.migrations import migrate_all
+from src.repository.adapters import (
+    SessionStoreAdapter,
+    ScheduleManagerAdapter,
+    WorkspaceRegistryAdapter,
+)
 
 # Todo 스케줄러 (옵션)
 _todo_scheduler = None
@@ -161,13 +137,27 @@ def create_app() -> Application:
     logger.info(f"  allowed_chat_ids: {settings.allowed_chat_ids or '(모두 허용)'}")
     logger.info("=" * 60)
 
-    # Initialize components
-    logger.trace("SessionStore 초기화 시작")
-    session_store = SessionStore(
-        file_path=settings.sessions_file,
-        timeout_hours=settings.session_timeout_hours,
+    # Initialize Repository (SQLite)
+    logger.trace("Repository 초기화 시작")
+    repo = init_repository(settings.db_path)
+    logger.trace(f"Repository 초기화 완료 - db: {settings.db_path}")
+
+    # Run migrations from JSON if needed
+    logger.trace("마이그레이션 확인")
+    try:
+        migration_result = migrate_all(repo, settings.data_dir)
+        if any(v > 0 for v in migration_result.values()):
+            logger.info(f"마이그레이션 완료: {migration_result}")
+    except Exception as e:
+        logger.warning(f"마이그레이션 실패 (기존 JSON 없을 수 있음): {e}")
+
+    # Initialize adapters for backward compatibility
+    logger.trace("SessionStore 어댑터 초기화 시작")
+    session_store = SessionStoreAdapter(
+        repo=repo,
+        session_timeout_hours=settings.session_timeout_hours,
     )
-    logger.trace(f"SessionStore 초기화 완료 - file: {settings.sessions_file}")
+    logger.trace("SessionStore 어댑터 초기화 완료")
 
     logger.trace("ClaudeClient 초기화 시작")
     claude_client = ClaudeClient(
@@ -184,9 +174,9 @@ def create_app() -> Application:
     )
     logger.trace(f"AuthManager 초기화 완료 - timeout: {settings.auth_timeout_minutes}분")
 
-    # 플러그인 로더 초기화
+    # 플러그인 로더 초기화 (Repository 주입)
     logger.trace("PluginLoader 초기화 시작")
-    plugin_loader = PluginLoader(settings.base_dir)
+    plugin_loader = PluginLoader(settings.base_dir, repository=repo)
     loaded_plugins = plugin_loader.load_all()
     if loaded_plugins:
         logger.info(f"플러그인 로드됨: {', '.join(loaded_plugins)}")
@@ -225,22 +215,61 @@ def create_app() -> Application:
     # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
     _setup_hourly_ping_scheduler(app, settings, plugin_loader)
 
-    # 예약 스케줄러 설정 (경로 기반)
+    # 예약 스케줄러 설정 (Repository 어댑터 사용)
     global _schedule_manager
-    _schedule_manager = init_schedule_manager(
-        data_dir=settings.data_dir,
-        claude_client=claude_client,
-    )
-    _schedule_manager.set_bot(app.bot)
-    _schedule_manager.register_all_to_scheduler()
-    logger.info("예약 스케줄러 초기화 완료")
+    _schedule_manager = ScheduleManagerAdapter(repo=repo)
+    # Executor는 나중에 설정 (bot 필요)
+    logger.info("예약 스케줄러 어댑터 초기화 완료")
 
-    # 워크스페이스 레지스트리 설정
-    workspace_registry = init_workspace_registry(
-        data_dir=settings.data_dir,
-        claude_client=claude_client,
-    )
-    logger.info("워크스페이스 레지스트리 초기화 완료")
+    # 워크스페이스 레지스트리 설정 (Repository 어댑터 사용)
+    workspace_registry = WorkspaceRegistryAdapter(repo=repo)
+    logger.info("워크스페이스 레지스트리 어댑터 초기화 완료")
+
+    # Schedule executor 설정 (Claude 호출 로직)
+    async def schedule_executor(schedule):
+        """Execute scheduled task."""
+        from src.repository.repository import Schedule
+        try:
+            # Create session for schedule
+            import uuid
+            session_id = f"schedule_{schedule.id}_{uuid.uuid4().hex[:8]}"
+
+            # Determine workspace path
+            workspace_path = None
+            if schedule.type == "workspace" and schedule.workspace_path:
+                workspace_path = schedule.workspace_path
+
+            # Call Claude
+            response = await claude_client.chat(
+                message=schedule.message,
+                session_id=session_id,
+                model=schedule.model,
+                cwd=workspace_path,
+            )
+
+            # Send response to Telegram
+            if app.bot and schedule.chat_id:
+                # Chunk response if too long
+                max_len = 4000
+                for i in range(0, len(response), max_len):
+                    chunk = response[i:i + max_len]
+                    await app.bot.send_message(
+                        chat_id=schedule.chat_id,
+                        text=f"📅 <b>{schedule.name}</b>\n\n{chunk}",
+                        parse_mode="HTML",
+                    )
+
+            _schedule_manager.update_run(schedule.id)
+            logger.info(f"Schedule {schedule.id} executed successfully")
+
+        except Exception as e:
+            _schedule_manager.update_run(schedule.id, last_error=str(e))
+            logger.error(f"Schedule {schedule.id} failed: {e}")
+
+    _schedule_manager.set_scheduler_manager(scheduler_manager.scheduler)
+    _schedule_manager.set_executor(schedule_executor)
+    _schedule_manager.register_all_to_scheduler()
+    logger.info("예약 스케줄러 executor 설정 완료")
 
     # BotHandlers에 schedule_manager, workspace_registry 설정
     handlers.set_schedule_manager(_schedule_manager)
@@ -317,14 +346,21 @@ def main() -> None:
 
     # 싱글톤 락 획득 (다른 인스턴스 실행 방지)
     logger.trace("싱글톤 락 획득 시도")
-    if not acquire_singleton_lock():
+    if not _process_lock.acquire():
         print("❌ 봇이 이미 실행 중입니다. 기존 프로세스를 종료하세요.", file=sys.stderr)
         print("   ./run.sh stop && ./run.sh start", file=sys.stderr)
         sys.exit(1)
     logger.trace("싱글톤 락 획득 성공")
 
-    # 종료 시 락 해제
-    atexit.register(release_singleton_lock)
+    # 종료 시 락 해제 및 Repository 정리
+    def cleanup():
+        _process_lock.release()
+        try:
+            shutdown_repository()
+        except Exception:
+            pass
+
+    atexit.register(cleanup)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     logger.trace("종료 핸들러 등록 완료")

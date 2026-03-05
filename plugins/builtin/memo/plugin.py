@@ -185,17 +185,12 @@ class MemoPlugin(Plugin):
     def _handle_confirm_delete(self, chat_id: int, memo_id: int) -> dict:
         """삭제 실행."""
         memos = self._load_memos(chat_id)
-
-        target = None
-        for i, memo in enumerate(memos):
-            if memo["id"] == memo_id:
-                target = memos.pop(i)
-                break
+        target = next((m for m in memos if m["id"] == memo_id), None)
 
         if not target:
             return {"text": f"❌ 메모 #{memo_id}을(를) 찾을 수 없습니다.", "edit": True}
 
-        self._save_memos(chat_id, memos)
+        self._delete_memo(chat_id, memo_id)
 
         result = self._handle_list(chat_id)
         result["text"] = f"🗑️ 삭제됨: <s>{target['content'][:20]}</s>\n\n" + result["text"]
@@ -215,18 +210,7 @@ class MemoPlugin(Plugin):
                 ]]),
             }
 
-        memos = self._load_memos(chat_id)
-
-        # 새 ID 계산 (삭제된 메모 고려)
-        new_id = max([m["id"] for m in memos], default=0) + 1
-
-        memo = {
-            "id": new_id,
-            "content": content,
-            "created_at": datetime.now().isoformat(),
-        }
-        memos.append(memo)
-        self._save_memos(chat_id, memos)
+        memo = self._add_memo(chat_id, content)
 
         keyboard = [
             [
@@ -243,12 +227,18 @@ class MemoPlugin(Plugin):
     # ==================== 유틸리티 ====================
 
     def _get_memo_file(self, chat_id: int) -> Path:
-        """메모 파일 경로."""
+        """메모 파일 경로 (레거시 지원)."""
         data_dir = self.get_data_dir(self._base_dir)
         return data_dir / f"{chat_id}.json"
 
     def _load_memos(self, chat_id: int) -> list[dict]:
-        """메모 로드."""
+        """메모 로드 - Repository 우선, 폴백으로 JSON."""
+        # Repository 사용 가능하면 사용
+        if self.repository:
+            memos = self.repository.list_memos(chat_id)
+            return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in memos]
+
+        # 레거시 JSON 폴백
         memo_file = self._get_memo_file(chat_id)
         if not memo_file.exists():
             return []
@@ -258,9 +248,46 @@ class MemoPlugin(Plugin):
             return []
 
     def _save_memos(self, chat_id: int, memos: list[dict]) -> None:
-        """메모 저장."""
+        """메모 저장 - Repository 사용 시 무시됨 (개별 add/delete 사용)."""
+        # Repository 사용 시에는 이 메서드 호출 안됨
+        if self.repository:
+            return
+
+        # 레거시 JSON 폴백
         memo_file = self._get_memo_file(chat_id)
         memo_file.write_text(
             json.dumps(memos, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
+
+    def _add_memo(self, chat_id: int, content: str) -> dict:
+        """메모 추가."""
+        if self.repository:
+            memo = self.repository.add_memo(chat_id, content)
+            return {"id": memo.id, "content": memo.content, "created_at": memo.created_at}
+
+        # 레거시
+        memos = self._load_memos(chat_id)
+        new_id = max([m["id"] for m in memos], default=0) + 1
+        memo = {
+            "id": new_id,
+            "content": content,
+            "created_at": datetime.now().isoformat(),
+        }
+        memos.append(memo)
+        self._save_memos(chat_id, memos)
+        return memo
+
+    def _delete_memo(self, chat_id: int, memo_id: int) -> bool:
+        """메모 삭제."""
+        if self.repository:
+            return self.repository.delete_memo(memo_id)
+
+        # 레거시
+        memos = self._load_memos(chat_id)
+        for i, memo in enumerate(memos):
+            if memo["id"] == memo_id:
+                memos.pop(i)
+                self._save_memos(chat_id, memos)
+                return True
+        return False

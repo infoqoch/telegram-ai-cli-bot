@@ -25,6 +25,14 @@ class Plugin(ABC):
     description: str = "Base plugin"
     usage: str = "사용법이 정의되지 않았습니다."
 
+    # Repository 인스턴스 (PluginLoader가 주입)
+    _repository: any = None
+
+    @property
+    def repository(self):
+        """Repository 인스턴스 반환."""
+        return self._repository
+
     @abstractmethod
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """이 플러그인이 메시지를 처리할 수 있는지 확인."""
@@ -36,7 +44,7 @@ class Plugin(ABC):
         pass
 
     def get_data_dir(self, base_dir: Path) -> Path:
-        """플러그인 데이터 디렉토리 반환."""
+        """플러그인 데이터 디렉토리 반환 (레거시 지원)."""
         data_dir = base_dir / ".data" / self.name
         data_dir.mkdir(parents=True, exist_ok=True)
         return data_dir
@@ -45,11 +53,18 @@ class Plugin(ABC):
 class PluginLoader:
     """안전한 플러그인 로더."""
 
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: Path, repository: any = None):
         logger.trace(f"PluginLoader.__init__() - base_dir={base_dir}")
         self.base_dir = base_dir
         self.plugins: list[Plugin] = []
         self._loaded_modules: dict[str, any] = {}
+        self._repository = repository
+
+    def set_repository(self, repository: any) -> None:
+        """Repository 설정 및 모든 플러그인에 주입."""
+        self._repository = repository
+        for plugin in self.plugins:
+            plugin._repository = repository
 
     def load_all(self) -> list[str]:
         """모든 플러그인 로드 (builtin + custom).
@@ -148,6 +163,7 @@ class PluginLoader:
                 ):
                     plugin = attr()
                     plugin._base_dir = self.base_dir
+                    plugin._repository = self._repository
                     self._loaded_modules[package_path.name] = module
                     logger.trace(f"Plugin 클래스 발견: {attr_name} -> {plugin.name}")
                     return plugin
@@ -198,6 +214,7 @@ class PluginLoader:
                 ):
                     plugin = attr()
                     plugin._base_dir = self.base_dir  # 데이터 디렉토리용
+                    plugin._repository = self._repository
                     self._loaded_modules[file_path.stem] = module
                     logger.trace(f"Plugin 인스턴스 생성: {plugin.name} (class: {attr_name})")
                     return plugin
