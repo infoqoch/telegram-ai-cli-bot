@@ -30,7 +30,7 @@ def mock_session_store():
 def mock_claude_client():
     """모의 Claude 클라이언트."""
     client = MagicMock()
-    client.chat = AsyncMock(return_value=("응답 텍스트", None))
+    client.chat = AsyncMock(return_value=("응답 텍스트", None, None))
     return client
 
 
@@ -572,6 +572,7 @@ class TestUserLock:
         update1.message.reply_text = AsyncMock()
         context1 = MagicMock()
         context1.bot.send_chat_action = AsyncMock()
+        context1.bot.send_message = AsyncMock()
 
         update2 = MagicMock()
         update2.effective_chat.id = 12345
@@ -579,6 +580,7 @@ class TestUserLock:
         update2.message.reply_text = AsyncMock()
         context2 = MagicMock()
         context2.bot.send_chat_action = AsyncMock()
+        context2.bot.send_message = AsyncMock()
 
         # 세션 없음 (새 세션 생성 케이스)
         mock_session_store.get_current_session_id.return_value = None
