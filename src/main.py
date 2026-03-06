@@ -229,12 +229,14 @@ def create_app() -> Application:
                 workspace_path = schedule.workspace_path
 
             # Call Claude
-            response = await claude_client.chat(
+            text, error, _ = await claude_client.chat(
                 message=schedule.message,
                 session_id=session_id,
                 model=schedule.model,
-                cwd=workspace_path,
+                workspace_path=workspace_path,
             )
+
+            response = text or error or "(응답 없음)"
 
             # Send response to Telegram
             if app.bot and schedule.chat_id:
@@ -287,7 +289,6 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("sl", handlers.session_list_command))  # 단축 명령어
     app.add_handler(CommandHandler("chatid", handlers.chatid_command))
     app.add_handler(CommandHandler("lock", handlers.lock_command))
-    app.add_handler(CommandHandler("jobs", handlers.jobs_command))
     app.add_handler(CommandHandler("scheduler", handlers.scheduler_command))
     app.add_handler(CommandHandler("workspace", handlers.workspace_command))
     app.add_handler(CommandHandler("ws", handlers.workspace_command))  # 단축 명령어

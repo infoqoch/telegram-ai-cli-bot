@@ -287,20 +287,6 @@ class TestLockCommand:
         assert reply
 
 
-class TestJobsCommand:
-    """작업 명령어 테스트."""
-
-    @pytest.mark.asyncio
-    async def test_jobs_shows_list(self, handlers):
-        """작업 목록 표시."""
-        update, context = create_command_update("jobs")
-
-        await handlers.jobs_command(update, context)
-
-        reply = await get_reply_text(update)
-        assert reply
-
-
 class TestSchedulerCommand:
     """스케줄러 명령어 테스트."""
 

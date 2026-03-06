@@ -300,6 +300,21 @@ class SchedulerManager:
 
         return "\n".join(lines)
 
+    def get_system_jobs_text(self) -> str:
+        """ScheduleAdapter 외 시스템 잡 텍스트 생성."""
+        system_jobs = [
+            job for job in self._jobs.values()
+            if job.owner != "ScheduleAdapter"
+        ]
+        if not system_jobs:
+            return ""
+
+        lines = ["\n\n⚙️ <b>시스템 작업</b>"]
+        for job in system_jobs:
+            lines.append(f"  {job.schedule_info} - {job.name}")
+
+        return "\n".join(lines)
+
 
 # 전역 싱글톤 인스턴스
 scheduler_manager = SchedulerManager()

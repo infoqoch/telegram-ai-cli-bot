@@ -32,28 +32,6 @@ class AdminHandlers(BaseHandler):
         logger.trace("/lock complete")
         clear_context()
 
-    async def jobs_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /jobs command - show scheduled jobs."""
-        from src.scheduler_manager import scheduler_manager
-
-        chat_id = update.effective_chat.id
-        self._setup_request_context(chat_id)
-        logger.info("/jobs command received")
-
-        text = scheduler_manager.get_status_text()
-
-        keyboard = [[
-            InlineKeyboardButton("Refresh", callback_data="jobs:refresh"),
-        ]]
-
-        await update.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
-        )
-        logger.trace("/jobs complete")
-        clear_context()
-
     async def scheduler_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /scheduler command - manage schedules."""
         chat_id = update.effective_chat.id
@@ -66,7 +44,10 @@ class AdminHandlers(BaseHandler):
             clear_context()
             return
 
+        from src.scheduler_manager import scheduler_manager
+
         text = self._schedule_manager.get_status_text(user_id)
+        text += scheduler_manager.get_system_jobs_text()
         keyboard = self._build_scheduler_keyboard(user_id)
 
         await update.message.reply_text(

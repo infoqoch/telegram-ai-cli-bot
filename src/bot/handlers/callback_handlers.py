@@ -59,11 +59,6 @@ class CallbackHandlers(BaseHandler):
             await self._handle_lock_callback(query, chat_id)
             return
 
-        # Jobs callback
-        if callback_data.startswith("jobs:"):
-            await self._handle_jobs_callback(query, chat_id)
-            return
-
         # Scheduler callback
         if callback_data.startswith("sched:"):
             await self._handle_scheduler_callback(query, chat_id, callback_data)
@@ -707,22 +702,6 @@ class CallbackHandlers(BaseHandler):
             parse_mode="HTML"
         )
 
-    async def _handle_jobs_callback(self, query, chat_id: int) -> None:
-        """Handle scheduled jobs callback - same as /jobs."""
-        from src.scheduler_manager import scheduler_manager
-
-        text = scheduler_manager.get_status_text()
-
-        keyboard = [[
-            InlineKeyboardButton("Refresh", callback_data="jobs:refresh"),
-        ]]
-
-        await query.edit_message_text(
-            text=text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
-        )
-
     async def _handle_scheduler_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle scheduler callbacks."""
         user_id = str(chat_id)
@@ -734,7 +713,10 @@ class CallbackHandlers(BaseHandler):
 
         # Refresh
         if action == "refresh":
+            from src.scheduler_manager import scheduler_manager
+
             text = self._schedule_manager.get_status_text(user_id)
+            text += scheduler_manager.get_system_jobs_text()
             keyboard = self._build_scheduler_keyboard(user_id)
             await query.edit_message_text(
                 text,
@@ -746,12 +728,15 @@ class CallbackHandlers(BaseHandler):
 
         # Toggle
         if action.startswith("toggle:"):
+            from src.scheduler_manager import scheduler_manager
+
             schedule_id = action[7:]
             new_state = self._schedule_manager.toggle(schedule_id)
             if new_state is not None:
                 status = "enabled" if new_state else "disabled"
                 await query.answer(f"{status}")
                 text = self._schedule_manager.get_status_text(user_id)
+                text += scheduler_manager.get_system_jobs_text()
                 keyboard = self._build_scheduler_keyboard(user_id)
                 await query.edit_message_text(
                     text,
@@ -764,10 +749,13 @@ class CallbackHandlers(BaseHandler):
 
         # Delete
         if action.startswith("delete:"):
+            from src.scheduler_manager import scheduler_manager
+
             schedule_id = action[7:]
             if self._schedule_manager.remove(schedule_id):
                 await query.answer("Deleted")
                 text = self._schedule_manager.get_status_text(user_id)
+                text += scheduler_manager.get_system_jobs_text()
                 keyboard = self._build_scheduler_keyboard(user_id)
                 await query.edit_message_text(
                     text,
