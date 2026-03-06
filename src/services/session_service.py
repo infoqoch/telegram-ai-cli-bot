@@ -261,3 +261,18 @@ class SessionService:
         """Store previous session ID for /back command."""
         current = self._repo.get_current_session_id(user_id)
         self._repo.update_user_current_session(user_id, current, session_id)
+
+    def get_session(self, session_id: str) -> Optional[dict]:
+        """Get session data as dict."""
+        session = self._repo.get_session(session_id)
+        if not session:
+            return None
+        return session.to_dict()
+
+    def hard_delete_session(self, session_id: str) -> bool:
+        """Hard delete session (remove from database)."""
+        return self._repo.hard_delete_session(session_id)
+
+    def restore_session(self, session_id: str) -> bool:
+        """Restore soft-deleted session."""
+        return self._repo.restore_session(session_id)

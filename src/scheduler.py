@@ -9,7 +9,7 @@ from src.scheduler_manager import scheduler_manager
 
 if TYPE_CHECKING:
     from telegram.ext import Application
-    from src.repository.adapters import SessionStoreAdapter
+    from src.services.session_service import SessionService
     from src.claude.client import ClaudeClient
 
 
@@ -27,13 +27,13 @@ class SessionScheduler:
 
     def __init__(
         self,
-        session_store: "SessionStoreAdapter",
+        session_store: "SessionService",
         claude_client: "ClaudeClient",
         admin_chat_id: Optional[int] = None,
     ):
         """
         Args:
-            session_store: 세션 저장소
+            session_store: 세션 서비스
             claude_client: Claude CLI 클라이언트
             admin_chat_id: 보고 받을 채팅 ID (None이면 보고 안함)
         """

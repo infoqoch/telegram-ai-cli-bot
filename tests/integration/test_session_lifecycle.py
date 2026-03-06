@@ -84,7 +84,7 @@ class TestSessionHistory:
 
         session_store.add_message("test-sess", "메시지", processed=True, processor="claude")
 
-        entries = session_store.get_session_history_entries("12345", "test-sess")
+        entries = session_store.get_session_history_entries("test-sess")
         assert len(entries) == 1
         assert entries[0]["processor"] == "claude"
 
@@ -109,7 +109,7 @@ class TestSessionDeletion:
         """소프트 삭제."""
         session_store.create_session("12345", "to-delete", "sonnet", "삭제할세션")
 
-        result = session_store.soft_delete_session("12345", "to-delete")
+        result = session_store.delete_session("12345", "to-delete")
         assert result is True
 
         # 삭제된 세션은 기본 목록에 안 나옴
@@ -122,7 +122,7 @@ class TestSessionDeletion:
         session_store.create_session("12345", "to-restore", "sonnet", "복구할세션")
 
         # 삭제
-        session_store.soft_delete_session("12345", "to-restore")
+        session_store.delete_session("12345", "to-restore")
 
         # 복구
         result = session_store.restore_session("to-restore")
@@ -138,7 +138,7 @@ class TestSessionDeletion:
         session_store.create_session("12345", "hard-delete", "sonnet", "완전삭제")
         session_store.add_message("hard-delete", "메시지")
 
-        result = session_store.hard_delete_session("12345", "hard-delete")
+        result = session_store.hard_delete_session("hard-delete")
         assert result is True
 
         # 완전 삭제됨 (include_deleted=True여도 안 나옴)
@@ -166,10 +166,10 @@ class TestSessionExpiration:
 
     def test_expired_session_not_returned(self, session_store):
         """만료된 세션은 반환 안 됨."""
-        # 짧은 타임아웃으로 어댑터 생성
-        from src.repository.adapters.session_adapter import SessionStoreAdapter
+        # 짧은 타임아웃으로 서비스 생성
+        from src.services.session_service import SessionService
 
-        short_timeout_store = SessionStoreAdapter(
+        short_timeout_store = SessionService(
             session_store._repo,
             session_timeout_hours=0  # 즉시 만료
         )
@@ -221,7 +221,7 @@ class TestWorkspaceSession:
             workspace_path="/Users/test/myproject"
         )
 
-        path = session_store.get_session_workspace_path("12345", "ws-sess")
+        path = session_store.get_workspace_path("ws-sess")
         assert path == "/Users/test/myproject"
 
 
@@ -232,7 +232,7 @@ class TestSessionModel:
         """세션 모델 조회."""
         session_store.create_session("12345", "opus-sess", model="opus", name="Opus 세션")
 
-        model = session_store.get_session_model("12345", "opus-sess")
+        model = session_store.get_session_model("opus-sess")
         assert model == "opus"
 
     def test_different_models(self, session_store):
@@ -245,7 +245,7 @@ class TestSessionModel:
             )
 
         for model in models:
-            stored_model = session_store.get_session_model("12345", f"{model}-sess")
+            stored_model = session_store.get_session_model(f"{model}-sess")
             assert stored_model == model
 
 

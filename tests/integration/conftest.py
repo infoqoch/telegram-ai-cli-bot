@@ -23,7 +23,7 @@ from src.bot.middleware import AuthManager
 from src.claude.client import ClaudeClient
 from src.plugins.loader import PluginLoader
 from src.repository import init_repository, get_repository, Repository
-from src.repository.adapters.session_adapter import SessionStoreAdapter
+from src.services.session_service import SessionService
 
 
 # =============================================================================
@@ -198,9 +198,9 @@ def repository(temp_db_path) -> Repository:
 
 
 @pytest.fixture
-def session_store(repository) -> SessionStoreAdapter:
-    """SessionStore 어댑터."""
-    return SessionStoreAdapter(repository, session_timeout_hours=24)
+def session_store(repository) -> SessionService:
+    """Session service."""
+    return SessionService(repository, session_timeout_hours=24)
 
 
 @pytest.fixture
