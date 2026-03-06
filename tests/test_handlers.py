@@ -395,10 +395,8 @@ class TestHandleMessage:
             # create_task 호출 확인 (watchdog + 실제 태스크)
             assert len(created_tasks) >= 1
 
-            # typing indicator 확인
-            context.bot.send_chat_action.assert_called_once_with(
-                chat_id=12345, action="typing"
-            )
+            # NOTE: send_chat_action("typing")은 타임아웃 원인으로 제거됨
+            # 더 이상 호출되지 않음
 
             # 생성된 태스크들 정리 (경고 방지)
             for task in created_tasks:

@@ -119,8 +119,8 @@ class MessageHandlers(BaseHandler):
             clear_context()
             return
 
-        logger.trace("Sending typing action")
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        # NOTE: send_chat_action("typing") 사용 금지
+        # - 텔레그램 API 지연 시 타임아웃 발생 원인
 
         logger.trace(f"Creating background task - model={model}")
         task = asyncio.create_task(
@@ -319,8 +319,8 @@ class MessageHandlers(BaseHandler):
             clear_context()
             return
 
-        logger.trace("Sending typing action")
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        # NOTE: send_chat_action("typing") 사용 금지
+        # - 텔레그램 API 지연 시 타임아웃 발생 원인
 
         logger.trace(f"Creating background task - model={model}")
         task = asyncio.create_task(

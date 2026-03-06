@@ -44,6 +44,9 @@ else:
 def legacy_compatible_method():
     """레거시 지원용"""  # 이런 메서드 작성 금지
 
+# ❌ 금지: send_chat_action 사용 금지 (타임아웃 원인)
+await context.bot.send_chat_action(chat_id=chat_id, action="typing")  # 절대 사용 금지!
+
 # ✅ 권장: 새 시스템만 사용
 def process():
     return new_system.process()  # 단순명확
