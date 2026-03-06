@@ -159,15 +159,28 @@ class MockClaude:
         error: Optional[str] = None,
     ) -> MagicMock:
         """Mock ClaudeClient 생성."""
+        from src.claude.client import ChatResponse, ChatError
+
         client = MagicMock(spec=ClaudeClient)
 
         if error:
-            client.chat = AsyncMock(return_value=("", error, None))
+            # Map error string to ChatError enum
+            error_mapping = {
+                "CLI_ERROR": ChatError.CLI_ERROR,
+                "TIMEOUT": ChatError.TIMEOUT,
+                "SESSION_NOT_FOUND": ChatError.SESSION_NOT_FOUND,
+            }
+            error_obj = error_mapping.get(error, ChatError.CLI_ERROR)
+            response = ChatResponse(text="", error=error_obj, session_id=None)
         else:
-            client.chat = AsyncMock(return_value=(default_response, None, None))
+            response = ChatResponse(text=default_response, error=None, session_id=None)
 
+        client.chat = AsyncMock(return_value=response)
         client.create_session = AsyncMock(return_value="new-session-id-12345678")
-        client.resume_session = AsyncMock(return_value=(default_response, None, None))
+
+        # resume_session also returns ChatResponse
+        resume_response = ChatResponse(text=default_response, error=None, session_id=None)
+        client.resume_session = AsyncMock(return_value=resume_response)
 
         return client
 
@@ -229,14 +242,36 @@ def plugin_loader(repository) -> PluginLoader:
 
 
 @pytest.fixture
-def handlers(
+async def queue_worker(repository, mock_claude, session_store):
+    """QueueWorker 인스턴스 (테스트용)."""
+    from src.bot.queue_worker import QueueWorker
+    from unittest.mock import MagicMock
+
+    # Mock bot
+    mock_bot = MagicMock()
+    mock_bot.send_message = AsyncMock()
+
+    worker = QueueWorker(
+        repository=repository,
+        claude_client=mock_claude,
+        session_service=session_store,
+        bot=mock_bot,
+    )
+    worker.start()
+    yield worker
+    worker.stop()
+
+
+@pytest.fixture
+async def handlers(
     session_store,
     mock_claude,
     auth_manager,
     plugin_loader,
+    queue_worker,
 ) -> BotHandlers:
     """BotHandlers 인스턴스."""
-    return BotHandlers(
+    h = BotHandlers(
         session_service=session_store,
         claude_client=mock_claude,
         auth_manager=auth_manager,
@@ -244,6 +279,8 @@ def handlers(
         allowed_chat_ids=[],  # 빈 리스트 = 모두 허용
         plugin_loader=plugin_loader,
     )
+    h.set_queue_worker(queue_worker)
+    return h
 
 
 @pytest.fixture(autouse=True)
@@ -359,5 +396,19 @@ async def wait_for_handlers(handlers, timeout: float = 2.0):
             if task_objects:
                 await asyncio.wait(task_objects, timeout=timeout)
 
+    # QueueWorker가 메시지 처리할 시간 대기
+    if hasattr(handlers, '_queue_worker') and handlers._queue_worker:
+        # Repository에서 처리 중인 메시지가 완료될 때까지 대기
+        from src.repository import get_repository
+        repo = get_repository()
+        if repo:
+            end_time = asyncio.get_event_loop().time() + timeout
+            while asyncio.get_event_loop().time() < end_time:
+                # 처리 중인 메시지가 없으면 완료
+                processing = repo.get_processing_message(12345)  # default chat_id
+                if not processing:
+                    break
+                await asyncio.sleep(0.1)
+
     # 추가로 짧은 대기
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)

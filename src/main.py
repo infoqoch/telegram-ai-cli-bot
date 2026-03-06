@@ -191,7 +191,16 @@ def create_app() -> Application:
     app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
     logger.trace("Application 빌드 완료 - concurrent_updates=True")
 
-    # QueueWorker 초기화
+    # UpdateQueueManager, UpdateDispatcher 초기화 (Telegram Update 라우팅)
+    from src.bot.update_queue import UpdateQueueManager
+    from src.bot.update_dispatcher import UpdateDispatcher
+
+    update_queue = UpdateQueueManager(max_queue_size=50, item_timeout=60)
+    update_dispatcher = UpdateDispatcher(handlers=handlers)
+    update_queue.set_dispatcher(update_dispatcher)
+    logger.info("UpdateQueueManager, UpdateDispatcher 초기화 완료")
+
+    # QueueWorker 초기화 (Repository 메시지 큐 처리 - Claude 호출)
     from src.bot.queue_worker import QueueWorker
     queue_worker = QueueWorker(
         repository=repo,
@@ -275,71 +284,62 @@ def create_app() -> Application:
     handlers.set_schedule_manager(_schedule_manager)
     handlers.set_workspace_registry(workspace_registry)
 
-    # Register handlers
-    logger.trace("핸들러 등록 시작")
-    app.add_handler(CommandHandler("start", handlers.start))
-    app.add_handler(CommandHandler("help", handlers.help_command))
-    app.add_handler(CommandHandler("auth", handlers.auth_command))
-    app.add_handler(CommandHandler("status", handlers.status_command))
-    app.add_handler(CommandHandler("new", handlers.new_session))
-    app.add_handler(CommandHandler("new_opus", handlers.new_session_opus))
-    app.add_handler(CommandHandler("new_sonnet", handlers.new_session_sonnet))
-    app.add_handler(CommandHandler("new_haiku", handlers.new_session_haiku))
-    app.add_handler(CommandHandler("new_haiku_speedy", handlers.new_session_haiku_speedy))
-    app.add_handler(CommandHandler("new_opus_smarty", handlers.new_session_opus_smarty))
-    app.add_handler(CommandHandler("new_workspace", handlers.new_workspace_session))
-    app.add_handler(CommandHandler("nw", handlers.new_workspace_session))  # 단축 명령어
-    app.add_handler(CommandHandler("model", handlers.model_command))
-    app.add_handler(CommandHandler("model_opus", handlers.model_opus_command))
-    app.add_handler(CommandHandler("model_sonnet", handlers.model_sonnet_command))
-    app.add_handler(CommandHandler("model_haiku", handlers.model_haiku_command))
-    app.add_handler(CommandHandler("session", handlers.session_command))
-    app.add_handler(CommandHandler("session_list", handlers.session_list_command))
-    app.add_handler(CommandHandler("sl", handlers.session_list_command))  # 단축 명령어
-    app.add_handler(CommandHandler("chatid", handlers.chatid_command))
-    app.add_handler(CommandHandler("lock", handlers.lock_command))
-    app.add_handler(CommandHandler("jobs", handlers.jobs_command))
-    app.add_handler(CommandHandler("scheduler", handlers.scheduler_command))
-    app.add_handler(CommandHandler("workspace", handlers.workspace_command))
-    app.add_handler(CommandHandler("ws", handlers.workspace_command))  # 단축 명령어
-    app.add_handler(CommandHandler("plugins", handlers.plugins_command))
-    app.add_handler(CommandHandler("ai", handlers.ai_command))
+    # Update 타입 분류 함수
+    from src.bot.update_queue import UpdateType
 
-    # 동적 플러그인 명령어 (예: /memo)
-    if plugin_loader.plugins:
-        plugin_names = [p.name for p in plugin_loader.plugins]
-        for name in plugin_names:
-            app.add_handler(CommandHandler(name, handlers.plugin_help_command))
-        logger.trace(f"플러그인 명령어 등록: {plugin_names}")
+    def classify_update(update: Update) -> UpdateType:
+        """Update 타입 분류."""
+        if update.callback_query:
+            return UpdateType.CALLBACK
+        if update.message:
+            if update.message.reply_to_message and update.message.reply_to_message.reply_markup:
+                # ForceReply 응답
+                return UpdateType.FORCE_REPLY
+            if update.message.text and update.message.text.startswith("/"):
+                return UpdateType.COMMAND
+            return UpdateType.MESSAGE
+        return UpdateType.MESSAGE  # fallback
 
-    app.add_handler(CommandHandler("rename", handlers.rename_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/rename_'), handlers.rename_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/r_'), handlers.rename_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/history_'), handlers.history_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/d_'), handlers.delete_session_command))
-    app.add_handler(MessageHandler(filters.Regex(r'^/delete_'), handlers.delete_session_command))
+    # 단일 update_router - 모든 update를 큐에 enqueue
+    async def update_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """모든 Update를 UpdateQueue로 라우팅."""
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not chat_id:
+            logger.warning("[UpdateRouter] No chat_id, ignoring update")
+            return
 
-    # Callback Query 핸들러 (인라인 버튼)
-    app.add_handler(CallbackQueryHandler(handlers.callback_query_handler))
+        update_type = classify_update(update)
+        logger.trace(f"[UpdateRouter] chat_id={chat_id}, type={update_type.value}")
 
-    # 알 수 없는 명령어 처리 (/ai 제외 - 이미 등록됨)
-    app.add_handler(MessageHandler(filters.COMMAND, handlers.unknown_command))
+        success = await update_queue.enqueue(
+            chat_id=chat_id,
+            update=update,
+            context=context,
+            update_type=update_type,
+        )
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
+        if not success:
+            logger.warning(f"[UpdateRouter] Enqueue failed - chat_id={chat_id}, queue full")
+            if update.message:
+                await update.message.reply_text("⚠️ 메시지 큐가 가득 찼습니다. 잠시 후 다시 시도해주세요.")
 
+    # Register single update handler
+    logger.trace("핸들러 등록 시작 - 단일 update_router")
+    app.add_handler(MessageHandler(filters.ALL, update_router), group=0)
+    app.add_handler(CallbackQueryHandler(update_router), group=0)
     app.add_error_handler(handlers.error_handler)
     logger.trace("핸들러 등록 완료")
 
-    # 앱 시작 시 큐 워커 시작
+    # 앱 시작 시 큐 매니저 및 워커 시작
     async def post_init(application):
+        update_queue.start()
         queue_worker.start()
-        logger.info("QueueWorker 시작됨")
+        logger.info("UpdateQueueManager, QueueWorker 시작됨")
 
     async def post_shutdown(application):
+        update_queue.stop()
         queue_worker.stop()
-        logger.info("QueueWorker 중지됨")
+        logger.info("UpdateQueueManager, QueueWorker 중지됨")
 
     app.post_init = post_init
     app.post_shutdown = post_shutdown
