@@ -62,6 +62,8 @@ case "$1" in
     # - INFO: 일반 운영 (최소 로그)
     # - DEBUG: 상세 로그 (기본값 - 문제 추적용)
     # - TRACE: 최상세 로그 (외부 라이브러리 포함)
+    # CLAUDECODE 환경변수 제거 (Claude Code 세션 내에서 실행 시 nested session 방지)
+    unset CLAUDECODE
     LOG_LEVEL="${LOG_LEVEL:-DEBUG}" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
@@ -126,6 +128,7 @@ case "$1" in
     fi
     # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
     source venv/bin/activate
+    unset CLAUDECODE
     LOG_LEVEL="TRACE" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
@@ -149,6 +152,7 @@ case "$1" in
     fi
     # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
     source venv/bin/activate
+    unset CLAUDECODE
     LOG_LEVEL="DEBUG" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
