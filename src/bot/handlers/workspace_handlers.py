@@ -146,7 +146,7 @@ class WorkspaceHandlers(BaseHandler):
 
             self._workspace_registry.mark_used(ws_id)
 
-            session_id = await self.claude.create_session()
+            session_id = await self.claude.create_session(workspace_path=ws.path)
             if not session_id:
                 await query.edit_message_text("Session creation failed")
                 return
