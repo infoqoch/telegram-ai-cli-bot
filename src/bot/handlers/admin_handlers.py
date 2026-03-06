@@ -223,7 +223,7 @@ class AdminHandlers(BaseHandler):
                 elapsed = time.time() - info.started_at
                 elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{int(elapsed)}s"
 
-                session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
+                session_name = self.sessions.get_session_name(info.session_id) or info.session_id[:8]
 
                 msg_preview = info.message[:MAX_LOCK_STATUS_PREVIEW] + "..." if len(info.message) > MAX_LOCK_STATUS_PREVIEW else info.message
                 msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")

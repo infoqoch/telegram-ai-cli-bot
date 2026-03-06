@@ -19,7 +19,7 @@ from ..constants import (
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
-    from src.repository.adapters import SessionStoreAdapter
+    from src.services.session_service import SessionService
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
 
@@ -49,7 +49,7 @@ class BaseHandler:
 
     def __init__(
         self,
-        session_store: "SessionStoreAdapter",
+        session_service: "SessionService",
         claude_client: "ClaudeClient",
         auth_manager: "AuthManager",
         require_auth: bool,
@@ -59,7 +59,7 @@ class BaseHandler:
         plugin_loader: "PluginLoader" = None,
     ):
         logger.trace("BaseHandler.__init__() start")
-        self.sessions = session_store
+        self.sessions = session_service
         self.claude = claude_client
         self.auth = auth_manager
         self.require_auth = require_auth
@@ -288,8 +288,8 @@ class BaseHandler:
         user_id = str(chat_id)
         logger.trace("Getting current session")
         session_id = self.sessions.get_current_session_id(user_id)
-        session_info = self.sessions.get_session_info(user_id, session_id)
-        history_count = self.sessions.get_history_count(user_id, session_id) if session_id else 0
+        session_info = self.sessions.get_session_info(session_id)
+        history_count = self.sessions.get_history_count(session_id) if session_id else 0
         logger.trace(f"Session info - session_id={session_id}, info={session_info}, history={history_count}")
 
         if self.require_auth:

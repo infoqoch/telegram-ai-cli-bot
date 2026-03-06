@@ -155,8 +155,8 @@ class WorkspaceHandlers(BaseHandler):
             self.sessions.create_session(
                 user_id,
                 session_id,
-                session_name,
                 model=model,
+                name=session_name,
                 workspace_path=ws.path,
             )
 

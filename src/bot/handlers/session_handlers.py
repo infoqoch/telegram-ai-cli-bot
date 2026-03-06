@@ -80,7 +80,7 @@ class SessionHandlers(BaseHandler):
         logger.info(f"새 세션 생성됨: {session_id[:8]}, model={model}")
 
         logger.trace("세션 저장 중")
-        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model, name=session_name)
+        self.sessions.create_session(user_id, session_id, model=model, name=session_name, first_message="(새 세션)")
 
         name_line = f"\n- 이름: {session_name}" if session_name else ""
         await update.message.reply_text(
@@ -176,8 +176,8 @@ class SessionHandlers(BaseHandler):
             return
 
         self.sessions.create_session(
-            user_id, session_id, f"(workspace: {workspace_name})",
-            model=model, name=display_name, workspace_path=expanded_path
+            user_id, session_id, model=model, name=display_name,
+            workspace_path=expanded_path, first_message=f"(workspace: {workspace_name})"
         )
 
         model_emoji = {"opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku"}.get(model or "sonnet", "Sonnet")
@@ -241,7 +241,7 @@ class SessionHandlers(BaseHandler):
             clear_context()
             return
 
-        current_model = self.sessions.get_session_model(user_id, session_id)
+        current_model = self.sessions.get_session_model(session_id)
 
         if not context.args:
             model_emoji = get_model_emoji(current_model)
@@ -272,7 +272,7 @@ class SessionHandlers(BaseHandler):
             clear_context()
             return
 
-        if self.sessions.set_session_model(user_id, session_id, new_model):
+        if self.sessions.update_session_model(session_id, new_model):
             logger.info(f"모델 변경됨: {current_model} -> {new_model}, session={session_id[:8]}")
 
             model_emoji = get_model_emoji(new_model)
@@ -320,11 +320,11 @@ class SessionHandlers(BaseHandler):
             return
 
         logger.trace(f"Getting session history - session={session_id[:8]}")
-        history_entries = self.sessions.get_session_history_entries(user_id, session_id)
+        history_entries = self.sessions.get_session_history_entries(session_id)
         count = len(history_entries)
-        model = self.sessions.get_session_model(user_id, session_id)
+        model = self.sessions.get_session_model(session_id)
         model_emoji = get_model_emoji(model)
-        session_name = self.sessions.get_session_name(user_id, session_id)
+        session_name = self.sessions.get_session_name(session_id)
         logger.trace(f"History count: {count}, model: {model}, name: {session_name or '(none)'}")
 
         recent = history_entries[-10:]
@@ -512,7 +512,7 @@ class SessionHandlers(BaseHandler):
                     clear_context()
                     return
 
-                if self.sessions.rename_session(user_id, session_id, new_name):
+                if self.sessions.rename_session(session_id, new_name):
                     logger.info(f"Session renamed: {session_id[:8]} -> {new_name}")
                     await update.message.reply_text(
                         f"Session renamed!\n\n"
@@ -548,7 +548,7 @@ class SessionHandlers(BaseHandler):
         elif context.args:
             new_name = " ".join(context.args)
         else:
-            current_name = self.sessions.get_session_name(user_id, session_id)
+            current_name = self.sessions.get_session_name(session_id)
             logger.trace(f"현재 이름: {current_name or '(없음)'}")
             await update.message.reply_text(
                 f"<b>세션 이름 변경</b>\n\n"
@@ -566,7 +566,7 @@ class SessionHandlers(BaseHandler):
             clear_context()
             return
 
-        if self.sessions.rename_session(user_id, session_id, new_name):
+        if self.sessions.rename_session(session_id, new_name):
             await update.message.reply_text(
                 f"✅ 세션 이름 변경됨!\n\n"
                 f"- 세션: <code>{session_id[:8]}</code>\n"
@@ -661,7 +661,7 @@ class SessionHandlers(BaseHandler):
             return
 
         logger.trace(f"히스토리 조회 - session={target_info['full_session_id'][:8]}")
-        history = self.sessions.get_session_history(user_id, target_info["full_session_id"])
+        history = self.sessions.get_session_history(target_info["full_session_id"])
         if not history:
             logger.trace("히스토리 없음")
             await update.message.reply_text("📭 히스토리가 없습니다.")
@@ -715,7 +715,7 @@ class SessionHandlers(BaseHandler):
         self.sessions.set_current(user_id, prev_session_id)
         self.sessions.set_previous_session_id(user_id, None)
 
-        name = self.sessions.get_session_name(user_id, prev_session_id)
+        name = self.sessions.get_session_name(prev_session_id)
         name_display = f" ({name})" if name else ""
 
         await update.message.reply_text(

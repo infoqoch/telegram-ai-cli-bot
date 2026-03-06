@@ -16,7 +16,7 @@ from src.bot.constants import MAX_MESSAGE_LENGTH
 
 
 @pytest.fixture
-def mock_session_store():
+def mock_session_service():
     """모의 세션 저장소."""
     store = MagicMock()
     store.get_current_session_info.return_value = "abc12345"
@@ -44,10 +44,10 @@ def mock_auth_manager():
 
 
 @pytest.fixture
-def handlers(mock_session_store, mock_claude_client, mock_auth_manager):
+def handlers(mock_session_service, mock_claude_client, mock_auth_manager):
     """테스트용 핸들러 생성."""
     return BotHandlers(
-        session_store=mock_session_store,
+        session_service=mock_session_service,
         claude_client=mock_claude_client,
         auth_manager=mock_auth_manager,
         require_auth=True,
@@ -66,10 +66,10 @@ class TestBotHandlers:
         """허용되지 않은 채팅 ID 확인."""
         assert handlers._is_authorized(99999) is False
 
-    def test_is_authorized_empty_list(self, mock_session_store, mock_claude_client, mock_auth_manager):
+    def test_is_authorized_empty_list(self, mock_session_service, mock_claude_client, mock_auth_manager):
         """빈 허용 목록은 모두 허용."""
         handlers = BotHandlers(
-            session_store=mock_session_store,
+            session_service=mock_session_service,
             claude_client=mock_claude_client,
             auth_manager=mock_auth_manager,
             require_auth=True,
@@ -85,10 +85,10 @@ class TestBotHandlers:
         mock_auth_manager.is_authenticated.return_value = False
         assert handlers._is_authenticated("user123") is False
 
-    def test_is_authenticated_not_required(self, mock_session_store, mock_claude_client, mock_auth_manager):
+    def test_is_authenticated_not_required(self, mock_session_service, mock_claude_client, mock_auth_manager):
         """인증 불필요 시 항상 True."""
         handlers = BotHandlers(
-            session_store=mock_session_store,
+            session_service=mock_session_service,
             claude_client=mock_claude_client,
             auth_manager=mock_auth_manager,
             require_auth=False,
@@ -154,16 +154,16 @@ class TestProcessClaudeRequest:
 
     @pytest.mark.asyncio
     async def test_process_claude_request_success(
-        self, handlers, mock_claude_client, mock_session_store
+        self, handlers, mock_claude_client, mock_session_service
     ):
         """Claude 호출 성공 및 응답 전송."""
         bot = MagicMock()
         bot.send_message = AsyncMock()
 
         mock_claude_client.chat = AsyncMock(return_value=("응답 내용", None, None))
-        mock_session_store.get_session_info.return_value = "abc12345"
-        mock_session_store.get_history_count.return_value = 3
-        mock_session_store.get_session_workspace_path.return_value = ""  # 일반 세션
+        mock_session_service.get_session_info.return_value = "abc12345"
+        mock_session_service.get_history_count.return_value = 3
+        mock_session_service.get_workspace_path.return_value = ""  # 일반 세션
 
         await handlers._process_claude_request(
             bot=bot,
@@ -179,8 +179,8 @@ class TestProcessClaudeRequest:
         mock_claude_client.chat.assert_called_once_with("테스트 질문", "session-123", model="sonnet", workspace_path=None)
 
         # 기존 세션이므로 메시지 추가 확인
-        mock_session_store.add_message.assert_called_once_with(
-            "user1", "session-123", "테스트 질문", processor="claude"
+        mock_session_service.add_message.assert_called_once_with(
+            "session-123", "테스트 질문", processor="claude"
         )
 
         # 응답 전송 확인
@@ -235,7 +235,7 @@ class TestProcessClaudeRequest:
 
     @pytest.mark.asyncio
     async def test_process_claude_request_adds_message_existing_session(
-        self, handlers, mock_session_store, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client
     ):
         """기존 세션에서는 메시지 추가."""
         bot = MagicMock()
@@ -252,13 +252,13 @@ class TestProcessClaudeRequest:
             is_new_session=False,
         )
 
-        mock_session_store.add_message.assert_called_once_with(
-            "user1", "session-123", "질문", processor="claude"
+        mock_session_service.add_message.assert_called_once_with(
+            "session-123", "질문", processor="claude"
         )
 
     @pytest.mark.asyncio
     async def test_process_claude_request_skips_message_new_session(
-        self, handlers, mock_session_store, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client
     ):
         """새 세션에서는 메시지 추가 스킵."""
         bot = MagicMock()
@@ -276,7 +276,7 @@ class TestProcessClaudeRequest:
         )
 
         # 새 세션이므로 add_message 호출되지 않음
-        mock_session_store.add_message.assert_not_called()
+        mock_session_service.add_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_claude_request_exception_handling(
@@ -368,7 +368,7 @@ class TestHandleMessage:
     """handle_message 메서드 테스트 (Fire-and-Forget 패턴)."""
 
     @pytest.mark.asyncio
-    async def test_handle_message_creates_background_task(self, handlers, mock_session_store):
+    async def test_handle_message_creates_background_task(self, handlers, mock_session_service):
         """백그라운드 태스크 생성 확인."""
         update = MagicMock()
         update.effective_chat.id = 12345
@@ -376,8 +376,9 @@ class TestHandleMessage:
         update.message.reply_text = AsyncMock()
         context = MagicMock()
         context.bot.send_chat_action = AsyncMock()
+        context.bot.send_message = AsyncMock()
 
-        mock_session_store.get_current_session_id.return_value = "existing-session"
+        mock_session_service.get_current_session_id.return_value = "existing-session"
 
         # 백그라운드 태스크를 실제로 실행 (경고 방지)
         original_create_task = asyncio.create_task
@@ -409,15 +410,16 @@ class TestHandleMessage:
                     pass
 
     @pytest.mark.asyncio
-    async def test_handle_message_returns_immediately(self, handlers, mock_session_store):
+    async def test_handle_message_returns_immediately(self, handlers, mock_session_service):
         """핸들러가 Claude 응답을 기다리지 않고 즉시 리턴."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "질문"
         context = MagicMock()
         context.bot.send_chat_action = AsyncMock()
+        context.bot.send_message = AsyncMock()
 
-        mock_session_store.get_current_session_id.return_value = "session-123"
+        mock_session_service.get_current_session_id.return_value = "session-123"
 
         # 백그라운드 태스크를 실제로 실행 (경고 방지)
         original_create_task = asyncio.create_task
@@ -444,15 +446,16 @@ class TestHandleMessage:
                     pass
 
     @pytest.mark.asyncio
-    async def test_handle_message_truncates_long_message(self, handlers, mock_session_store):
+    async def test_handle_message_truncates_long_message(self, handlers, mock_session_service):
         """긴 메시지는 MAX_MESSAGE_LENGTH로 자름."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "A" * 5000  # MAX_MESSAGE_LENGTH(4096) 초과
         context = MagicMock()
         context.bot.send_chat_action = AsyncMock()
+        context.bot.send_message = AsyncMock()
 
-        mock_session_store.get_current_session_id.return_value = "session-123"
+        mock_session_service.get_current_session_id.return_value = "session-123"
 
         # 백그라운드 태스크를 실제로 실행 (경고 방지)
         original_create_task = asyncio.create_task
@@ -477,7 +480,7 @@ class TestHandleMessage:
 
     @pytest.mark.asyncio
     async def test_handle_message_new_session_creation(
-        self, handlers, mock_session_store, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client
     ):
         """세션이 없을 때 새 세션 생성."""
         update = MagicMock()
@@ -486,9 +489,10 @@ class TestHandleMessage:
         update.message.reply_text = AsyncMock()
         context = MagicMock()
         context.bot.send_chat_action = AsyncMock()
+        context.bot.send_message = AsyncMock()
 
         # 세션 없음
-        mock_session_store.get_current_session_id.return_value = None
+        mock_session_service.get_current_session_id.return_value = None
         mock_claude_client.create_session = AsyncMock(return_value="new-session-123")
 
         # 백그라운드 태스크를 실제로 실행 (경고 방지)
@@ -505,8 +509,8 @@ class TestHandleMessage:
 
             # 새 세션 생성 확인
             mock_claude_client.create_session.assert_called_once()
-            mock_session_store.create_session.assert_called_once_with(
-                "12345", "new-session-123", "첫 질문"
+            mock_session_service.create_session.assert_called_once_with(
+                "12345", "new-session-123", first_message="첫 질문"
             )
 
             # 생성된 태스크들 정리 (경고 방지)
@@ -520,7 +524,7 @@ class TestHandleMessage:
 
     @pytest.mark.asyncio
     async def test_handle_message_uses_existing_session(
-        self, handlers, mock_session_store, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client
     ):
         """기존 세션이 있으면 새로 생성하지 않음."""
         update = MagicMock()
@@ -528,9 +532,10 @@ class TestHandleMessage:
         update.message.text = "질문"
         context = MagicMock()
         context.bot.send_chat_action = AsyncMock()
+        context.bot.send_message = AsyncMock()
 
         # 기존 세션 존재
-        mock_session_store.get_current_session_id.return_value = "existing-session"
+        mock_session_service.get_current_session_id.return_value = "existing-session"
 
         # 백그라운드 태스크를 실제로 실행 (경고 방지)
         original_create_task = asyncio.create_task
@@ -546,7 +551,7 @@ class TestHandleMessage:
 
             # 새 세션 생성하지 않음
             mock_claude_client.create_session.assert_not_called()
-            mock_session_store.create_session.assert_not_called()
+            mock_session_service.create_session.assert_not_called()
 
             # 생성된 태스크들 정리 (경고 방지)
             for task in created_tasks:
@@ -563,7 +568,7 @@ class TestUserLock:
 
     @pytest.mark.asyncio
     async def test_user_lock_prevents_race_condition(
-        self, handlers, mock_session_store, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client
     ):
         """세션 생성 중 두 번째 메시지는 블로킹됨."""
         update1 = MagicMock()
@@ -583,7 +588,7 @@ class TestUserLock:
         context2.bot.send_message = AsyncMock()
 
         # 세션 없음 (새 세션 생성 케이스)
-        mock_session_store.get_current_session_id.return_value = None
+        mock_session_service.get_current_session_id.return_value = None
         mock_claude_client.create_session = AsyncMock(return_value="new-session-123")
 
         call_order = []

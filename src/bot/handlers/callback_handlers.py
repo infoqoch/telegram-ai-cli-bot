@@ -120,7 +120,7 @@ class CallbackHandlers(BaseHandler):
 
         session_name = name.strip()[:50] if name.strip() else ""
 
-        self.sessions.create_session(user_id, session_id, "(new session)", model=model_name, name=session_name)
+        self.sessions.create_session(user_id, session_id, model=model_name, name=session_name, first_message="(new session)")
         short_id = session_id[:8]
 
         model_emoji = get_model_emoji(model_name)
@@ -454,7 +454,7 @@ class CallbackHandlers(BaseHandler):
             await query.edit_message_text("❌ 세션 생성 실패")
             return
 
-        self.sessions.create_session(user_id, session_id, "(new session)", model=model_name, name=name)
+        self.sessions.create_session(user_id, session_id, model=model_name, name=name, first_message="(new session)")
         short_id = session_id[:8]
 
         model_emoji = get_model_emoji(model_name)
@@ -587,7 +587,7 @@ class CallbackHandlers(BaseHandler):
         full_session_id = session.get("full_session_id", session_id)
         short_id = full_session_id[:8]
         name = session.get("name") or f"Session {short_id}"
-        history = self.sessions.get_session_history_entries(user_id, full_session_id)
+        history = self.sessions.get_session_history_entries(full_session_id)
 
         lines = [f"<b>{name}</b> History\n"]
 
@@ -670,7 +670,7 @@ class CallbackHandlers(BaseHandler):
 
         full_session_id = session.get("full_session_id", session_id)
 
-        self.sessions.set_session_model(user_id, full_session_id, model)
+        self.sessions.update_session_model(full_session_id, model)
 
         short_id = full_session_id[:8]
         name = session.get("name") or f"Session {short_id}"
@@ -1029,7 +1029,7 @@ class CallbackHandlers(BaseHandler):
                 await query.message.reply_text("❌ 세션 생성 실패. Please try again.")
                 return
 
-            self.sessions.create_session(user_id, new_session_id, message, model=model)
+            self.sessions.create_session(user_id, new_session_id, model=model, first_message=message)
             logger.info(f"New session created: {new_session_id[:8]}, model={model}")
 
             await self._process_alternative_session_request(
@@ -1111,7 +1111,7 @@ class CallbackHandlers(BaseHandler):
                         )
                         return
 
-            session_info = self.sessions.get_session_info(user_id, target_session_id)
+            session_info = self.sessions.get_session_info(target_session_id)
             model_emoji = {"opus": "[O]", "sonnet": "[S]", "haiku": "[H]"}.get(model, "[S]")
 
             self._temp_pending = None
@@ -1178,7 +1178,7 @@ class CallbackHandlers(BaseHandler):
                 await query.message.reply_text("❌ 세션 생성 실패. Please try again.")
                 return
 
-            self.sessions.create_session(user_id, new_session_id, message, model=new_model)
+            self.sessions.create_session(user_id, new_session_id, model=new_model, first_message=message)
 
             asyncio.create_task(
                 self._process_alternative_session_request(

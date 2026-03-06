@@ -34,10 +34,10 @@ from src.scheduler_manager import scheduler_manager
 from src.repository import init_repository, get_repository, shutdown_repository
 from src.repository.migrations import migrate_all
 from src.repository.adapters import (
-    SessionStoreAdapter,
     ScheduleManagerAdapter,
     WorkspaceRegistryAdapter,
 )
+from src.services.session_service import SessionService
 
 # Todo 스케줄러 (옵션)
 _todo_scheduler = None
@@ -49,7 +49,7 @@ _session_scheduler = None
 _schedule_manager = None
 
 
-def _setup_session_scheduler(app, session_store, claude_client, settings) -> None:
+def _setup_session_scheduler(app, session_service, claude_client, settings) -> None:
     """세션 스케줄러 설정 (매니저 세션 자동 compact)."""
     global _session_scheduler
 
@@ -57,7 +57,7 @@ def _setup_session_scheduler(app, session_store, claude_client, settings) -> Non
         from src.scheduler import SessionScheduler
 
         _session_scheduler = SessionScheduler(
-            session_store=session_store,
+            session_store=session_service,
             claude_client=claude_client,
             admin_chat_id=settings.admin_chat_id,
         )
@@ -140,13 +140,13 @@ def create_app() -> Application:
     except Exception as e:
         logger.warning(f"마이그레이션 실패 (기존 JSON 없을 수 있음): {e}")
 
-    # Initialize adapters for backward compatibility
-    logger.trace("SessionStore 어댑터 초기화 시작")
-    session_store = SessionStoreAdapter(
+    # Initialize SessionService
+    logger.trace("SessionService 초기화 시작")
+    session_service = SessionService(
         repo=repo,
         session_timeout_hours=settings.session_timeout_hours,
     )
-    logger.trace("SessionStore 어댑터 초기화 완료")
+    logger.trace("SessionService 초기화 완료")
 
     logger.trace("ClaudeClient 초기화 시작")
     claude_client = ClaudeClient(
@@ -175,7 +175,7 @@ def create_app() -> Application:
 
     logger.trace("BotHandlers 초기화 시작")
     handlers = BotHandlers(
-        session_store=session_store,
+        session_service=session_service,
         claude_client=claude_client,
         auth_manager=auth_manager,
         require_auth=settings.require_auth,
@@ -199,7 +199,7 @@ def create_app() -> Application:
     _setup_todo_scheduler(app, settings)
 
     # 세션 스케줄러 설정 (매니저 세션 compact)
-    _setup_session_scheduler(app, session_store, claude_client, settings)
+    _setup_session_scheduler(app, session_service, claude_client, settings)
 
     # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
     _setup_hourly_ping_scheduler(app, settings, plugin_loader)

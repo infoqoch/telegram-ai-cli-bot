@@ -79,15 +79,15 @@ class MessageHandlers(BaseHandler):
                         return
 
                     logger.trace(f"Saving session - session_id={session_id[:8]}")
-                    self.sessions.create_session(user_id, session_id, message)
+                    self.sessions.create_session(user_id, session_id, first_message=message)
                     is_new_session = True
                 finally:
                     self._creating_sessions.discard(user_id)
             else:
                 is_new_session = False
 
-        model = self.sessions.get_session_model(user_id, session_id)
-        workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
+        model = self.sessions.get_session_model(session_id)
+        workspace_path = self.sessions.get_workspace_path(session_id)
 
         set_session_id(session_id)
         logger.info(f"Session decided - model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
@@ -216,7 +216,7 @@ class MessageHandlers(BaseHandler):
                     logger.debug(f"[PLUGIN] response length={len(result.response) if result.response else 0}")
                     session_id = self.sessions.get_current_session_id(user_id)
                     if session_id:
-                        self.sessions.add_message(user_id, session_id, message, processor=f"plugin:{plugin_name}")
+                        self.sessions.add_message(session_id, message, processor=f"plugin:{plugin_name}")
                     if result.response:
                         logger.debug(f"[PLUGIN] Sending response")
                         try:
@@ -278,15 +278,15 @@ class MessageHandlers(BaseHandler):
                         return
 
                     logger.trace(f"Saving session - session_id={session_id[:8]}")
-                    self.sessions.create_session(user_id, session_id, message)
+                    self.sessions.create_session(user_id, session_id, first_message=message)
                     is_new_session = True
                 finally:
                     self._creating_sessions.discard(user_id)
             else:
                 is_new_session = False
 
-        model = self.sessions.get_session_model(user_id, session_id)
-        workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
+        model = self.sessions.get_session_model(session_id)
+        workspace_path = self.sessions.get_workspace_path(session_id)
 
         set_session_id(session_id)
 
@@ -358,7 +358,7 @@ class MessageHandlers(BaseHandler):
         locked = await session_queue_manager.try_lock(session_id, user_id, message)
         if not locked:
             logger.warning(f"Session lock acquisition failed - session={session_id[:8]}")
-            workspace_path = self.sessions.get_session_workspace_path(user_id, session_id) or ""
+            workspace_path = self.sessions.get_workspace_path(session_id) or ""
             await self._show_session_selection_ui(
                 update=None,
                 user_id=user_id,
@@ -429,7 +429,7 @@ class MessageHandlers(BaseHandler):
         logger.info(f"===== User Question (END) =====")
 
         try:
-            workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
+            workspace_path = self.sessions.get_workspace_path(session_id)
             if workspace_path:
                 logger.trace(f"Workspace session - workspace_path={workspace_path}")
 
@@ -476,7 +476,7 @@ class MessageHandlers(BaseHandler):
 
             if not is_new_session:
                 logger.trace("Adding message to session history")
-                self.sessions.add_message(user_id, session_id, message, processor="claude")
+                self.sessions.add_message(session_id, message, processor="claude")
 
             if error == "TIMEOUT":
                 logger.warning("Claude 타임아웃")
@@ -496,9 +496,9 @@ class MessageHandlers(BaseHandler):
                 logger.error(f"  workspace_path: {workspace_path}")
                 response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
 
-            session_info = self.sessions.get_session_info(user_id, session_id)
+            session_info = self.sessions.get_session_info(session_id)
             session_short_id = session_id[:8]
-            history_count = self.sessions.get_history_count(user_id, session_id)
+            history_count = self.sessions.get_history_count(session_id)
 
             question_preview = truncate_message(message, 30)
 
@@ -573,7 +573,7 @@ class MessageHandlers(BaseHandler):
             if sid == current_session_id:
                 continue
             if not session_queue_manager.is_locked(sid):
-                history = self.sessions.get_session_history(user_id, sid)
+                history = self.sessions.get_session_history(sid)
                 recent = history[-2:] if history else []
                 available_sessions.append({
                     **s,
@@ -668,7 +668,7 @@ class MessageHandlers(BaseHandler):
 
         logger.info(f"Queue message processing start - session={queued_msg.session_id[:8]}, user={queued_msg.user_id}")
 
-        session_info = self.sessions.get_session_info(queued_msg.user_id, queued_msg.session_id)
+        session_info = self.sessions.get_session_info(queued_msg.session_id)
         model_emoji = {"opus": "[O]", "sonnet": "[S]", "haiku": "[H]"}.get(queued_msg.model, "[S]")
         try:
             await bot.send_message(

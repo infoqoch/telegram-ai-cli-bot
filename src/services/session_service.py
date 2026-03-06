@@ -219,3 +219,43 @@ class SessionService:
             lines.append(f"{emoji} {model_badge} <b>{display_name}</b> ({msg_count}개)")
 
         return "\n".join(lines)
+
+    def get_session_name(self, session_id: str) -> str:
+        """Get session name."""
+        if not session_id:
+            return ""
+        session = self._repo.get_session(session_id)
+        if not session:
+            return ""
+        return session.name or ""
+
+    def get_session_history_entries(
+        self,
+        session_id: str,
+        limit: Optional[int] = None
+    ) -> list[dict]:
+        """Get session history as list of dicts."""
+        entries = self._repo.get_session_history_entries(session_id, limit)
+        return [
+            {
+                "message": e.message,
+                "timestamp": e.timestamp,
+                "processed": e.processed,
+                "processor": e.processor,
+            }
+            for e in entries
+        ]
+
+    def rename_session(self, session_id: str, new_name: str) -> bool:
+        """Rename a session."""
+        return self._repo.update_session_name(session_id, new_name)
+
+    def set_current(self, user_id: str, session_id: Optional[str]) -> None:
+        """Set current session ID."""
+        previous = self._repo.get_current_session_id(user_id)
+        self._repo.update_user_current_session(user_id, session_id, previous)
+
+    def set_previous_session_id(self, user_id: str, session_id: Optional[str]) -> None:
+        """Store previous session ID for /back command."""
+        current = self._repo.get_current_session_id(user_id)
+        self._repo.update_user_current_session(user_id, current, session_id)

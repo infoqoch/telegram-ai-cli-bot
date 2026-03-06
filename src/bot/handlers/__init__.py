@@ -11,7 +11,7 @@ from .callback_handlers import CallbackHandlers
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
-    from src.repository.adapters import SessionStoreAdapter
+    from src.services.session_service import SessionService
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
 
@@ -38,7 +38,7 @@ class BotHandlers(
 
     def __init__(
         self,
-        session_store: "SessionStoreAdapter",
+        session_service: "SessionService",
         claude_client: "ClaudeClient",
         auth_manager: "AuthManager",
         require_auth: bool,
@@ -49,7 +49,7 @@ class BotHandlers(
     ):
         # Initialize base class (all mixins share same base)
         super().__init__(
-            session_store=session_store,
+            session_service=session_service,
             claude_client=claude_client,
             auth_manager=auth_manager,
             require_auth=require_auth,
