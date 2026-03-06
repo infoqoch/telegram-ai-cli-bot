@@ -784,7 +784,7 @@ class CallbackHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}:00",
+                    f"{hour:02d}시",
                     callback_data=f"sched:time:claude:_:{hour}"
                 ))
                 if len(row) == 4:
@@ -855,7 +855,7 @@ class CallbackHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}:00",
+                    f"{hour:02d}시",
                     callback_data=f"sched:time:workspace:{path_idx}:{hour}"
                 ))
                 if len(row) == 4:
@@ -878,7 +878,7 @@ class CallbackHandlers(BaseHandler):
             await query.answer()
             return
 
-        # Time selected - model selection
+        # Time (hour) selected - minute selection
         if action.startswith("time:"):
             parts = action[5:].split(":")
             if len(parts) != 3:
@@ -890,7 +890,6 @@ class CallbackHandlers(BaseHandler):
             pending = self._pending_schedule_input.get(user_id, {})
             pending["type"] = schedule_type
             pending["hour"] = hour
-            pending["minute"] = 0
 
             if schedule_type == "workspace" and path_idx != "_":
                 paths = pending.get("paths", [])
@@ -901,6 +900,46 @@ class CallbackHandlers(BaseHandler):
 
             self._pending_schedule_input[user_id] = pending
 
+            # 분 선택 버튼 (00~55, 5분 단위)
+            buttons = []
+            row = []
+            for minute in range(0, 60, 5):
+                row.append(InlineKeyboardButton(
+                    f":{minute:02d}",
+                    callback_data=f"sched:minute:{minute}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("Cancel", callback_data="sched:refresh")
+            ])
+
+            type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
+            path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
+
+            await query.edit_message_text(
+                f"<b>Add {type_label} Schedule</b>\n\n"
+                f"Hour: <b>{hour:02d}시</b>{path_info}\n\n"
+                f"Select minute:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # Minute selected - model selection
+        if action.startswith("minute:"):
+            minute = int(action[7:])
+
+            pending = self._pending_schedule_input.get(user_id, {})
+            pending["minute"] = minute
+            self._pending_schedule_input[user_id] = pending
+
+            hour = pending.get("hour", 9)
+
             buttons = [
                 [
                     InlineKeyboardButton("Opus", callback_data="sched:model:opus"),
@@ -910,12 +949,13 @@ class CallbackHandlers(BaseHandler):
                 [InlineKeyboardButton("Cancel", callback_data="sched:refresh")],
             ]
 
+            schedule_type = pending.get("type", "claude")
             type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
             path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
                 f"<b>Add {type_label} Schedule</b>\n\n"
-                f"Time: <b>{hour:02d}:00</b>{path_info}\n\n"
+                f"Time: <b>{hour:02d}:{minute:02d}</b>{path_info}\n\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -932,12 +972,13 @@ class CallbackHandlers(BaseHandler):
 
             schedule_type = pending.get("type", "claude")
             hour = pending.get("hour", 9)
+            minute = pending.get("minute", 0)
             type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
             path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
                 f"<b>Add {type_label} Schedule</b>\n\n"
-                f"Time: <b>{hour:02d}:00</b>\n"
+                f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
                 f"Model: <b>{model}</b>{path_info}\n\n"
                 f"Enter scheduled message below:",
                 parse_mode="HTML"

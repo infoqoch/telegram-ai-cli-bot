@@ -184,7 +184,7 @@ class WorkspaceHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}:00",
+                    f"{hour:02d}시",
                     callback_data=f"ws:sched_time:{ws_id}:{hour}"
                 ))
                 if len(row) == 4:
@@ -206,7 +206,7 @@ class WorkspaceHandlers(BaseHandler):
             await query.answer()
             return
 
-        # Schedule time selected - model selection
+        # Schedule time (hour) selected - minute selection
         if action.startswith("sched_time:"):
             parts = action.split(":")
             ws_id, hour = parts[1], int(parts[2])
@@ -218,8 +218,49 @@ class WorkspaceHandlers(BaseHandler):
             self._pending_workspace_input[user_id] = {
                 "ws_id": ws_id,
                 "hour": hour,
-                "minute": 0,
             }
+
+            # 분 선택 버튼 (00~55, 5분 단위)
+            buttons = []
+            row = []
+            for minute in range(0, 60, 5):
+                row.append(InlineKeyboardButton(
+                    f":{minute:02d}",
+                    callback_data=f"ws:sched_minute:{ws_id}:{minute}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("Back", callback_data=f"ws:schedule:{ws_id}")
+            ])
+
+            await query.edit_message_text(
+                f"<b>{ws.name}</b> - Schedule Registration\n\n"
+                f"Hour: <b>{hour:02d}시</b>\n\n"
+                f"Select minute:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # Schedule minute selected - model selection
+        if action.startswith("sched_minute:"):
+            parts = action.split(":")
+            ws_id, minute = parts[1], int(parts[2])
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("Workspace not found")
+                return
+
+            pending = self._pending_workspace_input.get(user_id, {})
+            pending["minute"] = minute
+            self._pending_workspace_input[user_id] = pending
+
+            hour = pending.get("hour", 9)
 
             buttons = [
                 [
@@ -232,7 +273,7 @@ class WorkspaceHandlers(BaseHandler):
 
             await query.edit_message_text(
                 f"<b>{ws.name}</b> - Schedule Registration\n\n"
-                f"Time: <b>{hour:02d}:00</b>\n\n"
+                f"Time: <b>{hour:02d}:{minute:02d}</b>\n\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -254,10 +295,11 @@ class WorkspaceHandlers(BaseHandler):
             self._pending_workspace_input[user_id] = pending
 
             hour = pending.get("hour", 9)
+            minute = pending.get("minute", 0)
 
             await query.edit_message_text(
                 f"<b>{ws.name}</b> - Schedule Registration\n\n"
-                f"Time: <b>{hour:02d}:00</b>\n"
+                f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
                 f"Model: <b>{model}</b>\n\n"
                 f"Enter scheduled message below:",
                 parse_mode="HTML"
