@@ -281,6 +281,52 @@ class TestScheduleTimeChange:
         mock_scheduler.register_daily.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_detail_callback_shows_actions(self):
+        """sched:detail: 콜백이 액션 버튼 표시."""
+        from src.bot.handlers import BotHandlers
+
+        handlers = BotHandlers(
+            session_service=MagicMock(),
+            claude_client=MagicMock(),
+            auth_manager=MagicMock(),
+            require_auth=False,
+            allowed_chat_ids=[],
+        )
+        handlers._schedule_manager = MagicMock()
+
+        mock_schedule = MagicMock()
+        mock_schedule.name = "테스트"
+        mock_schedule.time_str = "08:00"
+        mock_schedule.type_emoji = "💬"
+        mock_schedule.model = "sonnet"
+        mock_schedule.message = "테스트 메시지"
+        mock_schedule.workspace_path = None
+        mock_schedule.enabled = True
+        mock_schedule.run_count = 3
+        handlers._schedule_manager.get.return_value = mock_schedule
+
+        query = MagicMock()
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:detail:abc123")
+
+        assert query.edit_message_text.called
+        text = query.edit_message_text.call_args[0][0]
+        assert "테스트" in text
+        assert "08:00" in text
+        assert "sonnet" in text
+
+        # 버튼 확인
+        markup = query.edit_message_text.call_args[1].get("reply_markup")
+        all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+        button_texts = [b.text for b in all_buttons]
+        assert any("OFF" in t for t in button_texts)  # toggle
+        assert any("Time" in t or "Change" in t for t in button_texts)  # time change
+        assert any("Delete" in t for t in button_texts)  # delete
+        assert any("Back" in t for t in button_texts)  # back
+
+    @pytest.mark.asyncio
     async def test_chtime_callback_shows_hours(self):
         """sched:chtime: 콜백이 시간 선택 버튼 표시."""
         from src.bot.handlers import BotHandlers

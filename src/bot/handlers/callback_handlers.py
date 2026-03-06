@@ -733,16 +733,10 @@ class CallbackHandlers(BaseHandler):
             schedule_id = action[7:]
             new_state = self._schedule_manager.toggle(schedule_id)
             if new_state is not None:
-                status = "enabled" if new_state else "disabled"
+                status = "ON" if new_state else "OFF"
                 await query.answer(f"{status}")
-                text = self._schedule_manager.get_status_text(user_id)
-                text += scheduler_manager.get_system_jobs_text()
-                keyboard = self._build_scheduler_keyboard(user_id)
-                await query.edit_message_text(
-                    text,
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="HTML"
-                )
+                # Return to detail view
+                await self._handle_scheduler_callback(query, chat_id, f"sched:detail:{schedule_id}")
             else:
                 await query.answer("Schedule not found")
             return
@@ -764,6 +758,38 @@ class CallbackHandlers(BaseHandler):
                 )
             else:
                 await query.answer("Delete failed")
+            return
+
+        # Schedule detail view
+        if action.startswith("detail:"):
+            schedule_id = action[7:]
+            schedule = self._schedule_manager.get(schedule_id)
+            if not schedule:
+                await query.answer("Schedule not found")
+                return
+
+            status_text = "ON" if schedule.enabled else "OFF"
+            toggle_label = "⏸ OFF" if schedule.enabled else "✅ ON"
+            path_info = f"\nPath: <code>{schedule.workspace_path}</code>" if schedule.workspace_path else ""
+
+            buttons = [
+                [InlineKeyboardButton(toggle_label, callback_data=f"sched:toggle:{schedule_id}")],
+                [InlineKeyboardButton(f"⏰ Change Time ({schedule.time_str})", callback_data=f"sched:chtime:{schedule_id}")],
+                [InlineKeyboardButton("🗑 Delete", callback_data=f"sched:delete:{schedule_id}")],
+                [InlineKeyboardButton("← Back", callback_data="sched:refresh")],
+            ]
+
+            await query.edit_message_text(
+                f"{schedule.type_emoji} <b>{schedule.name}</b>\n\n"
+                f"Status: <b>{status_text}</b>\n"
+                f"Time: <b>{schedule.time_str}</b> (daily)\n"
+                f"Model: <b>{schedule.model}</b>{path_info}\n"
+                f"Message: <i>{schedule.message[:80]}{'...' if len(schedule.message) > 80 else ''}</i>\n"
+                f"Runs: {schedule.run_count}",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
             return
 
         # Change time - hour selection

@@ -249,26 +249,24 @@ class AdminHandlers(BaseHandler):
         return text, keyboard
 
     def _build_scheduler_keyboard(self, user_id: str) -> list:
-        """Build scheduler UI keyboard."""
+        """Build scheduler UI keyboard - schedule list."""
         buttons = []
 
         if self._schedule_manager:
             schedules = self._schedule_manager.list_by_user(user_id)
             for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
-                status = "ON" if s.enabled else "OFF"
-                type_icon = "[ws]" if s.type == "workspace" else ""
+                status = "✅" if s.enabled else "⏸"
+                type_icon = "📂" if s.type == "workspace" else "💬"
                 buttons.append([
                     InlineKeyboardButton(
-                        f"{status} {s.time_str} {type_icon} {s.name[:10]}",
-                        callback_data=f"sched:toggle:{s.id}"
+                        f"{status} {s.time_str} {type_icon} {s.name[:15]}",
+                        callback_data=f"sched:detail:{s.id}"
                     ),
-                    InlineKeyboardButton("Time", callback_data=f"sched:chtime:{s.id}"),
-                    InlineKeyboardButton("Del", callback_data=f"sched:delete:{s.id}"),
                 ])
 
         buttons.append([
-            InlineKeyboardButton("Claude", callback_data="sched:add:claude"),
-            InlineKeyboardButton("Workspace", callback_data="sched:add:workspace"),
+            InlineKeyboardButton("+ Claude", callback_data="sched:add:claude"),
+            InlineKeyboardButton("+ Workspace", callback_data="sched:add:workspace"),
         ])
         buttons.append([
             InlineKeyboardButton("Refresh", callback_data="sched:refresh"),
