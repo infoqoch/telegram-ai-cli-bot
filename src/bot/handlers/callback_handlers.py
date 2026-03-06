@@ -292,7 +292,7 @@ class CallbackHandlers(BaseHandler):
                     parse_mode="HTML"
                 )
                 await query.message.reply_text(
-                    text="Enter memo content below",
+                    text="Enter memo content below (memo_add)",
                     reply_markup=result["force_reply"],
                     parse_mode="HTML"
                 )
