@@ -344,7 +344,7 @@ class WorkspaceHandlers(BaseHandler):
             await query.answer()
             return
 
-        # Recommendation selection
+        # Recommendation selection → ask for name
         if action.startswith("recommend:"):
             idx = int(action[10:])
             pending = self._pending_workspace_input.get(user_id, {})
@@ -355,28 +355,22 @@ class WorkspaceHandlers(BaseHandler):
                 return
 
             rec = recommendations[idx]
-            ws = self._workspace_registry.add(
-                user_id=user_id,
-                path=rec["path"],
-                name=rec["name"],
-                description=rec.get("description", rec.get("reason", "")),
-            )
-
-            del self._pending_workspace_input[user_id]
-
-            text = self._workspace_registry.get_status_text(user_id)
-            keyboard = self._build_workspace_keyboard(user_id)
+            pending["action"] = "recommend_name"
+            pending["path"] = rec["path"]
+            pending["suggested_name"] = rec["name"]
+            pending["description"] = rec.get("description", rec.get("reason", ""))
+            self._pending_workspace_input[user_id] = pending
 
             await query.edit_message_text(
-                f"<b>Workspace Registered!</b>\n\n"
-                f"<b>{ws.name}</b>\n"
-                f"<code>{ws.short_path}</code>\n"
-                f"{ws.description}\n\n"
-                f"────────────\n\n{text}",
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                f"<b>Selected:</b> <code>{rec['path'].replace(str(Path.home()), '~')}</code>\n\n"
+                f"Enter workspace name:",
                 parse_mode="HTML"
             )
-            await query.answer("Registered")
+            await query.message.reply_text(
+                f"{rec['name']}",
+                reply_markup=ForceReply(selective=True, input_field_placeholder=rec["name"])
+            )
+            await query.answer()
             return
 
         # Manual input selection
@@ -483,6 +477,35 @@ class WorkspaceHandlers(BaseHandler):
                 f"────────────\n\n"
                 f"{rec_text}",
                 reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            return
+
+        # Recommend name input - registration complete
+        if action == "recommend_name":
+            name = message.strip()[:30]
+            path = pending.get("path", "")
+            description = pending.get("description", "")
+
+            ws = self._workspace_registry.add(
+                user_id=user_id,
+                path=path,
+                name=name,
+                description=description,
+            )
+
+            del self._pending_workspace_input[user_id]
+
+            text = self._workspace_registry.get_status_text(user_id)
+            keyboard = self._build_workspace_keyboard(user_id)
+
+            await update.message.reply_text(
+                f"<b>Workspace Registered!</b>\n\n"
+                f"<b>{ws.name}</b>\n"
+                f"<code>{ws.short_path}</code>\n"
+                f"{ws.description}\n\n"
+                f"────────────\n\n{text}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
             return
