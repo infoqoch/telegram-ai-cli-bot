@@ -87,8 +87,8 @@ class MessageHandlers(BaseHandler):
             else:
                 is_new_session = False
 
-        model = self.sessions.get_session_model(session_id)
-        workspace_path = self.sessions.get_workspace_path(session_id)
+        model = self.sessions.get_session_model(user_id, session_id)
+        workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
 
         set_session_id(session_id)
         logger.info(f"Session decided - model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
@@ -266,8 +266,8 @@ class MessageHandlers(BaseHandler):
             else:
                 is_new_session = False
 
-        model = self.sessions.get_session_model(session_id)
-        workspace_path = self.sessions.get_workspace_path(session_id)
+        model = self.sessions.get_session_model(user_id, session_id)
+        workspace_path = self.sessions.get_session_workspace_path(user_id, session_id)
 
         set_session_id(session_id)
 

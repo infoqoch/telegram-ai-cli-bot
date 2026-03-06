@@ -246,6 +246,14 @@ def handlers(
     )
 
 
+@pytest.fixture(autouse=True)
+def patch_get_repository(repository):
+    """모든 통합 테스트에서 get_repository를 실제 repository로 패치."""
+    from unittest.mock import patch
+    with patch("src.bot.handlers.message_handlers.get_repository", return_value=repository):
+        yield
+
+
 @pytest.fixture
 def mock_update() -> MagicMock:
     """기본 Mock Update."""
