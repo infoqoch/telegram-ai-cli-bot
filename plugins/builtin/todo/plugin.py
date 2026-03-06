@@ -10,18 +10,18 @@ from src.logging_config import logger
 
 
 class TodoPlugin(Plugin):
-    """버튼 기반 할일 관리 플러그인."""
+    """할일 관리 플러그인."""
 
     name = "todo"
-    description = "버튼 기반 할일 관리 (오전/오후/저녁)"
+    description = "할일 관리"
     usage = (
         "📋 <b>할일 플러그인 사용법</b>\n\n"
         "<b>시작하기</b>\n"
         "• <code>/todo</code> 또는 <code>할일</code> 입력\n\n"
         "<b>기능</b>\n"
         "• 📄 리스트 - 오늘 할일 보기\n"
-        "• ➕ 추가 - 시간대 선택 후 할일 입력\n"
-        "• 항목 클릭 - 완료/삭제/이동"
+        "• ➕ 추가 - 할일 입력\n"
+        "• 항목 클릭 - 완료/삭제/내일로"
     )
 
     TRIGGER_KEYWORDS = ["todo", "할일", "투두"]
@@ -35,19 +35,10 @@ class TodoPlugin(Plugin):
 
     CALLBACK_PREFIX = "td:"
 
-    SLOTS = ["morning", "afternoon", "evening"]
-    SLOT_NAMES = {
-        "morning": "🌅 오전",
-        "afternoon": "☀️ 오후",
-        "evening": "🌙 저녁",
-    }
-    SLOT_CODES = {"morning": "m", "afternoon": "a", "evening": "e"}
-    CODE_TO_SLOT = {"m": "morning", "a": "afternoon", "e": "evening"}
-
     def __init__(self):
         super().__init__()
-        # 멀티 선택 상태 (chat_id -> set of todo_ids)
         self._multi_selections: dict[int, set[int]] = {}
+        self._yesterday_selections: dict[int, set[int]] = {}
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """할일 관련 메시지인지 확인."""
@@ -84,12 +75,10 @@ class TodoPlugin(Plugin):
         action = parts[1]
         handlers = {
             "list": lambda: self._handle_list(chat_id),
-            "add": lambda: self._handle_add_menu(chat_id),
-            "add_slot": lambda: self._handle_add_slot(chat_id, parts[2] if len(parts) > 2 else "m"),
+            "add": lambda: self._handle_add(chat_id),
             "item": lambda: self._handle_item_menu(chat_id, int(parts[2]) if len(parts) > 2 else 0),
             "done": lambda: self._handle_done(chat_id, int(parts[2]) if len(parts) > 2 else 0),
             "del": lambda: self._handle_delete(chat_id, int(parts[2]) if len(parts) > 2 else 0),
-            "move": lambda: self._handle_move(chat_id, int(parts[2]) if len(parts) > 2 else 0, parts[3] if len(parts) > 3 else "a"),
             "tomorrow": lambda: self._handle_tomorrow(chat_id, int(parts[2]) if len(parts) > 2 else 0),
             "back": lambda: self._handle_list(chat_id),
             "multi": lambda: self._handle_multi_select(chat_id),
@@ -100,6 +89,10 @@ class TodoPlugin(Plugin):
             "multi_clear": lambda: self._handle_multi_clear(chat_id),
             "date": lambda: self._handle_date_view(chat_id, parts[2] if len(parts) > 2 else None),
             "week": lambda: self._handle_week_view(chat_id, parts[2] if len(parts) > 2 else None),
+            "yday": lambda: self._handle_yesterday(chat_id),
+            "yday_toggle": lambda: self._handle_yesterday_toggle(chat_id, int(parts[2]) if len(parts) > 2 else 0),
+            "yday_carry": lambda: self._handle_yesterday_carry(chat_id),
+            "yday_all": lambda: self._handle_yesterday_all(chat_id),
         }
 
         handler = handlers.get(action)
@@ -110,79 +103,42 @@ class TodoPlugin(Plugin):
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         """스케줄 가능한 액션 목록."""
         return [
-            ScheduledAction(name="morning_check", description="오전 할일 리마인더"),
-            ScheduledAction(name="afternoon_check", description="오후 할일 리마인더"),
-            ScheduledAction(name="evening_check", description="저녁 할일 리마인더"),
-            ScheduledAction(name="daily_wrap", description="하루 마무리 리포트"),
+            ScheduledAction(name="yesterday_report", description="어제 할일 리포트"),
         ]
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
         """스케줄된 액션 실행."""
-        today = self._today()
+        if action_name == "yesterday_report":
+            return self._generate_yesterday_report(chat_id)
+        raise NotImplementedError(f"Action '{action_name}' not implemented")
 
-        if action_name == "daily_wrap":
-            return self._generate_daily_wrap(chat_id, today)
-
-        # morning/afternoon/evening check
-        slot_map = {
-            "morning_check": "morning",
-            "afternoon_check": "afternoon",
-            "evening_check": "evening",
-        }
-        slot = slot_map.get(action_name)
-        if not slot:
-            raise NotImplementedError(f"Action '{action_name}' not implemented")
-
-        return self._generate_slot_reminder(chat_id, today, slot)
-
-    def _generate_slot_reminder(self, chat_id: int, today: str, slot: str) -> str:
-        """시간대별 리마인더 텍스트 생성."""
-        slot_name = self.SLOT_NAMES[slot]
-        todos = self.repository.list_todos_by_slot(chat_id, today, slot)
-
+    def _generate_yesterday_report(self, chat_id: int) -> str:
+        """어제 할일 리포트 텍스트 생성."""
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        todos = self.repository.list_todos_by_date(chat_id, yesterday)
         if not todos:
-            return ""  # 할일 없으면 빈 문자열 (메시지 안 보냄)
+            return ""
 
-        pending = [t for t in todos if not t.done]
-        if not pending:
-            return f"{slot_name} 할일 모두 완료! 👏"
-
-        lines = [f"<b>{slot_name} 할일 리마인더</b>\n"]
-        for i, todo in enumerate(todos, 1):
+        lines = [f"📋 <b>어제({yesterday}) 할일 리포트</b>\n"]
+        pending_count = 0
+        for todo in todos:
             status = "✅" if todo.done else "⬜"
-            lines.append(f"{status} {i}. {todo.text}")
+            lines.append(f"{status} {todo.text}")
+            if not todo.done:
+                pending_count += 1
 
-        lines.append(f"\n📊 {len(todos) - len(pending)}/{len(todos)} 완료")
-        return "\n".join(lines)
+        done_count = len(todos) - pending_count
+        lines.append(f"\n📊 {done_count}/{len(todos)} 완료")
 
-    def _generate_daily_wrap(self, chat_id: int, today: str) -> str:
-        """하루 마무리 리포트 텍스트 생성."""
-        stats = self.repository.get_todo_stats(chat_id, today)
-        if stats["total"] == 0:
-            return ""  # 할일 없으면 빈 문자열
-
-        lines = ["🌙 <b>하루 마무리</b>\n"]
-
-        if stats["pending"] == 0:
-            lines.append("🎉 오늘 할일을 모두 완료했어요!")
-        else:
-            lines.append(f"📊 오늘 진행률: {stats['done']}/{stats['total']} 완료\n")
-            lines.append("<b>미완료 항목:</b>")
-
-            pending = self.repository.get_pending_todos(chat_id, today)
-            current_slot = None
-            for todo in pending:
-                if todo.slot != current_slot:
-                    current_slot = todo.slot
-                    lines.append(f"\n{self.SLOT_NAMES[todo.slot]}")
-                lines.append(f"  ⬜ {todo.text}")
-
-            lines.append("\n내일로 넘길 항목이 있나요?")
+        if pending_count > 0:
+            lines.append(f"\n미완료 {pending_count}개 항목을 오늘로 이전하려면 아래 버튼을 눌러주세요.")
 
         return "\n".join(lines)
 
     def _today(self) -> str:
         return date.today().isoformat()
+
+    # ==================== 리스트 / 추가 ====================
 
     def _handle_list(self, chat_id: int) -> dict:
         """할일 리스트 표시."""
@@ -192,29 +148,18 @@ class TodoPlugin(Plugin):
         lines = [f"📋 <b>{today} 할일</b>\n"]
         buttons = []
 
-        # 슬롯별 그룹화
-        by_slot = {s: [] for s in self.SLOTS}
-        for todo in todos:
-            by_slot[todo.slot].append(todo)
+        for idx, todo in enumerate(todos, 1):
+            status = "✅" if todo.done else "⬜"
+            lines.append(f"{status} {idx}. {todo.text}")
 
-        idx = 0
-        for slot in self.SLOTS:
-            items = by_slot[slot]
-            if items:
-                lines.append(f"\n<b>{self.SLOT_NAMES[slot]}</b>")
-                for todo in items:
-                    idx += 1
-                    status = "✅" if todo.done else "⬜"
-                    lines.append(f"{status} {idx}. {todo.text}")
-
-                    if not todo.done:
-                        preview = todo.text[:20] + "..." if len(todo.text) > 20 else todo.text
-                        buttons.append([
-                            InlineKeyboardButton(
-                                f"{idx}. {preview}",
-                                callback_data=f"td:item:{todo.id}"
-                            )
-                        ])
+            if not todo.done:
+                preview = todo.text[:20] + "..." if len(todo.text) > 20 else todo.text
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"{idx}. {preview}",
+                        callback_data=f"td:item:{todo.id}"
+                    )
+                ])
 
         stats = self.repository.get_todo_stats(chat_id, today)
         if stats["total"] == 0:
@@ -227,7 +172,6 @@ class TodoPlugin(Plugin):
                 InlineKeyboardButton("📋 멀티선택", callback_data="td:multi"),
             ])
 
-        # 날짜 이동
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         buttons.append([
@@ -246,30 +190,11 @@ class TodoPlugin(Plugin):
             "edit": True,
         }
 
-    def _handle_add_menu(self, chat_id: int) -> dict:
-        """시간대 선택 메뉴."""
-        keyboard = [
-            [
-                InlineKeyboardButton("🌅 오전", callback_data="td:add_slot:m"),
-                InlineKeyboardButton("☀️ 오후", callback_data="td:add_slot:a"),
-                InlineKeyboardButton("🌙 저녁", callback_data="td:add_slot:e"),
-            ],
-            [InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list")],
-        ]
-        return {
-            "text": "⏰ <b>시간대 선택</b>\n\n할일을 추가할 시간대를 선택하세요.",
-            "reply_markup": InlineKeyboardMarkup(keyboard),
-            "edit": True,
-        }
-
-    def _handle_add_slot(self, chat_id: int, slot_code: str) -> dict:
+    def _handle_add(self, chat_id: int) -> dict:
         """할일 추가 ForceReply."""
-        slot = self.CODE_TO_SLOT.get(slot_code, "morning")
-        slot_name = self.SLOT_NAMES[slot]
         return {
-            "text": f"{slot_name} <b>할일 입력</b>\n\n여러 개 입력 시 줄바꿈으로 구분하세요.",
+            "text": "📝 <b>할일 입력</b>\n\n여러 개 입력 시 줄바꿈으로 구분하세요.",
             "force_reply": ForceReply(selective=True, input_field_placeholder="할일 입력..."),
-            "slot_code": slot_code,
             "edit": False,
         }
 
@@ -279,28 +204,17 @@ class TodoPlugin(Plugin):
         if not todo:
             return {"text": "❌ 항목을 찾을 수 없어요.", "edit": True}
 
-        slot_name = self.SLOT_NAMES.get(todo.slot, todo.slot)
-        other_slots = [c for c in ["m", "a", "e"] if self.CODE_TO_SLOT[c] != todo.slot]
-        move_buttons = [
-            InlineKeyboardButton(
-                f"➡️ {self.SLOT_NAMES[self.CODE_TO_SLOT[c]]}",
-                callback_data=f"td:move:{todo_id}:{c}"
-            )
-            for c in other_slots
-        ]
-
         keyboard = [
             [
                 InlineKeyboardButton("✅ 완료", callback_data=f"td:done:{todo_id}"),
                 InlineKeyboardButton("🗑️ 삭제", callback_data=f"td:del:{todo_id}"),
             ],
-            move_buttons,
             [InlineKeyboardButton("📅 내일로", callback_data=f"td:tomorrow:{todo_id}")],
             [InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list")],
         ]
 
         return {
-            "text": f"{slot_name} 할일\n\n<b>{todo.text}</b>",
+            "text": f"📌 할일\n\n<b>{todo.text}</b>",
             "reply_markup": InlineKeyboardMarkup(keyboard),
             "edit": True,
         }
@@ -320,21 +234,6 @@ class TodoPlugin(Plugin):
             result["text"] = "🗑️ 삭제됨!\n\n" + result["text"]
             return result
         return {"text": "❌ 삭제 실패", "edit": True}
-
-    def _handle_move(self, chat_id: int, todo_id: int, target_code: str) -> dict:
-        """시간대 이동."""
-        target_slot = self.CODE_TO_SLOT.get(target_code, "afternoon")
-        todo = self.repository.get_todo(todo_id)
-        if not todo:
-            return {"text": "❌ 항목을 찾을 수 없어요.", "edit": True}
-
-        # 삭제 후 새로 추가 (슬롯 변경)
-        self.repository.delete_todo(todo_id)
-        self.repository.add_todo(chat_id, todo.date, target_slot, todo.text)
-
-        result = self._handle_list(chat_id)
-        result["text"] = f"➡️ {self.SLOT_NAMES[target_slot]}으로 이동!\n\n" + result["text"]
-        return result
 
     def _handle_tomorrow(self, chat_id: int, todo_id: int) -> dict:
         """내일로 이동."""
@@ -369,13 +268,8 @@ class TodoPlugin(Plugin):
 
         lines = ["📋 <b>멀티 선택</b>\n", "항목을 터치해서 선택/해제하세요.\n"]
         buttons = []
-        current_slot = None
 
         for todo in pending:
-            if todo.slot != current_slot:
-                current_slot = todo.slot
-                lines.append(f"\n<b>{self.SLOT_NAMES[todo.slot]}</b>")
-
             selected = todo.id in selections
             mark = "☑️" if selected else "⬜"
             lines.append(f"{mark} {todo.text}")
@@ -463,6 +357,104 @@ class TodoPlugin(Plugin):
         self._multi_selections.pop(chat_id, None)
         return self._render_multi_view(chat_id)
 
+    # ==================== 어제 할일 이전 ====================
+
+    def _handle_yesterday(self, chat_id: int) -> dict:
+        """어제 미완료 항목 멀티 선택."""
+        self._yesterday_selections[chat_id] = set()
+        return self._render_yesterday_view(chat_id)
+
+    def _render_yesterday_view(self, chat_id: int) -> dict:
+        """어제 미완료 항목 선택 화면."""
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        pending = self.repository.get_pending_todos(chat_id, yesterday)
+        selections = self._yesterday_selections.get(chat_id, set())
+
+        if not pending:
+            return {
+                "text": "✅ 어제 미완료 항목이 없어요!",
+                "reply_markup": InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📄 오늘 할일", callback_data="td:list")
+                ]]),
+                "edit": True,
+            }
+
+        lines = [f"📋 <b>어제({yesterday}) 미완료 항목</b>\n",
+                 "오늘로 이전할 항목을 선택하세요.\n"]
+        buttons = []
+
+        for todo in pending:
+            selected = todo.id in selections
+            mark = "☑️" if selected else "⬜"
+            lines.append(f"{mark} {todo.text}")
+
+            preview = todo.text[:18] + "..." if len(todo.text) > 18 else todo.text
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{'☑️' if selected else '⬜'} {preview}",
+                    callback_data=f"td:yday_toggle:{todo.id}"
+                )
+            ])
+
+        count = len(selections)
+        lines.append(f"\n📌 {count}개 선택됨")
+
+        action_buttons = []
+        if count > 0:
+            action_buttons.append(
+                InlineKeyboardButton(f"📅 선택 이전({count})", callback_data="td:yday_carry")
+            )
+        action_buttons.append(
+            InlineKeyboardButton(f"📅 전체 이전({len(pending)})", callback_data="td:yday_all")
+        )
+        buttons.append(action_buttons)
+
+        buttons.append([
+            InlineKeyboardButton("📄 오늘 할일", callback_data="td:list"),
+        ])
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(buttons),
+            "edit": True,
+        }
+
+    def _handle_yesterday_toggle(self, chat_id: int, todo_id: int) -> dict:
+        """어제 항목 선택 토글."""
+        if chat_id not in self._yesterday_selections:
+            self._yesterday_selections[chat_id] = set()
+
+        if todo_id in self._yesterday_selections[chat_id]:
+            self._yesterday_selections[chat_id].discard(todo_id)
+        else:
+            self._yesterday_selections[chat_id].add(todo_id)
+
+        return self._render_yesterday_view(chat_id)
+
+    def _handle_yesterday_carry(self, chat_id: int) -> dict:
+        """선택한 어제 항목을 오늘로 이전."""
+        selections = self._yesterday_selections.get(chat_id, set())
+        today = self._today()
+        count = self.repository.move_todos_to_date(list(selections), today)
+
+        self._yesterday_selections.pop(chat_id, None)
+        result = self._handle_list(chat_id)
+        result["text"] = f"📅 {count}개 오늘로 이전!\n\n" + result["text"]
+        return result
+
+    def _handle_yesterday_all(self, chat_id: int) -> dict:
+        """어제 미완료 전체를 오늘로 이전."""
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        pending = self.repository.get_pending_todos(chat_id, yesterday)
+        today = self._today()
+        ids = [t.id for t in pending]
+        count = self.repository.move_todos_to_date(ids, today)
+
+        self._yesterday_selections.pop(chat_id, None)
+        result = self._handle_list(chat_id)
+        result["text"] = f"📅 {count}개 오늘로 이전!\n\n" + result["text"]
+        return result
+
     # ==================== 날짜 이동 ====================
 
     def _handle_date_view(self, chat_id: int, date_str: str | None) -> dict:
@@ -479,21 +471,13 @@ class TodoPlugin(Plugin):
 
         lines = [f"📋 <b>{target_str} ({date_label}) 할일</b>\n"]
 
-        by_slot = {s: [] for s in self.SLOTS}
-        for todo in todos:
-            by_slot[todo.slot].append(todo)
-
         total, done_count = 0, 0
-        for slot in self.SLOTS:
-            items = by_slot[slot]
-            if items:
-                lines.append(f"\n<b>{self.SLOT_NAMES[slot]}</b>")
-                for todo in items:
-                    total += 1
-                    status = "✅" if todo.done else "⬜"
-                    if todo.done:
-                        done_count += 1
-                    lines.append(f"{status} {todo.text}")
+        for todo in todos:
+            total += 1
+            status = "✅" if todo.done else "⬜"
+            if todo.done:
+                done_count += 1
+            lines.append(f"{status} {todo.text}")
 
         if total == 0:
             lines.append("\n등록된 할일이 없어요.")
@@ -584,10 +568,8 @@ class TodoPlugin(Plugin):
 
     # ==================== ForceReply 처리 ====================
 
-    def handle_force_reply(self, message: str, chat_id: int, slot_code: str) -> dict:
+    def handle_force_reply(self, message: str, chat_id: int) -> dict:
         """ForceReply 응답 - 할일 추가."""
-        slot = self.CODE_TO_SLOT.get(slot_code, "morning")
-        slot_name = self.SLOT_NAMES[slot]
         today = self._today()
 
         tasks = [t.strip() for t in message.split("\n") if t.strip()]
@@ -595,9 +577,9 @@ class TodoPlugin(Plugin):
             return {"text": "❌ 할일이 입력되지 않았어요.", "reply_markup": None}
 
         for task_text in tasks:
-            self.repository.add_todo(chat_id, today, slot, task_text)
+            self.repository.add_todo(chat_id, today, task_text)
 
-        lines = [f"✅ {slot_name}에 {len(tasks)}개 추가됨!\n"]
+        lines = [f"✅ {len(tasks)}개 추가됨!\n"]
         for task in tasks:
             lines.append(f"• {task}")
 

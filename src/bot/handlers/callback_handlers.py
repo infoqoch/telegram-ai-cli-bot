@@ -81,9 +81,9 @@ class CallbackHandlers(BaseHandler):
 
         logger.warning(f"Unknown callback: {callback_data}")
 
-    async def _handle_todo_force_reply(self, update: Update, chat_id: int, message: str, slot_code: str) -> None:
+    async def _handle_todo_force_reply(self, update: Update, chat_id: int, message: str) -> None:
         """Handle Todo ForceReply response."""
-        logger.info(f"Todo ForceReply processing: slot={slot_code}, msg={message[:50]}")
+        logger.info(f"Todo ForceReply processing: msg={message[:50]}")
 
         todo_plugin = None
         if self.plugins:
@@ -93,7 +93,7 @@ class CallbackHandlers(BaseHandler):
             await update.message.reply_text("Todo plugin not found.")
             return
 
-        result = todo_plugin.handle_force_reply(message, chat_id, slot_code)
+        result = todo_plugin.handle_force_reply(message, chat_id)
 
         await update.message.reply_text(
             text=result.get("text", ""),
@@ -230,9 +230,8 @@ class CallbackHandlers(BaseHandler):
                     text=result.get("text", "Enter todo"),
                     parse_mode="HTML"
                 )
-                slot_code = result.get("slot_code", "m")
                 await query.message.reply_text(
-                    text=f"Enter todo below (slot:{slot_code})",
+                    text="td:add",
                     reply_markup=result["force_reply"],
                     parse_mode="HTML"
                 )

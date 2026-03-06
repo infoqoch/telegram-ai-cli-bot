@@ -276,15 +276,15 @@ class TestTodoOperations:
 
     def test_add_and_list_todos(self, repo):
         """Todo 추가 및 조회."""
-        repo.add_todo(12345, "2024-01-15", "morning", "Wake up")
-        repo.add_todo(12345, "2024-01-15", "afternoon", "Lunch")
+        repo.add_todo(12345, "2024-01-15", "Wake up")
+        repo.add_todo(12345, "2024-01-15", "Lunch")
 
         todos = repo.list_todos_by_date(12345, "2024-01-15")
         assert len(todos) == 2
 
     def test_toggle_todo(self, repo):
         """Todo 토글."""
-        todo = repo.add_todo(12345, "2024-01-15", "morning", "Task")
+        todo = repo.add_todo(12345, "2024-01-15", "Task")
         assert todo.done is False
 
         new_state = repo.toggle_todo(todo.id)

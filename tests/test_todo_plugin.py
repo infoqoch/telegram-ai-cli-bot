@@ -3,7 +3,7 @@
 import pytest
 import tempfile
 from pathlib import Path
-from datetime import date
+from datetime import date, timedelta
 
 from src.repository import init_repository, shutdown_repository, reset_connection
 from plugins.builtin.todo.plugin import TodoPlugin
@@ -33,11 +33,10 @@ class TestTodoRepository:
         repo, _ = repo_and_plugin
         today = date.today().isoformat()
 
-        todo = repo.add_todo(123, today, "morning", "회의하기")
+        todo = repo.add_todo(123, today, "회의하기")
 
         assert todo.id > 0
         assert todo.text == "회의하기"
-        assert todo.slot == "morning"
         assert todo.done is False
 
     def test_list_todos_by_date(self, repo_and_plugin):
@@ -45,8 +44,8 @@ class TestTodoRepository:
         repo, _ = repo_and_plugin
         today = date.today().isoformat()
 
-        repo.add_todo(123, today, "morning", "회의")
-        repo.add_todo(123, today, "afternoon", "점심")
+        repo.add_todo(123, today, "회의")
+        repo.add_todo(123, today, "점심")
 
         todos = repo.list_todos_by_date(123, today)
 
@@ -57,7 +56,7 @@ class TestTodoRepository:
         repo, _ = repo_and_plugin
         today = date.today().isoformat()
 
-        todo = repo.add_todo(123, today, "morning", "회의")
+        todo = repo.add_todo(123, today, "회의")
         result = repo.mark_todo_done(todo.id)
 
         assert result is True
@@ -69,7 +68,7 @@ class TestTodoRepository:
         repo, _ = repo_and_plugin
         today = date.today().isoformat()
 
-        todo = repo.add_todo(123, today, "morning", "회의")
+        todo = repo.add_todo(123, today, "회의")
         result = repo.delete_todo(todo.id)
 
         assert result is True
@@ -80,8 +79,8 @@ class TestTodoRepository:
         repo, _ = repo_and_plugin
         today = date.today().isoformat()
 
-        todo1 = repo.add_todo(123, today, "morning", "회의")
-        todo2 = repo.add_todo(123, today, "morning", "이메일")
+        todo1 = repo.add_todo(123, today, "회의")
+        todo2 = repo.add_todo(123, today, "이메일")
         repo.mark_todo_done(todo1.id)
 
         pending = repo.get_pending_todos(123, today)
@@ -95,7 +94,7 @@ class TestTodoRepository:
         today = date.today().isoformat()
         tomorrow = "2099-12-31"
 
-        todo = repo.add_todo(123, today, "morning", "회의")
+        todo = repo.add_todo(123, today, "회의")
         count = repo.move_todos_to_date([todo.id], tomorrow)
 
         assert count == 1
@@ -107,8 +106,8 @@ class TestTodoRepository:
         repo, _ = repo_and_plugin
         today = date.today().isoformat()
 
-        todo1 = repo.add_todo(123, today, "morning", "회의")
-        repo.add_todo(123, today, "afternoon", "점심")
+        todo1 = repo.add_todo(123, today, "회의")
+        repo.add_todo(123, today, "점심")
         repo.mark_todo_done(todo1.id)
 
         stats = repo.get_todo_stats(123, today)
@@ -156,28 +155,20 @@ class TestTodoPlugin:
 
         assert "등록된 할일이 없어요" in result["text"]
 
-    def test_callback_add_menu(self, repo_and_plugin):
-        """콜백: 추가 메뉴."""
+    def test_callback_add_force_reply(self, repo_and_plugin):
+        """콜백: 추가 버튼 → ForceReply."""
         _, plugin = repo_and_plugin
 
         result = plugin.handle_callback("td:add", 123)
 
-        assert "시간대 선택" in result["text"]
-
-    def test_callback_add_slot_force_reply(self, repo_and_plugin):
-        """콜백: 슬롯 선택 후 ForceReply."""
-        _, plugin = repo_and_plugin
-
-        result = plugin.handle_callback("td:add_slot:m", 123)
-
         assert "force_reply" in result
-        assert result["slot_code"] == "m"
+        assert "할일 입력" in result["text"]
 
     def test_force_reply_add_todos(self, repo_and_plugin):
         """ForceReply로 할일 추가."""
         repo, plugin = repo_and_plugin
 
-        result = plugin.handle_force_reply("회의하기\n이메일 확인", 123, "m")
+        result = plugin.handle_force_reply("회의하기\n이메일 확인", 123)
 
         assert "2개 추가됨" in result["text"]
 
@@ -190,7 +181,7 @@ class TestTodoPlugin:
         repo, plugin = repo_and_plugin
         today = date.today().isoformat()
 
-        todo = repo.add_todo(123, today, "morning", "회의")
+        todo = repo.add_todo(123, today, "회의")
         result = plugin.handle_callback(f"td:done:{todo.id}", 123)
 
         assert "완료 처리됨" in result["text"]
@@ -202,38 +193,22 @@ class TestTodoPlugin:
         repo, plugin = repo_and_plugin
         today = date.today().isoformat()
 
-        todo = repo.add_todo(123, today, "morning", "회의")
+        todo = repo.add_todo(123, today, "회의")
         result = plugin.handle_callback(f"td:del:{todo.id}", 123)
 
         assert "삭제됨" in result["text"]
         assert repo.get_todo(todo.id) is None
-
-    def test_callback_move_slot(self, repo_and_plugin):
-        """콜백: 시간대 이동."""
-        repo, plugin = repo_and_plugin
-        today = date.today().isoformat()
-
-        todo = repo.add_todo(123, today, "morning", "회의")
-        result = plugin.handle_callback(f"td:move:{todo.id}:a", 123)
-
-        assert "오후" in result["text"]
-
-        # 원래 todo는 삭제되고 새로 생성됨
-        todos = repo.list_todos_by_slot(123, today, "afternoon")
-        assert len(todos) == 1
-        assert todos[0].text == "회의"
 
     def test_callback_tomorrow(self, repo_and_plugin):
         """콜백: 내일로 이동."""
         repo, plugin = repo_and_plugin
         today = date.today().isoformat()
 
-        todo = repo.add_todo(123, today, "morning", "회의")
+        todo = repo.add_todo(123, today, "회의")
         result = plugin.handle_callback(f"td:tomorrow:{todo.id}", 123)
 
         assert "내일로 이동" in result["text"]
 
-        # 날짜가 변경됨
         updated = repo.get_todo(todo.id)
         assert updated.date != today
 
@@ -242,8 +217,8 @@ class TestTodoPlugin:
         repo, plugin = repo_and_plugin
         today = date.today().isoformat()
 
-        todo1 = repo.add_todo(123, today, "morning", "회의")
-        todo2 = repo.add_todo(123, today, "morning", "이메일")
+        todo1 = repo.add_todo(123, today, "회의")
+        todo2 = repo.add_todo(123, today, "이메일")
 
         # 멀티 선택 모드 진입
         result = plugin.handle_callback("td:multi", 123)
@@ -276,3 +251,75 @@ class TestTodoPlugin:
         result = plugin.handle_callback("td:week:2099-12-31", 123)
 
         assert "주간 할일" in result["text"]
+
+    def test_yesterday_carry_flow(self, repo_and_plugin):
+        """어제 할일 이전 플로우."""
+        repo, plugin = repo_and_plugin
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+        todo1 = repo.add_todo(123, yesterday, "어제 할일1")
+        todo2 = repo.add_todo(123, yesterday, "어제 할일2")
+
+        # 어제 미완료 항목 보기
+        result = plugin.handle_callback("td:yday", 123)
+        assert "미완료 항목" in result["text"]
+        assert "어제 할일1" in result["text"]
+
+        # 항목 선택
+        result = plugin.handle_callback(f"td:yday_toggle:{todo1.id}", 123)
+        assert "1개 선택됨" in result["text"]
+
+        # 선택한 항목 오늘로 이전
+        result = plugin.handle_callback("td:yday_carry", 123)
+        assert "1개 오늘로 이전" in result["text"]
+
+        # todo1은 오늘로 이동, todo2는 어제 그대로
+        updated1 = repo.get_todo(todo1.id)
+        updated2 = repo.get_todo(todo2.id)
+        assert updated1.date == date.today().isoformat()
+        assert updated2.date == yesterday
+
+    def test_yesterday_carry_all(self, repo_and_plugin):
+        """어제 할일 전체 이전."""
+        repo, plugin = repo_and_plugin
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+        repo.add_todo(123, yesterday, "어제 할일1")
+        repo.add_todo(123, yesterday, "어제 할일2")
+
+        # 전체 이전
+        result = plugin.handle_callback("td:yday_all", 123)
+        assert "2개 오늘로 이전" in result["text"]
+
+        # 모두 오늘로 이동
+        today_todos = repo.list_todos_by_date(123, date.today().isoformat())
+        assert len(today_todos) == 2
+
+    def test_yesterday_no_pending(self, repo_and_plugin):
+        """어제 미완료 없을 때."""
+        _, plugin = repo_and_plugin
+
+        result = plugin.handle_callback("td:yday", 123)
+        assert "미완료 항목이 없어요" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_scheduled_yesterday_report(self, repo_and_plugin):
+        """스케줄: 어제 할일 리포트."""
+        repo, plugin = repo_and_plugin
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+        repo.add_todo(123, yesterday, "어제 할일")
+
+        result = await plugin.execute_scheduled_action("yesterday_report", 123)
+
+        assert "리포트" in result
+        assert "어제 할일" in result
+
+    @pytest.mark.asyncio
+    async def test_scheduled_yesterday_report_empty(self, repo_and_plugin):
+        """스케줄: 어제 할일 없으면 빈 문자열."""
+        _, plugin = repo_and_plugin
+
+        result = await plugin.execute_scheduled_action("yesterday_report", 123)
+
+        assert result == ""

@@ -9,7 +9,7 @@
 """
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -68,14 +68,10 @@ class TestTodoPluginScheduledActions:
         return plugin
 
     def test_get_scheduled_actions(self, todo_plugin):
-        """Todo 플러그인은 4개 액션 제공."""
+        """Todo 플러그인은 1개 액션 제공."""
         actions = todo_plugin.get_scheduled_actions()
-        assert len(actions) == 4
-        names = [a.name for a in actions]
-        assert "morning_check" in names
-        assert "afternoon_check" in names
-        assert "evening_check" in names
-        assert "daily_wrap" in names
+        assert len(actions) == 1
+        assert actions[0].name == "yesterday_report"
 
     def test_actions_have_descriptions(self, todo_plugin):
         """모든 액션에 설명이 있음."""
@@ -84,100 +80,42 @@ class TestTodoPluginScheduledActions:
             assert len(action.description) > 0
 
     @pytest.mark.asyncio
-    async def test_morning_check_with_todos(self, todo_plugin):
-        """오전 체크 - 할일 있을 때."""
-        mock_todo = MagicMock()
-        mock_todo.done = False
-        mock_todo.text = "회의 준비"
-        mock_todo.slot = "morning"
+    async def test_yesterday_report_with_todos(self, todo_plugin):
+        """어제 리포트 - 할일 있을 때."""
+        mock_todo_done = MagicMock()
+        mock_todo_done.done = True
+        mock_todo_done.text = "완료 항목"
 
-        todo_plugin._repository.list_todos_by_slot.return_value = [mock_todo]
+        mock_todo_pending = MagicMock()
+        mock_todo_pending.done = False
+        mock_todo_pending.text = "미완료 항목"
 
-        result = await todo_plugin.execute_scheduled_action("morning_check", 12345)
-        assert "리마인더" in result
-        assert "회의 준비" in result
+        todo_plugin._repository.list_todos_by_date.return_value = [mock_todo_done, mock_todo_pending]
+
+        result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
+        assert "리포트" in result
+        assert "미완료 항목" in result
+        assert "1/2 완료" in result
 
     @pytest.mark.asyncio
-    async def test_morning_check_all_done(self, todo_plugin):
-        """오전 체크 - 모두 완료."""
+    async def test_yesterday_report_all_done(self, todo_plugin):
+        """어제 리포트 - 모두 완료."""
         mock_todo = MagicMock()
         mock_todo.done = True
-        mock_todo.text = "완료된 항목"
-        mock_todo.slot = "morning"
+        mock_todo.text = "완료 항목"
 
-        todo_plugin._repository.list_todos_by_slot.return_value = [mock_todo]
+        todo_plugin._repository.list_todos_by_date.return_value = [mock_todo]
 
-        result = await todo_plugin.execute_scheduled_action("morning_check", 12345)
-        assert "완료" in result
-
-    @pytest.mark.asyncio
-    async def test_morning_check_no_todos(self, todo_plugin):
-        """오전 체크 - 할일 없음 → 빈 문자열."""
-        todo_plugin._repository.list_todos_by_slot.return_value = []
-
-        result = await todo_plugin.execute_scheduled_action("morning_check", 12345)
-        assert result == ""
+        result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
+        assert "1/1 완료" in result
+        assert "이전" not in result
 
     @pytest.mark.asyncio
-    async def test_afternoon_check(self, todo_plugin):
-        """오후 체크."""
-        mock_todo = MagicMock()
-        mock_todo.done = False
-        mock_todo.text = "보고서 작성"
-        mock_todo.slot = "afternoon"
+    async def test_yesterday_report_no_todos(self, todo_plugin):
+        """어제 리포트 - 할일 없음 → 빈 문자열."""
+        todo_plugin._repository.list_todos_by_date.return_value = []
 
-        todo_plugin._repository.list_todos_by_slot.return_value = [mock_todo]
-
-        result = await todo_plugin.execute_scheduled_action("afternoon_check", 12345)
-        assert "오후" in result
-
-    @pytest.mark.asyncio
-    async def test_evening_check(self, todo_plugin):
-        """저녁 체크."""
-        mock_todo = MagicMock()
-        mock_todo.done = False
-        mock_todo.text = "운동"
-        mock_todo.slot = "evening"
-
-        todo_plugin._repository.list_todos_by_slot.return_value = [mock_todo]
-
-        result = await todo_plugin.execute_scheduled_action("evening_check", 12345)
-        assert "저녁" in result
-
-    @pytest.mark.asyncio
-    async def test_daily_wrap_all_done(self, todo_plugin):
-        """하루 마무리 - 모두 완료."""
-        todo_plugin._repository.get_todo_stats.return_value = {
-            "total": 5, "done": 5, "pending": 0
-        }
-
-        result = await todo_plugin.execute_scheduled_action("daily_wrap", 12345)
-        assert "모두 완료" in result
-
-    @pytest.mark.asyncio
-    async def test_daily_wrap_with_pending(self, todo_plugin):
-        """하루 마무리 - 미완료 있음."""
-        todo_plugin._repository.get_todo_stats.return_value = {
-            "total": 5, "done": 3, "pending": 2
-        }
-        mock_todo = MagicMock()
-        mock_todo.done = False
-        mock_todo.text = "미완료 항목"
-        mock_todo.slot = "evening"
-        todo_plugin._repository.get_pending_todos.return_value = [mock_todo]
-
-        result = await todo_plugin.execute_scheduled_action("daily_wrap", 12345)
-        assert "3/5" in result
-        assert "미완료 항목" in result
-
-    @pytest.mark.asyncio
-    async def test_daily_wrap_no_todos(self, todo_plugin):
-        """하루 마무리 - 할일 없음 → 빈 문자열."""
-        todo_plugin._repository.get_todo_stats.return_value = {
-            "total": 0, "done": 0, "pending": 0
-        }
-
-        result = await todo_plugin.execute_scheduled_action("daily_wrap", 12345)
+        result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
         assert result == ""
 
     @pytest.mark.asyncio
@@ -243,8 +181,7 @@ class TestPluginScheduleCallbackFlow:
         mock_plugin = MagicMock()
         mock_plugin.name = "todo"
         mock_plugin.get_scheduled_actions.return_value = [
-            ScheduledAction(name="morning_check", description="오전 할일 체크"),
-            ScheduledAction(name="daily_wrap", description="하루 마무리"),
+            ScheduledAction(name="yesterday_report", description="어제 할일 리포트"),
         ]
 
         mock_loader = MagicMock()
@@ -333,10 +270,10 @@ class TestPluginScheduleCallbackFlow:
 
         # Mock add to return ScheduleData
         mock_schedule = MagicMock()
-        mock_schedule.name = "todo:오전 할일 체크"
+        mock_schedule.name = "todo:어제 할일 리포트"
         mock_schedule.time_str = "10:30"
         mock_schedule.plugin_name = "todo"
-        mock_schedule.action_name = "morning_check"
+        mock_schedule.action_name = "yesterday_report"
         handlers._schedule_manager.add.return_value = mock_schedule
 
         # Select minute → should register directly
@@ -352,7 +289,7 @@ class TestPluginScheduleCallbackFlow:
         call_kwargs = handlers._schedule_manager.add.call_args[1]
         assert call_kwargs["schedule_type"] == "plugin"
         assert call_kwargs["plugin_name"] == "todo"
-        assert call_kwargs["action_name"] == "morning_check"
+        assert call_kwargs["action_name"] == "yesterday_report"
 
     @pytest.mark.asyncio
     async def test_no_plugins_with_actions(self, handlers):
@@ -401,7 +338,7 @@ class TestScheduleAdapterPluginFields:
         mock_schedule = MagicMock()
         mock_schedule.id = "sched001"
         mock_schedule.plugin_name = "todo"
-        mock_schedule.action_name = "morning_check"
+        mock_schedule.action_name = "yesterday_report"
         adapter._repo.add_schedule.return_value = mock_schedule
 
         adapter.add(
@@ -410,16 +347,16 @@ class TestScheduleAdapterPluginFields:
             hour=10,
             minute=0,
             message="",
-            name="todo:오전 체크",
+            name="todo:어제 할일 리포트",
             schedule_type="plugin",
             model="sonnet",
             plugin_name="todo",
-            action_name="morning_check",
+            action_name="yesterday_report",
         )
 
         call_kwargs = adapter._repo.add_schedule.call_args[1]
         assert call_kwargs["plugin_name"] == "todo"
-        assert call_kwargs["action_name"] == "morning_check"
+        assert call_kwargs["action_name"] == "yesterday_report"
         assert call_kwargs["schedule_type"] == "plugin"
 
 
@@ -437,7 +374,7 @@ class TestScheduleExecutorPlugin:
 
         mock_plugin = MagicMock()
         mock_plugin.name = "todo"
-        mock_plugin.execute_scheduled_action = AsyncMock(return_value="오전 할일 리마인더")
+        mock_plugin.execute_scheduled_action = AsyncMock(return_value="어제 할일 리포트")
 
         mock_loader = MagicMock(spec=PluginLoader)
         mock_loader.get_plugin_by_name.return_value = mock_plugin
@@ -446,10 +383,10 @@ class TestScheduleExecutorPlugin:
         schedule = MagicMock()
         schedule.type = "plugin"
         schedule.plugin_name = "todo"
-        schedule.action_name = "morning_check"
+        schedule.action_name = "yesterday_report"
         schedule.chat_id = 12345
         schedule.id = "sched001"
-        schedule.name = "todo:오전 체크"
+        schedule.name = "todo:어제 할일 리포트"
 
         # Execute the plugin path
         plugin = mock_loader.get_plugin_by_name(schedule.plugin_name)
@@ -457,9 +394,9 @@ class TestScheduleExecutorPlugin:
             schedule.action_name, schedule.chat_id
         )
 
-        assert response == "오전 할일 리마인더"
+        assert response == "어제 할일 리포트"
         mock_plugin.execute_scheduled_action.assert_called_once_with(
-            "morning_check", 12345
+            "yesterday_report", 12345
         )
 
     @pytest.mark.asyncio
@@ -493,7 +430,7 @@ class TestPluginScheduleFullFlow:
         mock_plugin = MagicMock()
         mock_plugin.name = "todo"
         mock_plugin.get_scheduled_actions.return_value = [
-            ScheduledAction(name="morning_check", description="오전 체크"),
+            ScheduledAction(name="yesterday_report", description="어제 할일 리포트"),
         ]
 
         mock_loader = MagicMock()
@@ -524,10 +461,10 @@ class TestPluginScheduleFullFlow:
 
         # Step 5: select minute → register
         mock_sched = MagicMock()
-        mock_sched.name = "todo:오전 체크"
+        mock_sched.name = "todo:어제 할일 리포트"
         mock_sched.time_str = "10:00"
         mock_sched.plugin_name = "todo"
-        mock_sched.action_name = "morning_check"
+        mock_sched.action_name = "yesterday_report"
         h._schedule_manager.add.return_value = mock_sched
 
         q5 = make_query()
@@ -568,16 +505,16 @@ class TestPluginScheduleRepository:
             hour=10,
             minute=0,
             message="",
-            name="todo:오전 체크",
+            name="todo:어제 할일 리포트",
             schedule_type="plugin",
             model="sonnet",
             plugin_name="todo",
-            action_name="morning_check",
+            action_name="yesterday_report",
         )
 
         assert schedule.type == "plugin"
         assert schedule.plugin_name == "todo"
-        assert schedule.action_name == "morning_check"
+        assert schedule.action_name == "yesterday_report"
 
     def test_retrieve_plugin_schedule(self, repo):
         """DB에서 플러그인 스케줄 조회."""
@@ -587,21 +524,21 @@ class TestPluginScheduleRepository:
         created = adapter.add(
             user_id="12345",
             chat_id=12345,
-            hour=21,
+            hour=9,
             minute=0,
             message="",
-            name="todo:하루 마무리",
+            name="todo:어제 할일 리포트",
             schedule_type="plugin",
             model="sonnet",
             plugin_name="todo",
-            action_name="daily_wrap",
+            action_name="yesterday_report",
         )
 
         fetched = adapter.get(created.id)
         assert fetched is not None
         assert fetched.type == "plugin"
         assert fetched.plugin_name == "todo"
-        assert fetched.action_name == "daily_wrap"
+        assert fetched.action_name == "yesterday_report"
 
     def test_plugin_schedule_to_dict(self, repo):
         """플러그인 스케줄 딕셔너리 변환."""
@@ -614,17 +551,17 @@ class TestPluginScheduleRepository:
             hour=10,
             minute=0,
             message="",
-            name="todo:오전 체크",
+            name="todo:어제 할일 리포트",
             schedule_type="plugin",
             model="sonnet",
             plugin_name="todo",
-            action_name="morning_check",
+            action_name="yesterday_report",
         )
 
         d = schedule.to_dict()
         assert d["type"] == "plugin"
         assert d["plugin_name"] == "todo"
-        assert d["action_name"] == "morning_check"
+        assert d["action_name"] == "yesterday_report"
 
     def test_plugin_schedule_type_emoji(self, repo):
         """플러그인 스케줄 이모지."""
@@ -641,7 +578,7 @@ class TestPluginScheduleRepository:
             schedule_type="plugin",
             model="sonnet",
             plugin_name="todo",
-            action_name="morning_check",
+            action_name="yesterday_report",
         )
 
         assert schedule.type_emoji == "🔌"

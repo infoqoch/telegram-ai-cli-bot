@@ -871,15 +871,14 @@ class Repository:
         self,
         chat_id: int,
         date: str,
-        slot: str,
         text: str
     ) -> Todo:
         """Add a todo item."""
         now = self._now()
         cursor = self._conn.execute(
             """INSERT INTO todos (chat_id, date, slot, text, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (chat_id, date, slot, text, now, now)
+               VALUES (?, ?, 'default', ?, ?, ?)""",
+            (chat_id, date, text, now, now)
         )
         self._conn.commit()
 
@@ -887,7 +886,7 @@ class Repository:
             id=cursor.lastrowid or 0,
             chat_id=chat_id,
             date=date,
-            slot=slot,
+            slot="default",
             text=text,
             done=False,
             created_at=now,
@@ -942,16 +941,8 @@ class Repository:
     def list_todos_by_date(self, chat_id: int, date: str) -> list[Todo]:
         """List todos for chat on specific date."""
         cursor = self._conn.execute(
-            "SELECT * FROM todos WHERE chat_id = ? AND date = ? ORDER BY slot, id",
+            "SELECT * FROM todos WHERE chat_id = ? AND date = ? ORDER BY id",
             (chat_id, date)
-        )
-        return [self._row_to_todo(row) for row in cursor.fetchall()]
-
-    def list_todos_by_slot(self, chat_id: int, date: str, slot: str) -> list[Todo]:
-        """List todos for specific slot."""
-        cursor = self._conn.execute(
-            "SELECT * FROM todos WHERE chat_id = ? AND date = ? AND slot = ? ORDER BY id",
-            (chat_id, date, slot)
         )
         return [self._row_to_todo(row) for row in cursor.fetchall()]
 
@@ -976,7 +967,7 @@ class Repository:
     def get_pending_todos(self, chat_id: int, date: str) -> list[Todo]:
         """Get incomplete todos for date."""
         cursor = self._conn.execute(
-            "SELECT * FROM todos WHERE chat_id = ? AND date = ? AND done = 0 ORDER BY slot, id",
+            "SELECT * FROM todos WHERE chat_id = ? AND date = ? AND done = 0 ORDER BY id",
             (chat_id, date)
         )
         return [self._row_to_todo(row) for row in cursor.fetchall()]
@@ -1000,7 +991,7 @@ class Repository:
         cursor = self._conn.execute(
             """SELECT * FROM todos
                WHERE chat_id = ? AND date >= ? AND date <= ?
-               ORDER BY date, slot, id""",
+               ORDER BY date, id""",
             (chat_id, start_date, end_date)
         )
         result: dict[str, list[Todo]] = {}

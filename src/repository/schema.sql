@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS todos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,
     date TEXT NOT NULL,  -- YYYY-MM-DD format
-    slot TEXT NOT NULL CHECK (slot IN ('morning', 'afternoon', 'evening')),
+    slot TEXT NOT NULL DEFAULT 'default',
     text TEXT NOT NULL,
     done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),

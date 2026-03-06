@@ -86,6 +86,41 @@ def init_repository(db_path: Path) -> Repository:
             import logging
             logging.getLogger(__name__).warning(f"schedules migration failed: {e}")
 
+    # todos slot CHECK 제약 제거 마이그레이션
+    if not _repository.is_migration_applied("todos_remove_slot_check_v1"):
+        try:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name='todos'"
+            ).fetchone()
+            if row and "CHECK" in row[0] and "slot IN" in row[0]:
+                conn.execute("ALTER TABLE todos RENAME TO _todos_old")
+                conn.execute("""
+                    CREATE TABLE todos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        chat_id INTEGER NOT NULL,
+                        date TEXT NOT NULL,
+                        slot TEXT NOT NULL DEFAULT 'default',
+                        text TEXT NOT NULL,
+                        done INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO todos
+                    SELECT id, chat_id, date, slot, text, done, created_at, updated_at
+                    FROM _todos_old
+                """)
+                conn.execute("DROP TABLE _todos_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_chat_id ON todos(chat_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_date ON todos(date)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_chat_date ON todos(chat_id, date)")
+                conn.commit()
+            _repository.mark_migration_applied("todos_remove_slot_check_v1")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"todos migration failed: {e}")
+
     return _repository
 
 

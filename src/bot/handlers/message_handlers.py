@@ -141,13 +141,10 @@ class MessageHandlers(BaseHandler):
             reply_text = update.message.reply_to_message.text or ""
             import re
 
-            if "slot:" in reply_text:
-                slot_match = re.search(r"slot:([mae])", reply_text)
-                if slot_match:
-                    slot_code = slot_match.group(1)
-                    await self._handle_todo_force_reply(update, chat_id, message, slot_code)
-                    clear_context()
-                    return
+            if "td:add" in reply_text:
+                await self._handle_todo_force_reply(update, chat_id, message)
+                clear_context()
+                return
 
             if "sess_name:" in reply_text:
                 sess_match = re.search(r"sess_name:(\w+)", reply_text)
