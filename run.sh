@@ -27,6 +27,23 @@ _get_running_pid() {
     pgrep -f 'python.*src.main' 2>/dev/null | head -1
 }
 
+LOG_ROTATE_COUNT=5  # 최근 5개 로그 보관
+
+_rotate_logs() {
+    # 로그 파일 로테이션: .5 삭제, .4→.5, .3→.4, ... .1→.2, current→.1
+    if [ ! -f "$LOG_FILE" ]; then
+        return
+    fi
+    # 가장 오래된 것부터 삭제/이동
+    rm -f "${LOG_FILE}.${LOG_ROTATE_COUNT}"
+    for i in $(seq $((LOG_ROTATE_COUNT - 1)) -1 1); do
+        if [ -f "${LOG_FILE}.${i}" ]; then
+            mv "${LOG_FILE}.${i}" "${LOG_FILE}.$((i + 1))"
+        fi
+    done
+    mv "$LOG_FILE" "${LOG_FILE}.1"
+}
+
 _kill_all_instances() {
     # 모든 관련 프로세스 강제 종료 (supervisor + main)
     # macOS 호환: pgrep 대신 ps + grep + awk 사용
@@ -64,6 +81,7 @@ case "$1" in
     # - TRACE: 최상세 로그 (외부 라이브러리 포함)
     # CLAUDECODE 환경변수 제거 (Claude Code 세션 내에서 실행 시 nested session 방지)
     unset CLAUDECODE
+    _rotate_logs
     LOG_LEVEL="${LOG_LEVEL:-DEBUG}" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
@@ -129,6 +147,7 @@ case "$1" in
     # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
     source venv/bin/activate
     unset CLAUDECODE
+    _rotate_logs
     LOG_LEVEL="TRACE" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
@@ -153,6 +172,7 @@ case "$1" in
     # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
     source venv/bin/activate
     unset CLAUDECODE
+    _rotate_logs
     LOG_LEVEL="DEBUG" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
