@@ -167,17 +167,29 @@ class BaseHandler:
                 )
 
                 trace_id = set_trace_id()
+                queue_id = msg["id"]
+
+                async def _safe_retry(coro, qid):
+                    try:
+                        await coro
+                    except Exception as exc:
+                        logger.error(f"재처리 태스크 실패 (id={qid}): {exc}", exc_info=True)
+                        repo.complete_message(qid, error=f"retry_task_failed: {exc}")
+
                 asyncio.create_task(
-                    self._process_claude_request_with_semaphore(
-                        bot=bot,
-                        chat_id=msg["chat_id"],
-                        user_id=str(msg["chat_id"]),
-                        session_id=msg["session_id"],
-                        message=msg["request"],
-                        is_new_session=False,
-                        trace_id=trace_id,
-                        model=msg.get("model", "sonnet"),
-                        queue_id=msg["id"],
+                    _safe_retry(
+                        self._process_claude_request_with_semaphore(
+                            bot=bot,
+                            chat_id=msg["chat_id"],
+                            user_id=str(msg["chat_id"]),
+                            session_id=msg["session_id"],
+                            message=msg["request"],
+                            is_new_session=False,
+                            trace_id=trace_id,
+                            model=msg.get("model", "sonnet"),
+                            queue_id=queue_id,
+                        ),
+                        queue_id,
                     )
                 )
                 count += 1
