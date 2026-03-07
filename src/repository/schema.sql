@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS message_log (
     -- processing state
     processed INTEGER NOT NULL DEFAULT 0,  -- 0: pending, 1: processing, 2: completed
     processed_at TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
 
     -- response
     response TEXT,

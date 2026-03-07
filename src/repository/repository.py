@@ -1120,10 +1120,11 @@ class Repository:
         return dict(row)
 
     def claim_message(self, queue_id: int) -> bool:
-        """Mark message as processing (processed=1). Returns True if claimed."""
+        """Mark message as processing (processed=1). Returns True if claimed.
+        Also works for retry (processed=1 stays at 1)."""
         cursor = self._conn.execute(
             """UPDATE message_log SET processed = 1
-               WHERE id = ? AND processed = 0""",
+               WHERE id = ? AND processed IN (0, 1)""",
             (queue_id,)
         )
         self._conn.commit()
@@ -1167,16 +1168,38 @@ class Repository:
             return None
         return dict(row)
 
-    def get_unfinished_messages(self, max_age_minutes: int = 30) -> list[dict[str, Any]]:
-        """Get all unfinished messages (processed=0 or 1) within max_age."""
+    def get_unfinished_messages(self, max_age_minutes: int = 30, max_retries: int = 2) -> list[dict[str, Any]]:
+        """Get all unfinished messages (processed=0 or 1) within max_age, under retry limit."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
         rows = self._conn.execute(
             """SELECT * FROM message_log
-               WHERE processed IN (0, 1) AND request_at > ?
+               WHERE processed IN (0, 1) AND request_at > ? AND retry_count < ?
                ORDER BY id ASC""",
-            (cutoff,),
+            (cutoff, max_retries),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def increment_retry_count(self, queue_id: int) -> int:
+        """Increment retry_count and return new value."""
+        self._conn.execute(
+            "UPDATE message_log SET retry_count = retry_count + 1 WHERE id = ?",
+            (queue_id,),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            "SELECT retry_count FROM message_log WHERE id = ?", (queue_id,)
+        ).fetchone()
+        return row[0] if row else 0
+
+    def fail_exceeded_retries(self, max_retries: int = 2) -> int:
+        """Mark messages that exceeded retry limit as completed with error."""
+        cursor = self._conn.execute(
+            """UPDATE message_log SET processed = 2, processed_at = ?, error = 'retry_limit_exceeded'
+               WHERE processed IN (0, 1) AND retry_count >= ?""",
+            (self._now(), max_retries),
+        )
+        self._conn.commit()
+        return cursor.rowcount
 
     def reset_stale_processing_messages(self, timeout_minutes: int = 30) -> int:
         """Reset messages stuck in processing state back to pending."""

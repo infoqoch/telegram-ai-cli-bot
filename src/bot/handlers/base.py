@@ -136,11 +136,17 @@ class BaseHandler:
 
     async def _retry_interrupted_messages(self, bot) -> int:
         """봇 재시작 후 미완료 메시지를 재처리. Returns count retried."""
+        MAX_RETRIES = 2
         repo = self._repository
         if not repo:
             return 0
 
-        unfinished = repo.get_unfinished_messages(max_age_minutes=30)
+        # 재시도 한도 초과 메시지 정리
+        failed = repo.fail_exceeded_retries(max_retries=MAX_RETRIES)
+        if failed:
+            logger.warning(f"재시도 한도 초과 메시지 {failed}개 실패 처리")
+
+        unfinished = repo.get_unfinished_messages(max_age_minutes=30, max_retries=MAX_RETRIES)
         if not unfinished:
             return 0
 
@@ -149,10 +155,14 @@ class BaseHandler:
         count = 0
         for msg in unfinished:
             try:
+                # 재시도 카운트 증가
+                new_count = repo.increment_retry_count(msg["id"])
+                logger.info(f"메시지 재처리 시도 (id={msg['id']}, retry={new_count}/{MAX_RETRIES})")
+
                 short_req = msg["request"][:50]
                 await bot.send_message(
                     chat_id=msg["chat_id"],
-                    text=f"🔄 봇 재시작으로 중단된 메시지를 재처리합니다...\n<code>{short_req}</code>",
+                    text=f"🔄 봇 재시작으로 중단된 메시지를 재처리합니다... ({new_count}/{MAX_RETRIES})\n<code>{short_req}</code>",
                     parse_mode="HTML",
                 )
 
