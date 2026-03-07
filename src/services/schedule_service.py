@@ -189,7 +189,6 @@ class ScheduleService:
         for s in schedules:
             status = "✅" if s.enabled else "⏸"
             type_icon = "🔌" if s.type == "plugin" else ("📂" if s.type == "workspace" else "💬")
-            time_str = f"{s.hour:02d}:{s.minute:02d}"
-            lines.append(f"{status} {type_icon} <b>{s.name}</b> - {time_str}")
+            lines.append(f"{status} {type_icon} <b>{s.name}</b> - {s.time_str}")
 
         return "\n".join(lines)

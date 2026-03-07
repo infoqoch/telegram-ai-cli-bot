@@ -294,10 +294,11 @@ class TestScheduleService:
                 minute=0,
                 enabled=True,
                 type="claude",
+                time_str="10:00 KST",
             )
         ]
 
         result = service.get_status_text("user1")
 
         assert "Morning Task" in result
-        assert "10:00" in result
+        assert "10:00 KST" in result

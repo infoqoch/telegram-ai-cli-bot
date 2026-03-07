@@ -77,10 +77,10 @@ class BaseHandler:
         self._active_tasks: dict[int, TaskInfo] = {}
         self._watchdog_task: Optional[asyncio.Task] = None
         self._creating_sessions: set[str] = set()
-        self._pending_schedule_input: dict[str, dict] = {}
+        self._sched_pending: dict[str, dict] = {}
         self._schedule_manager = None
         self._workspace_registry = None
-        self._pending_workspace_input: dict[str, dict] = {}
+        self._ws_pending: dict[str, dict] = {}
         self._watchdog_started = False
         # Temporary pending for session queue callbacks (keyed by pending_key)
         self._temp_pending: dict[str, dict] = {}
@@ -347,7 +347,6 @@ class BaseHandler:
             "/nw path [model] [name] - Workspace session\n"
             "/new_haiku_speedy - Speedy\n"
             "/new_opus_smarty - Smarty\n"
-            "/model - Change current session model\n"
             "/rename_MyName - Rename session\n"
             "/session - Current session info\n"
             "/sl - Session list\n"
@@ -358,7 +357,7 @@ class BaseHandler:
             "Schedule\n"
             "/scheduler - Schedule management\n\n"
             "Other\n"
-            "/lock - Active tasks/queue\n"
+            "/tasks - Active tasks/queue\n"
             "/chatid - My chat ID\n"
             "/help - This help",
             parse_mode="HTML"

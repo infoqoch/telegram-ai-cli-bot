@@ -421,7 +421,7 @@ class TestSchedulerMinuteSelection:
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 
-        handlers._pending_schedule_input["12345"] = {}
+        handlers._sched_pending["12345"] = {}
 
         # simulate sched:time:claude:_:10 callback
         await handlers._handle_scheduler_callback(query, 12345, "sched:time:claude:_:10")
@@ -440,7 +440,7 @@ class TestSchedulerMinuteSelection:
             markup = call_kwargs[1]["reply_markup"]
 
         # pending에 hour 저장 확인
-        pending = handlers._pending_schedule_input["12345"]
+        pending = handlers._sched_pending["12345"]
         assert pending["hour"] == 10
 
     @pytest.mark.asyncio
@@ -450,7 +450,7 @@ class TestSchedulerMinuteSelection:
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 
-        handlers._pending_schedule_input["12345"] = {
+        handlers._sched_pending["12345"] = {
             "type": "claude",
             "hour": 10,
         }
@@ -468,7 +468,7 @@ class TestSchedulerMinuteSelection:
         assert "model" in text.lower() or "Select model" in text
 
         # pending에 minute 저장 확인
-        pending = handlers._pending_schedule_input["12345"]
+        pending = handlers._sched_pending["12345"]
         assert pending["minute"] == 35
 
     @pytest.mark.asyncio
@@ -478,7 +478,7 @@ class TestSchedulerMinuteSelection:
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 
-        handlers._pending_schedule_input["12345"] = {
+        handlers._sched_pending["12345"] = {
             "type": "workspace",
             "hour": 8,
             "workspace_path": "/test/path",
@@ -486,7 +486,7 @@ class TestSchedulerMinuteSelection:
 
         await handlers._handle_scheduler_callback(query, 12345, "sched:minute:0")
 
-        pending = handlers._pending_schedule_input["12345"]
+        pending = handlers._sched_pending["12345"]
         assert pending["minute"] == 0
 
         call_kwargs = query.edit_message_text.call_args
@@ -500,14 +500,14 @@ class TestSchedulerMinuteSelection:
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 
-        handlers._pending_schedule_input["12345"] = {
+        handlers._sched_pending["12345"] = {
             "type": "claude",
             "hour": 22,
         }
 
         await handlers._handle_scheduler_callback(query, 12345, "sched:minute:55")
 
-        pending = handlers._pending_schedule_input["12345"]
+        pending = handlers._sched_pending["12345"]
         assert pending["minute"] == 55
 
         call_kwargs = query.edit_message_text.call_args
@@ -523,7 +523,7 @@ class TestSchedulerMinuteSelection:
         query.message = MagicMock()
         query.message.reply_text = AsyncMock()
 
-        handlers._pending_schedule_input["12345"] = {
+        handlers._sched_pending["12345"] = {
             "type": "claude",
             "hour": 14,
             "minute": 25,
@@ -795,7 +795,7 @@ class TestSchedulerInteractionFlow:
 
         text2 = self._get_text(q2)
         assert "10" in text2
-        assert handlers._pending_schedule_input["12345"]["hour"] == 10
+        assert handlers._sched_pending["12345"]["hour"] == 10
 
         callbacks2 = self._get_callback_data(q2)
         min_callbacks = [c for c in callbacks2 if "sched:minute:" in c]
@@ -807,7 +807,7 @@ class TestSchedulerInteractionFlow:
 
         text3 = self._get_text(q3)
         assert "10:25" in text3
-        assert handlers._pending_schedule_input["12345"]["minute"] == 25
+        assert handlers._sched_pending["12345"]["minute"] == 25
 
         callbacks3 = self._get_callback_data(q3)
         model_callbacks = [c for c in callbacks3 if "sched:model:" in c]
@@ -822,7 +822,7 @@ class TestSchedulerInteractionFlow:
         text4 = self._get_text(q4)
         assert "10:25" in text4
         assert "sonnet" in text4
-        assert handlers._pending_schedule_input["12345"]["model"] == "sonnet"
+        assert handlers._sched_pending["12345"]["model"] == "sonnet"
 
         # ForceReply 전송 확인
         q4.message.reply_text.assert_called_once()

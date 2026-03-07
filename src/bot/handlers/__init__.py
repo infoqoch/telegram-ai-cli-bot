@@ -31,7 +31,7 @@ class BotHandlers(
     - BaseHandler: Common utilities, watchdog, task tracking
     - SessionHandlers: Session commands (new, switch, delete, etc.)
     - MessageHandlers: Message processing, Claude requests
-    - AdminHandlers: Admin commands (lock, jobs, auth, etc.)
+    - AdminHandlers: Admin commands (tasks, jobs, auth, etc.)
     - WorkspaceHandlers: Workspace management
     - CallbackHandlers: Inline button callbacks
     """

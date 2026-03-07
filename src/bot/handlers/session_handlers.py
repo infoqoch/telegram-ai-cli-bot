@@ -214,10 +214,10 @@ class SessionHandlers(BaseHandler):
     @authorized_only
     @authenticated_only
     async def model_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /model command - change current session's model.
+        """Handle /model command - redirect to /session or change model.
 
         Usage:
-            /model         - Show current model
+            /model         - Redirect to /session (shows full session info with model buttons)
             /model opus    - Change to Opus
             /model sonnet  - Change to Sonnet
             /model haiku   - Change to Haiku
@@ -226,6 +226,12 @@ class SessionHandlers(BaseHandler):
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
         logger.info("/model command received")
+
+        # No args → redirect to /session (has model change buttons)
+        if not context.args:
+            logger.trace("/model without args → redirect to /session")
+            await self.session_command(update, context)
+            return
 
         session_id = self.sessions.get_current_session_id(user_id)
         if not session_id:
@@ -242,20 +248,6 @@ class SessionHandlers(BaseHandler):
             return
 
         current_model = self.sessions.get_session_model(session_id)
-
-        if not context.args:
-            model_emoji = get_model_emoji(current_model)
-            logger.trace(f"Showing current model: {current_model}")
-            await update.message.reply_text(
-                f"<b>Current Model</b>: {model_emoji} {current_model}\n\n"
-                f"Change to:\n"
-                f"/model opus - Best quality\n"
-                f"/model sonnet - Balanced\n"
-                f"/model haiku - Fast",
-                parse_mode="HTML"
-            )
-            clear_context()
-            return
 
         new_model = context.args[0].lower()
         if new_model not in SUPPORTED_MODELS:
@@ -360,6 +352,7 @@ class SessionHandlers(BaseHandler):
                 InlineKeyboardButton("Haiku", callback_data=f"sess:model:haiku:{session_id}"),
             ],
             [
+                InlineKeyboardButton("✏️ Rename", callback_data=f"sess:rename:{session_id}"),
                 InlineKeyboardButton("📜 History", callback_data=f"sess:history:{session_id}"),
                 InlineKeyboardButton("🗑️ Delete", callback_data=f"sess:delete:{session_id}"),
             ],
@@ -429,7 +422,7 @@ class SessionHandlers(BaseHandler):
         ])
         buttons.append([
             InlineKeyboardButton("Refresh", callback_data="sess:list"),
-            InlineKeyboardButton("Tasks", callback_data="lock:refresh"),
+            InlineKeyboardButton("Tasks", callback_data="tasks:refresh"),
         ])
 
         await update.message.reply_text(

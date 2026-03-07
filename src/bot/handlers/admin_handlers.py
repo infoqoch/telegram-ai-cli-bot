@@ -15,21 +15,21 @@ from .base import BaseHandler
 class AdminHandlers(BaseHandler):
     """Admin command handlers."""
 
-    async def lock_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /lock command - show active tasks with buttons."""
+    async def tasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /tasks command - show active tasks with buttons."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         user_id = str(chat_id)
-        logger.info("/lock command received")
+        logger.info("/tasks command received")
 
-        text, keyboard = self._build_lock_status(user_id)
+        text, keyboard = self._build_tasks_status(user_id)
 
         await update.message.reply_text(
             text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
-        logger.trace("/lock complete")
+        logger.trace("/tasks complete")
         clear_context()
 
     async def scheduler_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -179,7 +179,7 @@ class AdminHandlers(BaseHandler):
 
         clear_context()
 
-    def _build_lock_status(self, user_id: str) -> tuple[str, list]:
+    def _build_tasks_status(self, user_id: str) -> tuple[str, list]:
         """Build lock status text and buttons (including queue)."""
         user_tasks = [
             info for info in self._active_tasks.values()
@@ -243,7 +243,8 @@ class AdminHandlers(BaseHandler):
         text = "".join(lines) if lines else "No status info"
 
         keyboard = [[
-            InlineKeyboardButton("Refresh", callback_data="lock:refresh"),
+            InlineKeyboardButton("Refresh", callback_data="tasks:refresh"),
+            InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
         ]]
 
         return text, keyboard

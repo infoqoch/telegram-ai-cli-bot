@@ -228,7 +228,7 @@ class WorkspaceHandlers(BaseHandler):
                 await query.answer("Workspace not found")
                 return
 
-            self._pending_workspace_input[user_id] = {
+            self._ws_pending[user_id] = {
                 "ws_id": ws_id,
                 "hour": hour,
             }
@@ -269,9 +269,9 @@ class WorkspaceHandlers(BaseHandler):
                 await query.answer("Workspace not found")
                 return
 
-            pending = self._pending_workspace_input.get(user_id, {})
+            pending = self._ws_pending.get(user_id, {})
             pending["minute"] = minute
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             hour = pending.get("hour", 9)
 
@@ -303,9 +303,9 @@ class WorkspaceHandlers(BaseHandler):
                 await query.answer("Workspace not found")
                 return
 
-            pending = self._pending_workspace_input.get(user_id, {})
+            pending = self._ws_pending.get(user_id, {})
             pending["model"] = model
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             hour = pending.get("hour", 9)
             minute = pending.get("minute", 0)
@@ -335,7 +335,7 @@ class WorkspaceHandlers(BaseHandler):
                 parse_mode="HTML"
             )
 
-            self._pending_workspace_input[user_id] = {"action": "recommend"}
+            self._ws_pending[user_id] = {"action": "recommend"}
 
             await query.message.reply_text(
                 "Enter purpose:",
@@ -347,7 +347,7 @@ class WorkspaceHandlers(BaseHandler):
         # Recommendation selection → ask for name
         if action.startswith("recommend:"):
             idx = int(action[10:])
-            pending = self._pending_workspace_input.get(user_id, {})
+            pending = self._ws_pending.get(user_id, {})
             recommendations = pending.get("recommendations", [])
 
             if idx >= len(recommendations):
@@ -359,7 +359,7 @@ class WorkspaceHandlers(BaseHandler):
             pending["path"] = rec["path"]
             pending["suggested_name"] = rec["name"]
             pending["description"] = rec.get("description", rec.get("reason", ""))
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             await query.edit_message_text(
                 f"<b>Selected:</b> <code>{rec['path'].replace(str(Path.home()), '~')}</code>\n\n"
@@ -375,9 +375,9 @@ class WorkspaceHandlers(BaseHandler):
 
         # Manual input selection
         if action == "manual":
-            pending = self._pending_workspace_input.get(user_id, {})
+            pending = self._ws_pending.get(user_id, {})
             pending["action"] = "manual_path"
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             await query.edit_message_text(
                 "<b>Manual Workspace Registration</b>\n\n"
@@ -413,7 +413,7 @@ class WorkspaceHandlers(BaseHandler):
     async def _handle_workspace_force_reply(self, update: Update, chat_id: int, message: str) -> None:
         """Handle workspace ForceReply responses."""
         user_id = str(chat_id)
-        pending = self._pending_workspace_input.get(user_id)
+        pending = self._ws_pending.get(user_id)
 
         if not pending:
             await update.message.reply_text("Input expired. Please try again.")
@@ -435,7 +435,7 @@ class WorkspaceHandlers(BaseHandler):
             if not recommendations:
                 pending["action"] = "manual_path"
                 pending["purpose"] = message
-                self._pending_workspace_input[user_id] = pending
+                self._ws_pending[user_id] = pending
 
                 await update.message.reply_text(
                     "Could not get AI recommendations.\n\n"
@@ -446,7 +446,7 @@ class WorkspaceHandlers(BaseHandler):
 
             pending["recommendations"] = recommendations
             pending["purpose"] = message
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             buttons = []
             for i, rec in enumerate(recommendations):
@@ -494,7 +494,7 @@ class WorkspaceHandlers(BaseHandler):
                 description=description,
             )
 
-            del self._pending_workspace_input[user_id]
+            del self._ws_pending[user_id]
 
             text = self._workspace_registry.get_status_text(user_id)
             keyboard = self._build_workspace_keyboard(user_id)
@@ -526,7 +526,7 @@ class WorkspaceHandlers(BaseHandler):
 
             pending["path"] = str(expanded_path)
             pending["action"] = "manual_name"
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             await update.message.reply_text(
                 f"Path confirmed: <code>{expanded_path}</code>\n\n"
@@ -541,7 +541,7 @@ class WorkspaceHandlers(BaseHandler):
             name = message.strip()[:30]
             pending["name"] = name
             pending["action"] = "manual_desc"
-            self._pending_workspace_input[user_id] = pending
+            self._ws_pending[user_id] = pending
 
             await update.message.reply_text(
                 f"Name: <b>{name}</b>\n\n"
@@ -564,7 +564,7 @@ class WorkspaceHandlers(BaseHandler):
                 description=description,
             )
 
-            del self._pending_workspace_input[user_id]
+            del self._ws_pending[user_id]
 
             text = self._workspace_registry.get_status_text(user_id)
             keyboard = self._build_workspace_keyboard(user_id)
@@ -586,12 +586,12 @@ class WorkspaceHandlers(BaseHandler):
             ws = self._workspace_registry.get(ws_id)
             if not ws:
                 await update.message.reply_text("Workspace not found.")
-                del self._pending_workspace_input[user_id]
+                del self._ws_pending[user_id]
                 return
 
             if not self._schedule_manager:
                 await update.message.reply_text("Schedule feature disabled.")
-                del self._pending_workspace_input[user_id]
+                del self._ws_pending[user_id]
                 return
 
             schedule = self._schedule_manager.add(
@@ -608,7 +608,7 @@ class WorkspaceHandlers(BaseHandler):
 
             self._workspace_registry.mark_used(ws_id)
 
-            del self._pending_workspace_input[user_id]
+            del self._ws_pending[user_id]
 
             keyboard = [[
                 InlineKeyboardButton("Schedules", callback_data="sched:refresh"),
@@ -630,8 +630,8 @@ class WorkspaceHandlers(BaseHandler):
             return
 
         await update.message.reply_text("Unknown input state. Please try again.")
-        if user_id in self._pending_workspace_input:
-            del self._pending_workspace_input[user_id]
+        if user_id in self._ws_pending:
+            del self._ws_pending[user_id]
 
     def _get_allowed_workspace_paths(self) -> list[str]:
         """Get allowed workspace path list."""

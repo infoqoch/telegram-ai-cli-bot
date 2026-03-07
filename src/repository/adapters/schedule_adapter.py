@@ -33,8 +33,8 @@ class ScheduleData:
 
     @property
     def time_str(self) -> str:
-        """Return formatted time string HH:MM."""
-        return f"{self.hour:02d}:{self.minute:02d}"
+        """Return formatted time string HH:MM KST."""
+        return f"{self.hour:02d}:{self.minute:02d} KST"
 
     @property
     def type_emoji(self) -> str:
@@ -284,8 +284,7 @@ class ScheduleManagerAdapter:
         for s in schedules:
             status = "✅" if s.enabled else "⏸"
             type_icon = "📂" if s.type == "workspace" else "💬"
-            time_str = f"{s.hour:02d}:{s.minute:02d}"
-            lines.append(f"{status} {type_icon} <b>{s.name}</b> - {time_str}")
+            lines.append(f"{status} {type_icon} <b>{s.name}</b> - {s.time_str}")
 
         return "\n".join(lines)
 

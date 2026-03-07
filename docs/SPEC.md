@@ -62,7 +62,7 @@
 | `/new_workspace path [model] [name]` | 워크스페이스 세션 생성 | `/nw` |
 | `/workspace` | 워크스페이스 관리 | `/ws` |
 | `/scheduler` | 스케줄 관리 | - |
-| `/lock` | 활성 태스크/큐 현황 | - |
+| `/tasks` | 활성 태스크/큐 현황 | - |
 | `/plugins` | 플러그인 목록 | - |
 | `/ai <question>` | 플러그인 우회, Claude에 직접 질문 | - |
 | `/chatid` | 내 Chat ID 확인 | - |
@@ -745,7 +745,7 @@ Claude CLI에 전달되는 전역 프롬프트:
 
 ---
 
-## 태스크 현황 (`/lock`)
+## 태스크 현황 (`/tasks`)
 
 처리 중인 메시지와 대기열의 실시간 현황 대시보드.
 

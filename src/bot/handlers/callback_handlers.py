@@ -54,9 +54,9 @@ class CallbackHandlers(BaseHandler):
             await self._handle_session_callback(query, chat_id, callback_data)
             return
 
-        # Lock callback
-        if callback_data.startswith("lock:"):
-            await self._handle_lock_callback(query, chat_id)
+        # Tasks callback
+        if callback_data.startswith("tasks:"):
+            await self._handle_tasks_callback(query, chat_id)
             return
 
         # Scheduler callback
@@ -133,6 +133,30 @@ class CallbackHandlers(BaseHandler):
             parse_mode="HTML"
         )
 
+    async def _handle_rename_force_reply(self, update: Update, chat_id: int, new_name: str, session_id: str) -> None:
+        """Handle session rename ForceReply response."""
+        logger.info(f"Rename ForceReply processing: session={session_id[:8]}, name={new_name}")
+
+        new_name = new_name.strip()
+        if not new_name:
+            await update.message.reply_text("❌ Name cannot be empty.")
+            return
+
+        if len(new_name) > 50:
+            await update.message.reply_text("❌ Name too long. (max 50 chars)")
+            return
+
+        if self.sessions.rename_session(session_id, new_name):
+            logger.info(f"Session renamed: {session_id[:8]} -> {new_name}")
+            await update.message.reply_text(
+                f"✅ Session renamed!\n\n"
+                f"- Session: <code>{session_id[:8]}</code>\n"
+                f"- Name: {new_name}",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text("❌ Rename failed.")
+
     async def _handle_memo_force_reply(self, update: Update, chat_id: int, message: str) -> None:
         """Handle memo add ForceReply response."""
         logger.info(f"Memo ForceReply processing: msg={message[:50]}")
@@ -156,7 +180,7 @@ class CallbackHandlers(BaseHandler):
     async def _handle_schedule_force_reply(self, update: Update, chat_id: int, message: str) -> None:
         """Handle schedule message input ForceReply response."""
         user_id = str(chat_id)
-        pending = self._pending_schedule_input.get(user_id)
+        pending = self._sched_pending.get(user_id)
 
         if not pending:
             await update.message.reply_text("Schedule input expired. Please try again.")
@@ -164,7 +188,7 @@ class CallbackHandlers(BaseHandler):
 
         if not self._schedule_manager:
             await update.message.reply_text("Schedule feature disabled.")
-            del self._pending_schedule_input[user_id]
+            del self._sched_pending[user_id]
             return
 
         schedule_type = pending.get("type", "claude")
@@ -187,7 +211,7 @@ class CallbackHandlers(BaseHandler):
             workspace_path=workspace_path,
         )
 
-        del self._pending_schedule_input[user_id]
+        del self._sched_pending[user_id]
 
         keyboard = [[
             InlineKeyboardButton("Schedule List", callback_data="sched:refresh"),
@@ -396,6 +420,10 @@ class CallbackHandlers(BaseHandler):
             elif action == "list":
                 await self._handle_session_list_callback(query, chat_id)
 
+            elif action == "rename":
+                session_id = parts[2] if len(parts) > 2 else ""
+                await self._handle_rename_prompt_callback(query, chat_id, session_id)
+
             elif action == "model":
                 model = parts[2] if len(parts) > 2 else "sonnet"
                 session_id = parts[3] if len(parts) > 3 else ""
@@ -434,6 +462,23 @@ class CallbackHandlers(BaseHandler):
         await query.message.reply_text(
             text=f"Enter session name (sess_name:{model})",
             reply_markup=ForceReply(selective=True, input_field_placeholder="Session name...")
+        )
+
+    async def _handle_rename_prompt_callback(self, query, chat_id: int, session_id: str) -> None:
+        """Handle rename button - prompt for new name via ForceReply."""
+        session_name = self.sessions.get_session_name(session_id) or "(unnamed)"
+
+        await query.edit_message_text(
+            text=f"✏️ <b>Rename Session</b>\n\n"
+            f"- Current: {session_name}\n"
+            f"- ID: <code>{session_id[:8]}</code>\n\n"
+            f"Enter new name below:",
+            parse_mode="HTML"
+        )
+
+        await query.message.reply_text(
+            text=f"Enter new name (sess_rename:{session_id})",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="New session name...")
         )
 
     async def _handle_new_session_callback(self, query, chat_id: int, model: str, name: str = "") -> None:
@@ -645,7 +690,7 @@ class CallbackHandlers(BaseHandler):
         ])
         buttons.append([
             InlineKeyboardButton("Refresh", callback_data="sess:list"),
-            InlineKeyboardButton("Tasks", callback_data="lock:refresh"),
+            InlineKeyboardButton("Tasks", callback_data="tasks:refresh"),
         ])
 
         await query.edit_message_text(
@@ -690,10 +735,10 @@ class CallbackHandlers(BaseHandler):
             parse_mode="HTML"
         )
 
-    async def _handle_lock_callback(self, query, chat_id: int) -> None:
-        """Handle task status callback - same as /lock."""
+    async def _handle_tasks_callback(self, query, chat_id: int) -> None:
+        """Handle task status callback - same as /tasks."""
         user_id = str(chat_id)
-        text, keyboard = self._build_lock_status(user_id)
+        text, keyboard = self._build_tasks_status(user_id)
 
         await query.edit_message_text(
             text=text,
@@ -935,7 +980,7 @@ class CallbackHandlers(BaseHandler):
                     )
                 ])
 
-            self._pending_schedule_input[user_id] = {"workspaces": ws_map}
+            self._sched_pending[user_id] = {"workspaces": ws_map}
 
             buttons.append([
                 InlineKeyboardButton("Cancel", callback_data="sched:refresh")
@@ -984,7 +1029,7 @@ class CallbackHandlers(BaseHandler):
                 await query.answer()
                 return
 
-            self._pending_schedule_input[user_id] = {"plugin_map": plugin_map}
+            self._sched_pending[user_id] = {"plugin_map": plugin_map}
             buttons.append([
                 InlineKeyboardButton("Cancel", callback_data="sched:refresh")
             ])
@@ -1001,7 +1046,7 @@ class CallbackHandlers(BaseHandler):
         # Plugin selected - show actions
         if action.startswith("plugin:") and not action.startswith("pluginaction:"):
             plugin_idx = int(action[7:])
-            pending = self._pending_schedule_input.get(user_id, {})
+            pending = self._sched_pending.get(user_id, {})
             plugin_map = pending.get("plugin_map", {})
             plugin_info = plugin_map.get(plugin_idx)
 
@@ -1010,7 +1055,7 @@ class CallbackHandlers(BaseHandler):
                 return
 
             pending["selected_plugin"] = plugin_info["name"]
-            self._pending_schedule_input[user_id] = pending
+            self._sched_pending[user_id] = pending
 
             buttons = []
             for i, act in enumerate(plugin_info["actions"]):
@@ -1036,7 +1081,7 @@ class CallbackHandlers(BaseHandler):
         # Plugin action selected - time selection
         if action.startswith("pluginaction:"):
             action_idx = int(action[13:])
-            pending = self._pending_schedule_input.get(user_id, {})
+            pending = self._sched_pending.get(user_id, {})
             plugin_name = pending.get("selected_plugin")
             plugin_map = pending.get("plugin_map", {})
 
@@ -1056,7 +1101,7 @@ class CallbackHandlers(BaseHandler):
             pending["plugin_name"] = plugin_name
             pending["action_name"] = selected_action.name
             pending["name"] = f"{plugin_name}:{selected_action.description}"
-            self._pending_schedule_input[user_id] = pending
+            self._sched_pending[user_id] = pending
 
             buttons = []
             row = []
@@ -1087,7 +1132,7 @@ class CallbackHandlers(BaseHandler):
         # Workspace selected - time selection
         if action.startswith("wspath:"):
             ws_idx = int(action[7:])
-            pending = self._pending_schedule_input.get(user_id, {})
+            pending = self._sched_pending.get(user_id, {})
             ws_map = pending.get("workspaces", {})
 
             ws_info = ws_map.get(ws_idx)
@@ -1135,7 +1180,7 @@ class CallbackHandlers(BaseHandler):
 
             schedule_type, path_idx, hour = parts[0], parts[1], int(parts[2])
 
-            pending = self._pending_schedule_input.get(user_id, {})
+            pending = self._sched_pending.get(user_id, {})
             pending["type"] = schedule_type
             pending["hour"] = hour
 
@@ -1147,7 +1192,7 @@ class CallbackHandlers(BaseHandler):
                     pending["workspace_path"] = ws_info["path"]
                     pending["name"] = ws_info["name"]
 
-            self._pending_schedule_input[user_id] = pending
+            self._sched_pending[user_id] = pending
 
             # Minute selection buttons (00~55, 5-min intervals)
             buttons = []
@@ -1183,9 +1228,9 @@ class CallbackHandlers(BaseHandler):
         if action.startswith("minute:"):
             minute = int(action[7:])
 
-            pending = self._pending_schedule_input.get(user_id, {})
+            pending = self._sched_pending.get(user_id, {})
             pending["minute"] = minute
-            self._pending_schedule_input[user_id] = pending
+            self._sched_pending[user_id] = pending
 
             hour = pending.get("hour", 9)
             schedule_type = pending.get("type", "claude")
@@ -1194,7 +1239,7 @@ class CallbackHandlers(BaseHandler):
             if schedule_type == "plugin":
                 if not self._schedule_manager:
                     await query.edit_message_text("Schedule feature disabled.")
-                    del self._pending_schedule_input[user_id]
+                    del self._sched_pending[user_id]
                     return
 
                 schedule = self._schedule_manager.add(
@@ -1210,7 +1255,7 @@ class CallbackHandlers(BaseHandler):
                     action_name=pending.get("action_name"),
                 )
 
-                del self._pending_schedule_input[user_id]
+                del self._sched_pending[user_id]
 
                 keyboard = [[
                     InlineKeyboardButton("Schedule List", callback_data="sched:refresh"),
@@ -1253,9 +1298,9 @@ class CallbackHandlers(BaseHandler):
         # Model selected - message input (ForceReply)
         if action.startswith("model:"):
             model = action[6:]
-            pending = self._pending_schedule_input.get(user_id, {})
+            pending = self._sched_pending.get(user_id, {})
             pending["model"] = model
-            self._pending_schedule_input[user_id] = pending
+            self._sched_pending[user_id] = pending
 
             schedule_type = pending.get("type", "claude")
             hour = pending.get("hour", 9)

@@ -176,7 +176,7 @@ class TestWorkspaceCallbackFlows:
     @pytest.mark.asyncio
     async def test_ws_sched_minute_shows_models(self, handlers):
         """ws:sched_minute:{id}:{minute} - 모델 선택 화면."""
-        handlers._pending_workspace_input["12345"] = {"ws_id": "ws001", "hour": 14}
+        handlers._ws_pending["12345"] = {"ws_id": "ws001", "hour": 14}
 
         query = make_query()
         await handlers._handle_workspace_callback(query, 12345, "ws:sched_minute:ws001:30")
@@ -190,7 +190,7 @@ class TestWorkspaceCallbackFlows:
     @pytest.mark.asyncio
     async def test_ws_sched_model_shows_force_reply(self, handlers):
         """ws:sched_model:{id}:{model} - 메시지 입력 ForceReply."""
-        handlers._pending_workspace_input["12345"] = {
+        handlers._ws_pending["12345"] = {
             "ws_id": "ws001", "hour": 14, "minute": 30
         }
 
@@ -224,12 +224,12 @@ class TestWorkspaceCallbackFlows:
         # ForceReply 전송 확인
         query.message.reply_text.assert_called_once()
         # pending state 설정 확인
-        assert handlers._pending_workspace_input["12345"]["action"] == "recommend"
+        assert handlers._ws_pending["12345"]["action"] == "recommend"
 
     @pytest.mark.asyncio
     async def test_ws_manual_shows_path_input(self, handlers):
         """ws:manual - 수동 경로 입력."""
-        handlers._pending_workspace_input["12345"] = {"action": "recommend"}
+        handlers._ws_pending["12345"] = {"action": "recommend"}
 
         query = make_query()
         await handlers._handle_workspace_callback(query, 12345, "ws:manual")
@@ -238,7 +238,7 @@ class TestWorkspaceCallbackFlows:
         assert "Manual" in text
 
         query.message.reply_text.assert_called_once()
-        assert handlers._pending_workspace_input["12345"]["action"] == "manual_path"
+        assert handlers._ws_pending["12345"]["action"] == "manual_path"
 
     @pytest.mark.asyncio
     async def test_ws_full_schedule_flow(self, handlers):
@@ -254,13 +254,13 @@ class TestWorkspaceCallbackFlows:
         assert any("sched_minute" in c for c in get_callback_data(q2))
 
         # Step 3: minute (30)
-        handlers._pending_workspace_input["12345"] = {"ws_id": "ws001", "hour": 9}
+        handlers._ws_pending["12345"] = {"ws_id": "ws001", "hour": 9}
         q3 = make_query()
         await handlers._handle_workspace_callback(q3, 12345, "ws:sched_minute:ws001:30")
         assert "09:30" in get_text(q3)
 
         # Step 4: model
-        handlers._pending_workspace_input["12345"]["minute"] = 30
+        handlers._ws_pending["12345"]["minute"] = 30
         q4 = make_query()
         await handlers._handle_workspace_callback(q4, 12345, "ws:sched_model:ws001:haiku")
         assert "09:30" in get_text(q4)
@@ -301,7 +301,7 @@ class TestWorkspaceForceReplyFlows:
     @pytest.mark.asyncio
     async def test_recommend_no_results_falls_to_manual(self, handlers):
         """AI 추천 없으면 수동 입력으로 전환."""
-        handlers._pending_workspace_input["12345"] = {"action": "recommend"}
+        handlers._ws_pending["12345"] = {"action": "recommend"}
 
         update = MagicMock()
         update.message.reply_text = AsyncMock()
@@ -309,7 +309,7 @@ class TestWorkspaceForceReplyFlows:
         await handlers._handle_workspace_force_reply(update, 12345, "투자 분석")
 
         # 수동 입력 모드 전환
-        assert handlers._pending_workspace_input["12345"]["action"] == "manual_path"
+        assert handlers._ws_pending["12345"]["action"] == "manual_path"
 
     @pytest.mark.asyncio
     async def test_manual_path_name_desc_flow(self, handlers):
@@ -319,31 +319,31 @@ class TestWorkspaceForceReplyFlows:
 
         try:
             # Step 1: path
-            handlers._pending_workspace_input["12345"] = {"action": "manual_path"}
+            handlers._ws_pending["12345"] = {"action": "manual_path"}
             update1 = MagicMock()
             update1.message.reply_text = AsyncMock()
             await handlers._handle_workspace_force_reply(update1, 12345, tmpdir)
-            assert handlers._pending_workspace_input["12345"]["action"] == "manual_name"
+            assert handlers._ws_pending["12345"]["action"] == "manual_name"
 
             # Step 2: name
             update2 = MagicMock()
             update2.message.reply_text = AsyncMock()
             await handlers._handle_workspace_force_reply(update2, 12345, "MyApp")
-            assert handlers._pending_workspace_input["12345"]["action"] == "manual_desc"
+            assert handlers._ws_pending["12345"]["action"] == "manual_desc"
 
             # Step 3: description → registration
             update3 = MagicMock()
             update3.message.reply_text = AsyncMock()
             await handlers._handle_workspace_force_reply(update3, 12345, "My application")
             handlers._workspace_registry.add.assert_called_once()
-            assert "12345" not in handlers._pending_workspace_input
+            assert "12345" not in handlers._ws_pending
         finally:
             os.rmdir(tmpdir)
 
     @pytest.mark.asyncio
     async def test_schedule_message_input(self, handlers):
         """워크스페이스 스케줄 메시지 입력."""
-        handlers._pending_workspace_input["12345"] = {
+        handlers._ws_pending["12345"] = {
             "ws_id": "ws001",
             "hour": 9,
             "minute": 30,
@@ -356,7 +356,7 @@ class TestWorkspaceForceReplyFlows:
         await handlers._handle_workspace_force_reply(update, 12345, "오늘 할 일 정리해줘")
 
         handlers._schedule_manager.add.assert_called_once()
-        assert "12345" not in handlers._pending_workspace_input
+        assert "12345" not in handlers._ws_pending
 
 
 # =============================================================================
@@ -515,17 +515,17 @@ class TestSessionCallbackFlows:
 # 5. Lock 콜백
 # =============================================================================
 
-class TestLockCallbackFlows:
-    """Lock 콜백 테스트."""
+class TestTasksCallbackFlows:
+    """Tasks 콜백 테스트."""
 
     @pytest.mark.asyncio
-    async def test_lock_refresh(self):
-        """lock:refresh - 태스크 상태 새로고침."""
+    async def test_tasks_refresh(self):
+        """tasks:refresh - 태스크 상태 새로고침."""
         h = make_handlers()
         h.sessions.list_sessions.return_value = []
 
         query = make_query()
-        await h._handle_lock_callback(query, 12345)
+        await h._handle_tasks_callback(query, 12345)
 
         assert query.edit_message_text.called
         text = get_text(query)
@@ -554,7 +554,7 @@ class TestSchedulerForceReplyFlows:
     @pytest.mark.asyncio
     async def test_schedule_message_creates_schedule(self, handlers):
         """스케줄 메시지 입력 → 스케줄 생성."""
-        handlers._pending_schedule_input["12345"] = {
+        handlers._sched_pending["12345"] = {
             "type": "claude",
             "hour": 10,
             "minute": 25,
@@ -576,7 +576,7 @@ class TestSchedulerForceReplyFlows:
     @pytest.mark.asyncio
     async def test_workspace_schedule_message(self, handlers):
         """워크스페이스 스케줄 메시지 입력."""
-        handlers._pending_schedule_input["12345"] = {
+        handlers._sched_pending["12345"] = {
             "type": "workspace",
             "hour": 8,
             "minute": 0,

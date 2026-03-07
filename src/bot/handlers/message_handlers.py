@@ -156,17 +156,25 @@ class MessageHandlers(BaseHandler):
                     clear_context()
                     return
 
+            if "sess_rename:" in reply_text:
+                rename_match = re.search(r"sess_rename:(\S+)", reply_text)
+                if rename_match:
+                    session_id = rename_match.group(1)
+                    await self._handle_rename_force_reply(update, chat_id, message, session_id)
+                    clear_context()
+                    return
+
             if "memo_add" in reply_text:
                 await self._handle_memo_force_reply(update, chat_id, message)
                 clear_context()
                 return
 
-            if "schedule_input" in reply_text and user_id in self._pending_schedule_input:
+            if "schedule_input" in reply_text and user_id in self._sched_pending:
                 await self._handle_schedule_force_reply(update, chat_id, message)
                 clear_context()
                 return
 
-            if user_id in self._pending_workspace_input:
+            if user_id in self._ws_pending:
                 await self._handle_workspace_force_reply(update, chat_id, message)
                 clear_context()
                 return

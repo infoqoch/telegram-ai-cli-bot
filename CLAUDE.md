@@ -364,7 +364,7 @@ class MyPlugin(Plugin):
 | `sched:` | 스케줄러 | `callback_handlers.py` |
 | `ws:` | 워크스페이스 | `callback_handlers.py` |
 | `sq:` | 세션 큐 (충돌 처리) | `callback_handlers.py` |
-| `lock:` | 태스크 현황 | `callback_handlers.py` |
+| `tasks:` | 태스크 현황 | `callback_handlers.py` |
 
 **ForceReply 마커 (충돌 금지):**
 
@@ -373,8 +373,9 @@ class MyPlugin(Plugin):
 | `td:add` | 투두 추가 | `message_handlers.py` |
 | `memo_add` | 메모 추가 | `message_handlers.py` |
 | `sess_name:{model}` | 세션 이름 입력 | `message_handlers.py` |
+| `sess_rename:{session_id}` | 세션 이름 변경 | `message_handlers.py` |
 | `schedule_input` | 스케줄 메시지 입력 | `message_handlers.py` |
-| `_pending_workspace_input` | 워크스페이스 플로우 | `message_handlers.py` (dict 기반) |
+| `_ws_pending` | 워크스페이스 플로우 | `message_handlers.py` (dict 기반) |
 
 ## 메시지 처리 흐름
 

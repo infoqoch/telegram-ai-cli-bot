@@ -273,15 +273,15 @@ class TestDeleteSessionCommand:
         assert reply or update.message.reply_text.called
 
 
-class TestLockCommand:
+class TestTasksCommand:
     """락 명령어 테스트."""
 
     @pytest.mark.asyncio
-    async def test_lock_shows_status(self, handlers):
-        """락 상태 표시."""
-        update, context = create_command_update("lock")
+    async def test_tasks_shows_status(self, handlers):
+        """태스크 상태 표시."""
+        update, context = create_command_update("tasks")
 
-        await handlers.lock_command(update, context)
+        await handlers.tasks_command(update, context)
 
         reply = await get_reply_text(update)
         assert reply

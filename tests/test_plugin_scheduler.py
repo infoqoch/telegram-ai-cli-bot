@@ -309,7 +309,7 @@ class TestPluginScheduleCallbackFlow:
     async def test_claude_schedule_still_shows_model(self, handlers):
         """claude 타입은 여전히 모델 선택 표시."""
         user_id = str(12345)
-        handlers._pending_schedule_input[user_id] = {
+        handlers._sched_pending[user_id] = {
             "type": "claude",
             "hour": 9,
         }
