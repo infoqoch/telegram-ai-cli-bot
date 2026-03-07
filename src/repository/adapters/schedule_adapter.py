@@ -76,7 +76,7 @@ class ScheduleData:
             minute=s.minute,
             message=s.message,
             name=s.name,
-            type=s.type,
+            type=s.schedule_type,
             model=s.model,
             workspace_path=s.workspace_path,
             plugin_name=s.plugin_name,
@@ -283,7 +283,7 @@ class ScheduleManagerAdapter:
         lines = []
         for s in schedules:
             status = "✅" if s.enabled else "⏸"
-            type_icon = "🔌" if s.type == "plugin" else ("📂" if s.type == "workspace" else "💬")
+            type_icon = s.type_emoji
             lines.append(f"{status} {type_icon} <b>{s.name}</b> - {s.time_str}")
 
         return "\n".join(lines)

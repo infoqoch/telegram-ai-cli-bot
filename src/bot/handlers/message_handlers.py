@@ -547,7 +547,7 @@ class MessageHandlers(BaseHandler):
         now = time.time()
         expired_keys = [k for k, v in self._temp_pending.items() if now - v.get("created_at", 0) > 300]
         for k in expired_keys:
-            del self._temp_pending[k]
+            self._delete_temp_pending(k)
 
         wait_label = f"Wait in this session"
         if queue_size > 0:
@@ -596,7 +596,7 @@ class MessageHandlers(BaseHandler):
             InlineKeyboardButton("Cancel", callback_data=f"sq:cancel:{pending_key}"),
         ])
 
-        self._temp_pending[pending_key] = {
+        self._save_temp_pending(pending_key, {
             "user_id": user_id,
             "chat_id": chat_id,
             "message": message,
@@ -605,7 +605,7 @@ class MessageHandlers(BaseHandler):
             "workspace_path": workspace_path,
             "current_session_id": current_session_id,
             "created_at": time.time(),
-        }
+        })
 
         if update:
             await update.message.reply_text(

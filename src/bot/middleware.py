@@ -3,12 +3,15 @@
 import hmac
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.logging_config import logger
+
+if TYPE_CHECKING:
+    from src.repository import Repository
 
 F = TypeVar('F', bound=Callable)
 
@@ -16,38 +19,55 @@ F = TypeVar('F', bound=Callable)
 class AuthManager:
     """Manages user authentication sessions."""
 
-    def __init__(self, secret_key: str, timeout_minutes: int = 30):
+    def __init__(self, secret_key: str, timeout_minutes: int = 30, repository: "Repository" = None):
         logger.trace(f"AuthManager.__init__() - timeout={timeout_minutes}분")
         self.secret_key = secret_key
         self.timeout_minutes = timeout_minutes
         self._sessions: dict[str, datetime] = {}
+        self._repository = repository
 
     def is_authenticated(self, user_id: str) -> bool:
         logger.trace(f"is_authenticated() - user_id={user_id}")
 
-        if user_id not in self._sessions:
-            logger.trace(f"인증 세션 없음")
-            return False
+        if user_id in self._sessions:
+            last_auth = self._sessions[user_id]
+            elapsed = datetime.now() - last_auth
+            is_valid = elapsed < timedelta(minutes=self.timeout_minutes)
+            logger.trace(f"메모리 세션 검증 - last_auth={last_auth}, elapsed={elapsed}, valid={is_valid}")
+            if not is_valid:
+                logger.debug(f"인증 세션 만료 - user_id={user_id}")
+                del self._sessions[user_id]
+                if self._repository:
+                    self._repository.delete_auth_session(user_id)
+            return is_valid
 
-        last_auth = self._sessions[user_id]
-        elapsed = datetime.now() - last_auth
-        is_valid = elapsed < timedelta(minutes=self.timeout_minutes)
+        # 메모리에 없으면 DB 확인
+        if self._repository:
+            authenticated_at = self._repository.get_auth_session(user_id)
+            if authenticated_at:
+                elapsed = datetime.now() - authenticated_at
+                is_valid = elapsed < timedelta(minutes=self.timeout_minutes)
+                if is_valid:
+                    self._sessions[user_id] = authenticated_at
+                    logger.debug(f"DB에서 인증 세션 복원 - user_id={user_id}")
+                    return True
+                else:
+                    self._repository.delete_auth_session(user_id)
 
-        logger.trace(f"세션 검증 - last_auth={last_auth}, elapsed={elapsed}, valid={is_valid}")
-
-        if not is_valid:
-            logger.debug(f"인증 세션 만료 - user_id={user_id}")
-
-        return is_valid
+        logger.trace("인증 세션 없음")
+        return False
 
     def authenticate(self, user_id: str, key: str) -> bool:
         logger.trace(f"authenticate() - user_id={user_id}, key_len={len(key)}")
 
         # 타이밍 공격 방지를 위해 상수 시간 비교 사용
         if hmac.compare_digest(key, self.secret_key):
-            self._sessions[user_id] = datetime.now()
+            now = datetime.now()
+            self._sessions[user_id] = now
+            if self._repository:
+                self._repository.save_auth_session(user_id, now)
             logger.info(f"인증 성공 - user_id={user_id}")
-            logger.trace(f"인증 세션 생성됨 - expires_at={datetime.now() + timedelta(minutes=self.timeout_minutes)}")
+            logger.trace(f"인증 세션 생성됨 - expires_at={now + timedelta(minutes=self.timeout_minutes)}")
             return True
 
         logger.warning(f"인증 실패 - user_id={user_id}, 잘못된 키")
@@ -83,7 +103,28 @@ class AuthManager:
             del self._sessions[uid]
             logger.trace(f"세션 삭제: user_id={uid}")
 
+        if self._repository:
+            self._repository.clear_expired_auth_sessions(self.timeout_minutes)
+
         return len(expired)
+
+    def restore_from_db(self) -> int:
+        """봇 시작 시 DB에서 만료되지 않은 세션을 메모리로 로드. 복원된 수 반환."""
+        if not self._repository:
+            return 0
+
+        self._repository.clear_expired_auth_sessions(self.timeout_minutes)
+        all_sessions = self._repository.get_all_auth_sessions()
+        count = 0
+        now = datetime.now()
+        for user_id, authenticated_at in all_sessions.items():
+            if now - authenticated_at < timedelta(minutes=self.timeout_minutes):
+                self._sessions[user_id] = authenticated_at
+                count += 1
+                logger.debug(f"인증 세션 복원 - user_id={user_id}")
+
+        logger.info(f"DB에서 인증 세션 {count}개 복원")
+        return count
 
 
 def require_auth(

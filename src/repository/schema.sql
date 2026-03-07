@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     minute INTEGER NOT NULL CHECK (minute >= 0 AND minute <= 59),
     message TEXT NOT NULL,
     name TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'claude',
+    schedule_type TEXT NOT NULL DEFAULT 'claude',
     model TEXT NOT NULL DEFAULT 'sonnet',
     workspace_path TEXT,
     plugin_name TEXT,
@@ -114,6 +114,39 @@ CREATE TABLE IF NOT EXISTS message_log (
     error TEXT,
 
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+-- auth_sessions: 인증 세션 영속화
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    user_id TEXT PRIMARY KEY,
+    authenticated_at TEXT NOT NULL
+);
+
+-- pending_messages: 세션 충돌 시 임시 메시지 영속화
+CREATE TABLE IF NOT EXISTS pending_messages (
+    pending_key TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    model TEXT,
+    is_new_session INTEGER NOT NULL DEFAULT 0,
+    workspace_path TEXT,
+    current_session_id TEXT,
+    created_at REAL NOT NULL
+);
+
+-- queued_messages: persistent queue for concurrent requests
+CREATE TABLE IF NOT EXISTS queued_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    model TEXT NOT NULL,
+    is_new_session INTEGER NOT NULL,
+    workspace_path TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_log_chat_id ON message_log(chat_id);

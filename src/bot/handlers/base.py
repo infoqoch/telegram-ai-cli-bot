@@ -20,6 +20,7 @@ from ..constants import (
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
+    from src.repository import Repository
     from src.services.session_service import SessionService
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
@@ -86,6 +87,52 @@ class BaseHandler:
         self._temp_pending: dict[str, dict] = {}
 
         logger.trace(f"BaseHandler config - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
+
+    @property
+    def _repository(self) -> Optional["Repository"]:
+        """Access repository via SessionService."""
+        return getattr(self.sessions, '_repo', None)
+
+    def _save_temp_pending(self, key: str, data: dict) -> None:
+        """Save pending data to memory and DB."""
+        self._temp_pending[key] = data
+        repo = self._repository
+        if repo:
+            repo.save_pending_message(
+                key=key,
+                user_id=data["user_id"],
+                chat_id=data["chat_id"],
+                message=data["message"],
+                model=data.get("model", ""),
+                is_new_session=data.get("is_new_session", False),
+                workspace_path=data.get("workspace_path", ""),
+                current_session_id=data.get("current_session_id", ""),
+                created_at=data.get("created_at", time.time()),
+            )
+
+    def _delete_temp_pending(self, key: str) -> None:
+        """Delete pending data from memory and DB."""
+        self._temp_pending.pop(key, None)
+        repo = self._repository
+        if repo:
+            repo.delete_pending_message(key)
+
+    def _restore_temp_pending(self) -> int:
+        """Restore non-expired pending messages from DB. Returns count restored."""
+        repo = self._repository
+        if not repo:
+            return 0
+        repo.clear_expired_pending_messages(ttl_seconds=300)
+        all_pending = repo.get_all_pending_messages()
+        now = time.time()
+        count = 0
+        for key, data in all_pending.items():
+            if now - data.get("created_at", 0) <= 300:
+                self._temp_pending[key] = data
+                count += 1
+        if count:
+            logger.info(f"DB에서 pending message {count}개 복원")
+        return count
 
     def set_schedule_manager(self, manager) -> None:
         """Set schedule manager."""

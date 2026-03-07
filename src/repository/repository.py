@@ -3,7 +3,7 @@
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -78,7 +78,7 @@ class Schedule:
     minute: int
     message: str
     name: str
-    type: str
+    schedule_type: str
     model: str
     workspace_path: Optional[str]
     plugin_name: Optional[str]
@@ -96,12 +96,12 @@ class Schedule:
 
     @property
     def type_emoji(self) -> str:
-        """Return emoji based on schedule type."""
-        if self.type == "workspace":
+        """Return emoji representing the schedule type."""
+        if self.schedule_type == "workspace":
             return "📂"
-        elif self.type == "plugin":
+        if self.schedule_type == "plugin":
             return "🔌"
-        return "💬"
+        return "🤖"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,7 +112,7 @@ class Schedule:
             "minute": self.minute,
             "message": self.message,
             "name": self.name,
-            "type": self.type,
+            "type": self.schedule_type,
             "model": self.model,
             "workspace_path": self.workspace_path,
             "plugin_name": self.plugin_name,
@@ -541,7 +541,7 @@ class Repository:
 
         self._conn.execute(
             """INSERT INTO schedules
-               (id, user_id, chat_id, hour, minute, message, name, type, model,
+               (id, user_id, chat_id, hour, minute, message, name, schedule_type, model,
                 workspace_path, plugin_name, action_name, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (schedule_id, user_id, chat_id, hour, minute, message, name,
@@ -557,7 +557,7 @@ class Repository:
             minute=minute,
             message=message,
             name=name,
-            type=schedule_type,
+            schedule_type=schedule_type,
             model=model,
             workspace_path=workspace_path,
             plugin_name=plugin_name,
@@ -589,7 +589,7 @@ class Repository:
             minute=row["minute"],
             message=row["message"],
             name=row["name"],
-            type=row["type"],
+            schedule_type=row["schedule_type"],
             model=row["model"],
             workspace_path=row["workspace_path"],
             plugin_name=row["plugin_name"],
@@ -1185,6 +1185,142 @@ class Repository:
                WHERE processed = 2
                AND datetime(processed_at) < datetime('now', ?)""",
             (f'-{days} days',)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    # ── auth_sessions ──────────────────────────────────────────
+
+    def save_auth_session(self, user_id: str, authenticated_at: datetime) -> None:
+        """인증 세션을 DB에 저장."""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO auth_sessions (user_id, authenticated_at) VALUES (?, ?)",
+            (user_id, authenticated_at.isoformat()),
+        )
+        self._conn.commit()
+
+    def get_auth_session(self, user_id: str) -> Optional[datetime]:
+        """DB에서 인증 세션 조회. 없으면 None."""
+        row = self._conn.execute(
+            "SELECT authenticated_at FROM auth_sessions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return datetime.fromisoformat(row[0])
+
+    def get_all_auth_sessions(self) -> dict[str, datetime]:
+        """모든 인증 세션 반환."""
+        rows = self._conn.execute("SELECT user_id, authenticated_at FROM auth_sessions").fetchall()
+        return {r[0]: datetime.fromisoformat(r[1]) for r in rows}
+
+    def delete_auth_session(self, user_id: str) -> None:
+        """인증 세션 삭제."""
+        self._conn.execute("DELETE FROM auth_sessions WHERE user_id = ?", (user_id,))
+        self._conn.commit()
+
+    def clear_expired_auth_sessions(self, timeout_minutes: int) -> int:
+        """만료된 인증 세션 정리."""
+        cutoff = (datetime.now() - timedelta(minutes=timeout_minutes)).isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM auth_sessions WHERE authenticated_at < ?",
+            (cutoff,),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    # ── pending_messages ───────────────────────────────────────
+
+    def save_pending_message(self, key: str, user_id: str, chat_id: int,
+                             message: str, model: str = "", is_new_session: bool = False,
+                             workspace_path: str = "", current_session_id: str = "",
+                             created_at: float = 0.0) -> None:
+        """세션 충돌 시 임시 메시지 저장."""
+        self._conn.execute(
+            """INSERT OR REPLACE INTO pending_messages
+               (pending_key, user_id, chat_id, message, model, is_new_session,
+                workspace_path, current_session_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (key, user_id, chat_id, message, model, int(is_new_session),
+             workspace_path, current_session_id, created_at),
+        )
+        self._conn.commit()
+
+    def get_pending_message(self, key: str) -> Optional[dict[str, Any]]:
+        """pending message 조회."""
+        row = self._conn.execute(
+            "SELECT * FROM pending_messages WHERE pending_key = ?", (key,)
+        ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    def get_all_pending_messages(self) -> dict[str, dict[str, Any]]:
+        """모든 pending messages 반환."""
+        rows = self._conn.execute("SELECT * FROM pending_messages").fetchall()
+        result = {}
+        for r in rows:
+            d = dict(r)
+            key = d.pop("pending_key")
+            d["is_new_session"] = bool(d["is_new_session"])
+            result[key] = d
+        return result
+
+    def delete_pending_message(self, key: str) -> None:
+        """pending message 삭제."""
+        self._conn.execute("DELETE FROM pending_messages WHERE pending_key = ?", (key,))
+        self._conn.commit()
+
+    def clear_expired_pending_messages(self, ttl_seconds: int = 300) -> int:
+        """TTL 초과 pending messages 정리."""
+        import time
+        cutoff = time.time() - ttl_seconds
+        cursor = self._conn.execute(
+            "DELETE FROM pending_messages WHERE created_at < ?", (cutoff,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    # ── queued_messages ────────────────────────────────────────
+
+    def save_queued_message(self, session_id: str, user_id: str, chat_id: int,
+                            message: str, model: str, is_new_session: bool,
+                            workspace_path: str = "", expires_minutes: int = 5) -> int:
+        """세션 큐 메시지 저장. 생성된 ID 반환."""
+        expires_at = (datetime.now() + timedelta(minutes=expires_minutes)).isoformat()
+        cursor = self._conn.execute(
+            """INSERT INTO queued_messages
+               (session_id, user_id, chat_id, message, model, is_new_session,
+                workspace_path, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, user_id, chat_id, message, model, int(is_new_session),
+             workspace_path, expires_at),
+        )
+        self._conn.commit()
+        return cursor.lastrowid
+
+    def get_queued_messages_by_session(self, session_id: str) -> list[dict[str, Any]]:
+        """세션의 대기 중인 메시지 목록 (만료되지 않은 것만)."""
+        now = datetime.now().isoformat()
+        rows = self._conn.execute(
+            """SELECT * FROM queued_messages
+               WHERE session_id = ? AND expires_at > ?
+               ORDER BY id ASC""",
+            (session_id, now),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_queued_message(self, queue_id: int) -> None:
+        """큐 메시지 삭제."""
+        self._conn.execute("DELETE FROM queued_messages WHERE id = ?", (queue_id,))
+        self._conn.commit()
+
+    def clear_expired_queued_messages(self) -> int:
+        """만료된 큐 메시지 정리."""
+        now = datetime.now().isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM queued_messages WHERE expires_at <= ?",
+            (now,),
         )
         self._conn.commit()
         return cursor.rowcount

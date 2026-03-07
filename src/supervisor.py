@@ -168,11 +168,15 @@ def main():
     logger.info("=" * 60)
 
     # 시작 알림
-    start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notify_admin(f"🟢 <b>봇이 시작되었습니다</b>\n\n<code>{start_time}</code>")
+    start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    notify_admin(f"🟢 <b>봇이 시작되었습니다</b>\n\n<code>{start_time_str}</code>")
 
     restart_delay = INITIAL_RESTART_DELAY
     restart_count = 0
+    
+    global _shutdown_requested, _restart_requested
+    _shutdown_requested = False
+    _restart_requested = False
 
     while not _shutdown_requested:
         start_time = time.time()

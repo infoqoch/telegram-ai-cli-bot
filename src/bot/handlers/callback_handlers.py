@@ -1361,7 +1361,7 @@ class CallbackHandlers(BaseHandler):
         bot = query.get_bot()
 
         if action == "cancel":
-            self._temp_pending.pop(pending_key, None)
+            self._delete_temp_pending(pending_key)
             await query.edit_message_text("Request cancelled.")
             return
 
@@ -1389,7 +1389,7 @@ class CallbackHandlers(BaseHandler):
                     queued_msg = await session_queue_manager.unlock(target_session_id)
                     if queued_msg:
                         await session_queue_manager.try_lock(target_session_id, user_id, message)
-                        self._temp_pending.pop(pending_key, None)
+                        self._delete_temp_pending(pending_key)
                         await query.edit_message_text(
                             f"<b>Processing immediately</b>\n\n"
                             f"<code>{truncate_message(message, 40)}</code>",
@@ -1403,7 +1403,7 @@ class CallbackHandlers(BaseHandler):
             session_info = self.sessions.get_session_info(target_session_id)
             model_badge = get_model_badge(model)
 
-            self._temp_pending.pop(pending_key, None)
+            self._delete_temp_pending(pending_key)
             await query.edit_message_text(
                 f"<b>Added to queue</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>\n\n"
@@ -1431,7 +1431,7 @@ class CallbackHandlers(BaseHandler):
 
             self.sessions.set_current(user_id, target_session_id)
 
-            self._temp_pending.pop(pending_key, None)
+            self._delete_temp_pending(pending_key)
             await query.edit_message_text(
                 f"<b>Session switched</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>\n\n"
@@ -1455,7 +1455,7 @@ class CallbackHandlers(BaseHandler):
         if action == "new":
             new_model = parts[3] if len(parts) > 3 else "sonnet"
 
-            self._temp_pending.pop(pending_key, None)
+            self._delete_temp_pending(pending_key)
             await query.edit_message_text(
                 f"<b>Creating new {new_model} session...</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>",

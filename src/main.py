@@ -93,7 +93,9 @@ def create_app() -> Application:
     auth_manager = AuthManager(
         secret_key=settings.auth_secret_key,
         timeout_minutes=settings.auth_timeout_minutes,
+        repository=repo,
     )
+    auth_manager.restore_from_db()
     logger.trace(f"AuthManager 초기화 완료 - timeout: {settings.auth_timeout_minutes}분")
 
     # 플러그인 로더 초기화 (Repository 주입)
@@ -117,6 +119,7 @@ def create_app() -> Application:
         session_list_ai_summary=settings.session_list_ai_summary,
         plugin_loader=plugin_loader,
     )
+    handlers._restore_temp_pending()
     logger.trace("BotHandlers 초기화 완료")
 
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
