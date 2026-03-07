@@ -11,6 +11,7 @@ from src.logging_config import logger, set_trace_id, set_user_id, set_session_id
 from ..constants import (
     MAX_MESSAGE_LENGTH,
     LONG_TASK_THRESHOLD_SECONDS,
+    get_model_badge,
 )
 from ..formatters import truncate_message
 from ..middleware import authorized_only, authenticated_only
@@ -557,7 +558,7 @@ class MessageHandlers(BaseHandler):
                 short_id = s["session_id"]
                 name = s.get("name") or f"Session {short_id}"
                 sess_model = s.get("model", "sonnet")
-                model_emoji = {"opus": "[O]", "sonnet": "[S]", "haiku": "[H]"}.get(sess_model, "[S]")
+                model_emoji = get_model_badge(sess_model)
 
                 recent_msgs = s.get("recent", [])
                 if recent_msgs:
@@ -619,7 +620,7 @@ class MessageHandlers(BaseHandler):
         logger.info(f"Queue message processing start - session={queued_msg.session_id[:8]}, user={queued_msg.user_id}")
 
         session_info = self.sessions.get_session_info(queued_msg.session_id)
-        model_emoji = {"opus": "[O]", "sonnet": "[S]", "haiku": "[H]"}.get(queued_msg.model, "[S]")
+        model_emoji = get_model_badge(queued_msg.model)
         try:
             await bot.send_message(
                 chat_id=queued_msg.chat_id,
