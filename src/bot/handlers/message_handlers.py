@@ -107,7 +107,6 @@ class MessageHandlers(BaseHandler):
                 model=model,
             )
         )
-        self._register_task(task, user_id, session_id, trace_id, message)
         logger.trace("/ai handler complete - background task created")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -274,7 +273,6 @@ class MessageHandlers(BaseHandler):
                 model=model,
             )
         )
-        self._register_task(task, user_id, session_id, trace_id, message)
         logger.trace("handle_message complete - background task created")
 
     async def _process_claude_request_with_semaphore(
@@ -315,6 +313,10 @@ class MessageHandlers(BaseHandler):
 
         try:
             logger.trace(f"Session lock acquired - session={session_id[:8]}")
+            # Register current task for /lock visibility (covers all paths: handle_message, queue, alternative)
+            current_task = asyncio.current_task()
+            if current_task:
+                self._register_task(current_task, user_id, session_id, trace_id, message)
             async with self._user_semaphores[user_id]:
                 logger.trace("Semaphore acquired")
                 await self._process_claude_request(
