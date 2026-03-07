@@ -268,6 +268,19 @@ class MessageHandlers(BaseHandler):
 
         logger.info(f"Message accepted: model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
 
+        # message_log에 기록 (재시작 시 재처리용)
+        queue_id = None
+        repo = self._repository
+        if repo:
+            queue_id = repo.enqueue_message(
+                chat_id=chat_id,
+                session_id=session_id,
+                request=message,
+                model=model or "sonnet",
+                workspace_path=workspace_path,
+            )
+            logger.debug(f"message_log 기록 - queue_id={queue_id}")
+
         # Fire-and-forget: 백그라운드에서 Claude 호출
         task = asyncio.create_task(
             self._process_claude_request_with_semaphore(
@@ -279,6 +292,7 @@ class MessageHandlers(BaseHandler):
                 is_new_session=is_new_session,
                 trace_id=trace_id,
                 model=model,
+                queue_id=queue_id,
             )
         )
         logger.trace("handle_message complete - background task created")
@@ -293,6 +307,7 @@ class MessageHandlers(BaseHandler):
         is_new_session: bool,
         trace_id: str,
         model: str = None,
+        queue_id: int = None,
     ) -> None:
         """Semaphore + session lock for concurrent request limiting then Claude call."""
         set_trace_id(trace_id)
@@ -335,6 +350,7 @@ class MessageHandlers(BaseHandler):
                     message=message,
                     is_new_session=is_new_session,
                     model=model,
+                    queue_id=queue_id,
                 )
         finally:
             next_msg = await session_queue_manager.unlock(session_id)
@@ -356,6 +372,7 @@ class MessageHandlers(BaseHandler):
         message: str,
         is_new_session: bool,
         model: str = None,
+        queue_id: int = None,
     ) -> None:
         """Background Claude call and response sending.
 
@@ -371,8 +388,13 @@ class MessageHandlers(BaseHandler):
         from ..constants import get_model_emoji
 
         start_time = time.time()
+        repo = self._repository
 
-        logger.info(f"Claude call start - session={session_id[:8]}, model={model}")
+        # Claim message in message_log (processed=0 → 1)
+        if queue_id and repo:
+            repo.claim_message(queue_id)
+
+        logger.info(f"Claude call start - session={session_id[:8]}, model={model}, queue_id={queue_id}")
         logger.info(f"===== User Question (START) =====")
         logger.info(message)
         logger.info(f"===== User Question (END) =====")
@@ -474,8 +496,15 @@ class MessageHandlers(BaseHandler):
             await self._send_message_to_chat(bot, chat_id, full_response)
             logger.trace("Response sent")
 
+            # Complete message in message_log (processed=1 → 2)
+            if queue_id and repo:
+                repo.complete_message(queue_id, response=response[:500] if response else None)
+
         except Exception as e:
             logger.exception(f"Claude processing failed: {e}")
+            # Complete with error in message_log
+            if queue_id and repo:
+                repo.complete_message(queue_id, error=str(e))
             await bot.send_message(
                 chat_id=chat_id,
                 text="❌ An error occurred. Please try again later."

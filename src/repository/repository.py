@@ -1167,24 +1167,35 @@ class Repository:
             return None
         return dict(row)
 
+    def get_unfinished_messages(self, max_age_minutes: int = 30) -> list[dict[str, Any]]:
+        """Get all unfinished messages (processed=0 or 1) within max_age."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+        rows = self._conn.execute(
+            """SELECT * FROM message_log
+               WHERE processed IN (0, 1) AND request_at > ?
+               ORDER BY id ASC""",
+            (cutoff,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def reset_stale_processing_messages(self, timeout_minutes: int = 30) -> int:
         """Reset messages stuck in processing state back to pending."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)).isoformat()
         cursor = self._conn.execute(
             """UPDATE message_log SET processed = 0
-               WHERE processed = 1
-               AND datetime(request_at) < datetime('now', ?)""",
-            (f'-{timeout_minutes} minutes',)
+               WHERE processed = 1 AND request_at < ?""",
+            (cutoff,)
         )
         self._conn.commit()
         return cursor.rowcount
 
     def cleanup_old_completed_messages(self, days: int = 7) -> int:
         """Delete completed messages older than N days."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = self._conn.execute(
             """DELETE FROM message_log
-               WHERE processed = 2
-               AND datetime(processed_at) < datetime('now', ?)""",
-            (f'-{days} days',)
+               WHERE processed = 2 AND processed_at < ?""",
+            (cutoff,)
         )
         self._conn.commit()
         return cursor.rowcount

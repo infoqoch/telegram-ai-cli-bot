@@ -134,6 +134,50 @@ class BaseHandler:
             logger.info(f"DB에서 pending message {count}개 복원")
         return count
 
+    async def _retry_interrupted_messages(self, bot) -> int:
+        """봇 재시작 후 미완료 메시지를 재처리. Returns count retried."""
+        repo = self._repository
+        if not repo:
+            return 0
+
+        unfinished = repo.get_unfinished_messages(max_age_minutes=30)
+        if not unfinished:
+            return 0
+
+        logger.info(f"재시작 후 미완료 메시지 {len(unfinished)}개 발견 - 재처리 시작")
+
+        count = 0
+        for msg in unfinished:
+            try:
+                short_req = msg["request"][:50]
+                await bot.send_message(
+                    chat_id=msg["chat_id"],
+                    text=f"🔄 봇 재시작으로 중단된 메시지를 재처리합니다...\n<code>{short_req}</code>",
+                    parse_mode="HTML",
+                )
+
+                trace_id = set_trace_id()
+                asyncio.create_task(
+                    self._process_claude_request_with_semaphore(
+                        bot=bot,
+                        chat_id=msg["chat_id"],
+                        user_id=str(msg["chat_id"]),
+                        session_id=msg["session_id"],
+                        message=msg["request"],
+                        is_new_session=False,
+                        trace_id=trace_id,
+                        model=msg.get("model", "sonnet"),
+                        queue_id=msg["id"],
+                    )
+                )
+                count += 1
+            except Exception as e:
+                logger.error(f"메시지 재처리 실패 (id={msg['id']}): {e}")
+                repo.complete_message(msg["id"], error=f"retry_failed: {e}")
+
+        logger.info(f"미완료 메시지 {count}개 재처리 시작됨")
+        return count
+
     def set_schedule_manager(self, manager) -> None:
         """Set schedule manager."""
         self._schedule_manager = manager

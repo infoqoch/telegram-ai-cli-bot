@@ -122,9 +122,21 @@ def create_app() -> Application:
     handlers._restore_temp_pending()
     logger.trace("BotHandlers 초기화 완료")
 
+    # 봇 시작 후 미완료 메시지 재처리 콜백
+    async def post_init(application):
+        count = await handlers._retry_interrupted_messages(application.bot)
+        if count:
+            logger.info(f"미완료 메시지 {count}개 재처리 시작")
+
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
     logger.trace("Application 빌드 시작")
-    app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
+    app = (
+        Application.builder()
+        .token(settings.telegram_token)
+        .concurrent_updates(True)
+        .post_init(post_init)
+        .build()
+    )
     logger.trace("Application 빌드 완료 - concurrent_updates=True")
 
     # SchedulerManager 초기화 (단일 job_queue 관리)
