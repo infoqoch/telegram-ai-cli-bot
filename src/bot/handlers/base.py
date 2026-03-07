@@ -82,8 +82,8 @@ class BaseHandler:
         self._workspace_registry = None
         self._pending_workspace_input: dict[str, dict] = {}
         self._watchdog_started = False
-        # Temporary pending for session queue callbacks
-        self._temp_pending: Optional[dict] = None
+        # Temporary pending for session queue callbacks (keyed by pending_key)
+        self._temp_pending: dict[str, dict] = {}
 
         logger.trace(f"BaseHandler config - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
 

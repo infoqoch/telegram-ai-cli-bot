@@ -1,6 +1,7 @@
 """Message processing handlers."""
 
 import asyncio
+import hashlib
 import time
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -526,13 +527,24 @@ class MessageHandlers(BaseHandler):
 
         buttons = []
 
+        # Generate unique key for this pending request
+        pending_key = hashlib.md5(
+            f"{current_session_id}:{message}:{time.time()}".encode()
+        ).hexdigest()[:8]
+
+        # Expire entries older than 5 minutes
+        now = time.time()
+        expired_keys = [k for k, v in self._temp_pending.items() if now - v.get("created_at", 0) > 300]
+        for k in expired_keys:
+            del self._temp_pending[k]
+
         wait_label = f"Wait in this session"
         if queue_size > 0:
             wait_label += f" ({queue_size} waiting)"
         buttons.append([
             InlineKeyboardButton(
                 wait_label + " (recommended)",
-                callback_data=f"sq:wait:{current_session_id[:16]}"
+                callback_data=f"sq:wait:{pending_key}:{current_session_id[:16]}"
             )
         ])
         lines.append(f"<b>Wait in this session</b>: Auto process after completion")
@@ -557,23 +569,23 @@ class MessageHandlers(BaseHandler):
                 buttons.append([
                     InlineKeyboardButton(
                         f"{model_emoji} {name[:15]}",
-                        callback_data=f"sq:switch:{sid[:16]}"
+                        callback_data=f"sq:switch:{pending_key}:{sid[:16]}"
                     )
                 ])
 
         lines.append(f"")
         lines.append(f"<b>Create new session:</b>")
         buttons.append([
-            InlineKeyboardButton("Opus", callback_data="sq:new:opus"),
-            InlineKeyboardButton("Sonnet", callback_data="sq:new:sonnet"),
-            InlineKeyboardButton("Haiku", callback_data="sq:new:haiku"),
+            InlineKeyboardButton("Opus", callback_data=f"sq:new:{pending_key}:opus"),
+            InlineKeyboardButton("Sonnet", callback_data=f"sq:new:{pending_key}:sonnet"),
+            InlineKeyboardButton("Haiku", callback_data=f"sq:new:{pending_key}:haiku"),
         ])
 
         buttons.append([
-            InlineKeyboardButton("Cancel", callback_data="sq:cancel"),
+            InlineKeyboardButton("Cancel", callback_data=f"sq:cancel:{pending_key}"),
         ])
 
-        self._temp_pending = {
+        self._temp_pending[pending_key] = {
             "user_id": user_id,
             "chat_id": chat_id,
             "message": message,
@@ -581,6 +593,7 @@ class MessageHandlers(BaseHandler):
             "is_new_session": is_new_session,
             "workspace_path": workspace_path,
             "current_session_id": current_session_id,
+            "created_at": time.time(),
         }
 
         if update:

@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
-from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji
+from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji, get_model_badge
 from ..formatters import truncate_message
 from ..session_queue import session_queue_manager
 from .base import BaseHandler
@@ -625,12 +625,12 @@ class CallbackHandlers(BaseHandler):
                 short_id = session["session_id"]
                 name = session.get("name") or f"Session {short_id}"
                 model = session.get("model", "sonnet")
-                model_emoji = {"opus": "[O]", "sonnet": "[S]", "haiku": "[H]"}.get(model, "[S]")
+                model_badge = get_model_badge(model)
 
                 is_current = "> " if sid == current_session_id else ""
                 is_locked = session_queue_manager.is_locked(sid)
                 lock_indicator = " [locked]" if is_locked else ""
-                lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
+                lines.append(f"{is_current}{model_badge} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
                 buttons.append([
                     InlineKeyboardButton(f"{name[:10]}", callback_data=f"sess:switch:{sid}"),
@@ -1440,13 +1440,13 @@ class CallbackHandlers(BaseHandler):
                         return
 
             session_info = self.sessions.get_session_info(target_session_id)
-            model_emoji = {"opus": "[O]", "sonnet": "[S]", "haiku": "[H]"}.get(model, "[S]")
+            model_badge = get_model_badge(model)
 
             self._temp_pending = None
             await query.edit_message_text(
                 f"<b>Added to queue</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>\n\n"
-                f"Session: {model_emoji} <b>{session_info}</b>\n"
+                f"Session: {model_badge} <b>{session_info}</b>\n"
                 f"Position: #{position}\n"
                 f"Will be processed automatically after current task completes.",
                 parse_mode="HTML"

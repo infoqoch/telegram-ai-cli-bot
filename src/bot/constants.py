@@ -28,3 +28,16 @@ MODEL_EMOJI = {
 def get_model_emoji(model: str) -> str:
     """모델명에 해당하는 이모지 반환."""
     return MODEL_EMOJI.get(model, "")
+
+
+# 모델 뱃지 매핑 (리스트 약자)
+MODEL_BADGE = {
+    "opus": "[O]",
+    "sonnet": "[S]",
+    "haiku": "[H]",
+}
+
+
+def get_model_badge(model: str) -> str:
+    """모델명에 해당하는 뱃지 반환."""
+    return MODEL_BADGE.get(model, "[S]")

@@ -38,33 +38,8 @@ from src.repository.adapters import (
 )
 from src.services.session_service import SessionService
 
-# 세션 스케줄러 (매니저 compact)
-_session_scheduler = None
-
 # 예약 스케줄러 (경로 기반)
 _schedule_manager = None
-
-
-def _setup_session_scheduler(app, session_service, claude_client, settings) -> None:
-    """세션 스케줄러 설정 (매니저 세션 자동 compact)."""
-    global _session_scheduler
-
-    try:
-        from src.scheduler import SessionScheduler
-
-        _session_scheduler = SessionScheduler(
-            session_store=session_service,
-            claude_client=claude_client,
-            admin_chat_id=settings.admin_chat_id,
-        )
-        _session_scheduler.setup_jobs(app)
-
-        logger.info(f"세션 스케줄러 활성화 - 21:00 매니저 compact, 보고: {settings.admin_chat_id or '(없음)'}")
-
-    except ImportError as e:
-        logger.debug(f"세션 스케줄러 비활성화 (모듈 없음): {e}")
-    except Exception as e:
-        logger.warning(f"세션 스케줄러 초기화 실패: {e}")
 
 
 def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
@@ -152,9 +127,6 @@ def create_app() -> Application:
     # SchedulerManager 초기화 (단일 job_queue 관리)
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager 초기화 완료")
-
-    # 세션 스케줄러 설정 (매니저 세션 compact)
-    _setup_session_scheduler(app, session_service, claude_client, settings)
 
     # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
     _setup_hourly_ping_scheduler(app, settings, plugin_loader)

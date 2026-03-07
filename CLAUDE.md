@@ -154,7 +154,6 @@ src/
 ├── notify.py                  # 개발 리포트 CLI
 ├── lock.py                    # 파일 락 (싱글톤)
 ├── supervisor.py              # 프로세스 감시
-├── scheduler.py               # 세션 compact 스케줄러
 ├── scheduler_manager.py       # 통합 job_queue 매니저
 ├── logging_config.py          # 로깅 설정
 │
@@ -245,6 +244,29 @@ src/
 1. **`kill -9`는 시그널 핸들러 무시** → 락 파일 미정리
 2. **zsh에서 `kill -9 PID`가 실패할 수 있음** → 에러 무시되어 인지 못함
 3. **Supervisor가 자식 프로세스 재생성** → 중복 발생
+
+## 보호 메커니즘
+
+| 계층 | 위협 | 보호 |
+|------|------|------|
+| 접근 | 무단 사용 | `ALLOWED_CHAT_IDS` |
+| 인증 | 권한 탈취 | `AuthManager` (30분 TTL) |
+| 동시성 | Race Condition | `_user_locks` |
+| 리소스 | 요청 폭주 | `_user_semaphores` (3개) |
+| 리소스 | 좀비 태스크 | Watchdog (30분) |
+| 데이터 | 파일 손상 | Atomic Write |
+| DoS | 긴 메시지 | `MAX_MESSAGE_LENGTH` (4096) |
+
+## 로깅 시스템
+
+### MDC 스타일 (contextvars)
+
+요청별 컨텍스트 유지 (`trace_id`, `user_id`, `session_id`):
+
+```
+22:15:30.123 | INFO | 123456789 | a1b2c3d4 | 8f9e0d1c | handlers:handle_message:1364 | 메시지 수신
+              ↑ level  ↑ user_id   ↑ session  ↑ trace_id   ↑ location
+```
 
 ## 금지
 
