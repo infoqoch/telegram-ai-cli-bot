@@ -19,6 +19,7 @@ class MemoPlugin(Plugin):
     )
 
     CALLBACK_PREFIX = "memo:"
+    FORCE_REPLY_MARKER = "memo_add"
     MAX_MEMOS = 30
 
     TRIGGER_KEYWORDS = ["메모", "memo"]

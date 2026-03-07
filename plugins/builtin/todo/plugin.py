@@ -34,6 +34,7 @@ class TodoPlugin(Plugin):
     ]
 
     CALLBACK_PREFIX = "td:"
+    FORCE_REPLY_MARKER = "td:add"
 
     def __init__(self):
         super().__init__()
@@ -221,6 +222,7 @@ class TodoPlugin(Plugin):
         return {
             "text": "📝 <b>Add Todo</b>\n\nSeparate multiple items with line breaks.",
             "force_reply": ForceReply(selective=True, input_field_placeholder="Enter todo..."),
+            "force_reply_marker": "td:add",
             "edit": False,
         }
 

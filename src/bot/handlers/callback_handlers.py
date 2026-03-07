@@ -34,20 +34,12 @@ class CallbackHandlers(BaseHandler):
 
         await query.answer()
 
-        # Todo plugin callback
-        if callback_data.startswith("td:"):
-            await self._handle_todo_callback(query, chat_id, callback_data)
-            return
-
-        # Memo plugin callback
-        if callback_data.startswith("memo:"):
-            await self._handle_memo_callback(query, chat_id, callback_data)
-            return
-
-        # Weather plugin callback
-        if callback_data.startswith("weather:"):
-            await self._handle_weather_callback(query, chat_id, callback_data)
-            return
+        # Plugin auto-routing (CALLBACK_PREFIX 기반)
+        if self.plugins:
+            plugin = self.plugins.get_plugin_for_callback(callback_data)
+            if plugin:
+                await self._handle_plugin_callback(query, chat_id, callback_data, plugin)
+                return
 
         # Session callback
         if callback_data.startswith("sess:"):
@@ -232,35 +224,26 @@ class CallbackHandlers(BaseHandler):
 
         logger.info(f"Schedule registered: {schedule.name} @ {schedule.time_str} (type={schedule_type})")
 
-    async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
-        """Handle Todo plugin callback."""
+    async def _handle_plugin_callback(self, query, chat_id: int, callback_data: str, plugin) -> None:
+        """Handle plugin callback with auto-routing."""
         try:
-            todo_plugin = None
-            if self.plugins:
-                todo_plugin = self.plugins.get_plugin_by_name("todo")
-                logger.info(f"Todo plugin lookup: {todo_plugin}")
-            else:
-                logger.warning("self.plugins is None")
+            result = await plugin.handle_callback_async(callback_data, chat_id)
 
-            if not todo_plugin or not hasattr(todo_plugin, 'handle_callback'):
-                logger.error(f"Todo plugin not found: {todo_plugin}")
-                await query.edit_message_text("Todo plugin not found.")
-                return
-
-            result = todo_plugin.handle_callback(callback_data, chat_id)
-
+            # ForceReply 처리
             if result.get("force_reply"):
                 await query.edit_message_text(
-                    text=result.get("text", "Enter todo"),
+                    text=result.get("text", "Enter input"),
                     parse_mode="HTML"
                 )
+                marker_text = result.get("force_reply_marker", plugin.FORCE_REPLY_MARKER or f"{plugin.name}_add")
                 await query.message.reply_text(
-                    text="td:add",
+                    text=marker_text,
                     reply_markup=result["force_reply"],
                     parse_mode="HTML"
                 )
                 return
 
+            # 메시지 편집/전송
             if result.get("edit", True) and query.message:
                 await query.edit_message_text(
                     text=result.get("text", ""),
@@ -277,104 +260,9 @@ class CallbackHandlers(BaseHandler):
             if "Message is not modified" in str(e):
                 pass
             else:
-                logger.warning(f"Todo callback BadRequest: {e}")
+                logger.warning(f"{plugin.name} callback BadRequest: {e}")
         except Exception as e:
-            logger.exception(f"Todo callback error: {e}")
-            try:
-                await query.edit_message_text(
-                    text=f"Error occurred.\n\n<code>{str(e)}</code>",
-                    parse_mode="HTML"
-                )
-            except:
-                await query.message.reply_text(
-                    text=f"Error occurred.\n\n<code>{str(e)}</code>",
-                    parse_mode="HTML"
-                )
-
-    async def _handle_memo_callback(self, query, chat_id: int, callback_data: str) -> None:
-        """Handle Memo plugin callback."""
-        try:
-            memo_plugin = None
-            if self.plugins:
-                memo_plugin = self.plugins.get_plugin_by_name("memo")
-
-            if not memo_plugin or not hasattr(memo_plugin, 'handle_callback'):
-                await query.edit_message_text("Memo plugin not found.")
-                return
-
-            result = memo_plugin.handle_callback(callback_data, chat_id)
-
-            if result.get("force_reply"):
-                await query.edit_message_text(
-                    text=result.get("text", "Enter memo"),
-                    parse_mode="HTML"
-                )
-                await query.message.reply_text(
-                    text="Enter memo content below (memo_add)",
-                    reply_markup=result["force_reply"],
-                    parse_mode="HTML"
-                )
-                return
-
-            if result.get("edit", True):
-                await query.edit_message_text(
-                    text=result.get("text", ""),
-                    reply_markup=result.get("reply_markup"),
-                    parse_mode="HTML"
-                )
-            else:
-                await query.message.reply_text(
-                    text=result.get("text", ""),
-                    reply_markup=result.get("reply_markup"),
-                    parse_mode="HTML"
-                )
-        except BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass
-            else:
-                logger.warning(f"Memo callback BadRequest: {e}")
-        except Exception as e:
-            logger.exception(f"Memo callback error: {e}")
-            try:
-                await query.edit_message_text(
-                    text=f"Error occurred.\n\n<code>{str(e)}</code>",
-                    parse_mode="HTML"
-                )
-            except:
-                pass
-
-    async def _handle_weather_callback(self, query, chat_id: int, callback_data: str) -> None:
-        """Handle Weather plugin callback."""
-        try:
-            weather_plugin = None
-            if self.plugins:
-                weather_plugin = self.plugins.get_plugin_by_name("weather")
-
-            if not weather_plugin or not hasattr(weather_plugin, 'handle_callback_async'):
-                await query.edit_message_text("Weather plugin not found.")
-                return
-
-            result = await weather_plugin.handle_callback_async(callback_data, chat_id)
-
-            if result.get("edit", True):
-                await query.edit_message_text(
-                    text=result.get("text", ""),
-                    reply_markup=result.get("reply_markup"),
-                    parse_mode="HTML"
-                )
-            else:
-                await query.message.reply_text(
-                    text=result.get("text", ""),
-                    reply_markup=result.get("reply_markup"),
-                    parse_mode="HTML"
-                )
-        except BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass
-            else:
-                logger.warning(f"Weather callback BadRequest: {e}")
-        except Exception as e:
-            logger.exception(f"Weather callback error: {e}")
+            logger.exception(f"{plugin.name} callback error: {e}")
             try:
                 await query.edit_message_text(
                     text=f"Error occurred.\n\n<code>{str(e)}</code>",
