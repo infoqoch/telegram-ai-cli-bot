@@ -513,7 +513,7 @@ class CallbackHandlers(BaseHandler):
         )
 
     async def _handle_switch_session_callback(self, query, chat_id: int, session_id: str) -> None:
-        """Handle session switch callback."""
+        """Handle session switch callback - shows full session info like /session."""
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
@@ -523,9 +523,26 @@ class CallbackHandlers(BaseHandler):
         full_session_id = session.get("full_session_id", session_id)
         self.sessions.set_current(user_id, full_session_id)
         short_id = full_session_id[:8]
-        name = session.get("name") or f"Session {short_id}"
+        session_name = session.get("name") or ""
         model = session.get("model", "sonnet")
         model_emoji = get_model_emoji(model)
+
+        history_entries = self.sessions.get_session_history_entries(full_session_id)
+        count = len(history_entries)
+
+        recent = history_entries[-10:]
+        history_lines = []
+        start_idx = len(history_entries) - len(recent) + 1
+
+        for i, entry in enumerate(recent, start=start_idx):
+            msg = entry.get("message", "") if isinstance(entry, dict) else str(entry)
+            processor = entry.get("processor", "claude") if isinstance(entry, dict) else "claude"
+            emoji = "[plugin]" if processor.startswith("plugin:") else {"command": "[cmd]", "rejected": "[x]"}.get(processor, "")
+            short_q = truncate_message(msg, 35)
+            history_lines.append(f"{i}. {emoji} {short_q}")
+
+        history_text = "\n".join(history_lines) if history_lines else "(empty)"
+        name_line = f"- Name: {session_name}\n" if session_name else ""
 
         keyboard = [
             [
@@ -534,15 +551,22 @@ class CallbackHandlers(BaseHandler):
                 InlineKeyboardButton("Haiku", callback_data=f"sess:model:haiku:{full_session_id}"),
             ],
             [
-                InlineKeyboardButton("Session List", callback_data="sess:list"),
+                InlineKeyboardButton("✏️ Rename", callback_data=f"sess:rename:{full_session_id}"),
+                InlineKeyboardButton("📜 History", callback_data=f"sess:history:{full_session_id}"),
+                InlineKeyboardButton("🗑️ Delete", callback_data=f"sess:delete:{full_session_id}"),
+            ],
+            [
+                InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
             ]
         ]
 
         await query.edit_message_text(
-            text=f"Session switched!\n\n"
-                 f"<b>{name}</b>\n"
-                 f"{model_emoji} Model: {model}\n"
-                 f"ID: <code>{short_id}</code>",
+            text=f"✅ <b>Session switched!</b>\n\n"
+                 f"- ID: <code>{short_id}</code>\n"
+                 f"{name_line}"
+                 f"- Model: {model_emoji} {model}\n"
+                 f"- Messages: {count}\n\n"
+                 f"<b>History</b> (last 10)\n{history_text}",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
