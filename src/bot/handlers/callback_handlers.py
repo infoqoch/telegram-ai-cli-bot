@@ -1376,17 +1376,19 @@ class CallbackHandlers(BaseHandler):
     async def _handle_session_queue_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle session queue callbacks (new method).
 
-        callback_data format:
-        - sq:wait:{session_id} - Wait in this session
-        - sq:switch:{session_id} - Switch to another session
-        - sq:new:{model} - Create new session
-        - sq:cancel - Cancel
+        callback_data format (with pending_key):
+        - sq:wait:{pending_key}:{session_id} - Wait in this session
+        - sq:switch:{pending_key}:{session_id} - Switch to another session
+        - sq:new:{pending_key}:{model} - Create new session
+        - sq:cancel:{pending_key} - Cancel
         """
         user_id = str(query.from_user.id)
         parts = callback_data.split(":")
         action = parts[1] if len(parts) > 1 else ""
+        pending_key = parts[2] if len(parts) > 2 else ""
 
-        pending = getattr(self, '_temp_pending', None)
+        # Look up pending data by key
+        pending = self._temp_pending.get(pending_key) if pending_key else None
         if not pending or pending.get("user_id") != user_id:
             await query.edit_message_text(
                 "<b>Request expired</b>\n\nPlease resend the message.",
@@ -1402,16 +1404,18 @@ class CallbackHandlers(BaseHandler):
         bot = query.get_bot()
 
         if action == "cancel":
-            self._temp_pending = None
+            self._temp_pending.pop(pending_key, None)
             await query.edit_message_text("Request cancelled.")
             return
 
         if action == "wait":
             target_session_id = current_session_id
-            for s in self.sessions.list_sessions(user_id):
-                if s["full_session_id"].startswith(parts[2]):
-                    target_session_id = s["full_session_id"]
-                    break
+            session_prefix = parts[3] if len(parts) > 3 else ""
+            if session_prefix:
+                for s in self.sessions.list_sessions(user_id):
+                    if s["full_session_id"].startswith(session_prefix):
+                        target_session_id = s["full_session_id"]
+                        break
 
             position = await session_queue_manager.add_to_waiting(
                 session_id=target_session_id,
@@ -1428,7 +1432,7 @@ class CallbackHandlers(BaseHandler):
                     queued_msg = await session_queue_manager.unlock(target_session_id)
                     if queued_msg:
                         await session_queue_manager.try_lock(target_session_id, user_id, message)
-                        self._temp_pending = None
+                        self._temp_pending.pop(pending_key, None)
                         await query.edit_message_text(
                             f"<b>Processing immediately</b>\n\n"
                             f"<code>{truncate_message(message, 40)}</code>",
@@ -1442,7 +1446,7 @@ class CallbackHandlers(BaseHandler):
             session_info = self.sessions.get_session_info(target_session_id)
             model_badge = get_model_badge(model)
 
-            self._temp_pending = None
+            self._temp_pending.pop(pending_key, None)
             await query.edit_message_text(
                 f"<b>Added to queue</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>\n\n"
@@ -1454,7 +1458,7 @@ class CallbackHandlers(BaseHandler):
             return
 
         if action == "switch":
-            target_prefix = parts[2]
+            target_prefix = parts[3] if len(parts) > 3 else ""
             target_session = None
             for s in self.sessions.list_sessions(user_id):
                 if s["full_session_id"].startswith(target_prefix):
@@ -1470,7 +1474,7 @@ class CallbackHandlers(BaseHandler):
 
             self.sessions.set_current(user_id, target_session_id)
 
-            self._temp_pending = None
+            self._temp_pending.pop(pending_key, None)
             await query.edit_message_text(
                 f"<b>Session switched</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>\n\n"
@@ -1492,9 +1496,9 @@ class CallbackHandlers(BaseHandler):
             return
 
         if action == "new":
-            new_model = parts[2] if len(parts) > 2 else "sonnet"
+            new_model = parts[3] if len(parts) > 3 else "sonnet"
 
-            self._temp_pending = None
+            self._temp_pending.pop(pending_key, None)
             await query.edit_message_text(
                 f"<b>Creating new {new_model} session...</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>",
