@@ -135,70 +135,114 @@ class BaseHandler:
         return count
 
     async def _retry_interrupted_messages(self, bot) -> int:
-        """봇 재시작 후 미완료 메시지를 재처리. Returns count retried."""
-        MAX_RETRIES = 2
+        """봇 재시작 후 미완료 메시지의 응답을 복구.
+
+        Claude 세션에 '이전 답변 복구' 요청을 보내 응답을 재전달한다.
+        각 메시지는 1회만 복구 시도하며, 실패 시 유실 알림 후 종료.
+        """
         repo = self._repository
         if not repo:
             return 0
 
-        # 재시도 한도 초과 메시지 정리
-        failed = repo.fail_exceeded_retries(max_retries=MAX_RETRIES)
-        if failed:
-            logger.warning(f"재시도 한도 초과 메시지 {failed}개 실패 처리")
-
-        unfinished = repo.get_unfinished_messages(max_age_minutes=30, max_retries=MAX_RETRIES)
+        # 모든 미완료 메시지 조회 (retry_count 무관)
+        unfinished = repo.get_unfinished_messages(max_age_minutes=30, max_retries=999)
         if not unfinished:
             return 0
 
-        logger.info(f"재시작 후 미완료 메시지 {len(unfinished)}개 발견 - 재처리 시작")
+        logger.info(f"재시작 후 미완료 메시지 {len(unfinished)}개 발견")
 
-        count = 0
+        recover_count = 0
+        lost_count = 0
+
         for msg in unfinished:
+            retry_count = msg.get("retry_count", 0)
+
+            if retry_count >= 1:
+                # 이전 복구 시도가 실패한 메시지 → 유실 알림
+                await self._notify_message_lost(bot, msg)
+                repo.complete_message(msg["id"], error="response_lost")
+                lost_count += 1
+            else:
+                # 첫 복구 시도
+                repo.increment_retry_count(msg["id"])
+                repo.claim_message(msg["id"])
+                asyncio.create_task(self._recover_interrupted_message(bot, msg))
+                recover_count += 1
+
+        if lost_count:
+            logger.warning(f"복구 불가 메시지 {lost_count}개 유실 처리")
+        if recover_count:
+            logger.info(f"미완료 메시지 {recover_count}개 복구 시작")
+
+        return recover_count
+
+    async def _notify_message_lost(self, bot, msg: dict) -> None:
+        """유실된 메시지에 대해 사용자에게 알림."""
+        try:
+            short_req = msg["request"][:50]
+            await bot.send_message(
+                chat_id=msg["chat_id"],
+                text=(
+                    f"⚠️ 봇 재시작으로 아래 메시지의 응답이 유실되었습니다.\n"
+                    f"<code>{short_req}</code>\n\n"
+                    f"다시 메시지를 보내주세요."
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"유실 알림 전송 실패 (id={msg['id']}): {e}")
+
+    async def _recover_interrupted_message(self, bot, msg: dict) -> None:
+        """Claude 세션을 이용해 미완료 메시지의 응답을 복구."""
+        repo = self._repository
+        msg_id = msg["id"]
+        chat_id = msg["chat_id"]
+        session_id = msg["session_id"]
+        original_request = msg["request"]
+        model = msg.get("model", "sonnet")
+
+        try:
+            retry_prompt = (
+                "System: The bot was restarted and your previous response was lost. "
+                "If you already answered the user's last message, please send the same answer again. "
+                "If you haven't answered yet, please answer now.\n\n"
+                f"User's original message:\n{original_request}"
+            )
+
+            workspace_path = None
             try:
-                # 재시도 카운트 증가
-                new_count = repo.increment_retry_count(msg["id"])
-                logger.info(f"메시지 재처리 시도 (id={msg['id']}, retry={new_count}/{MAX_RETRIES})")
+                workspace_path = self.sessions.get_workspace_path(session_id)
+            except Exception:
+                pass
 
-                short_req = msg["request"][:50]
-                await bot.send_message(
-                    chat_id=msg["chat_id"],
-                    text=f"🔄 봇 재시작으로 중단된 메시지를 재처리합니다... ({new_count}/{MAX_RETRIES})\n<code>{short_req}</code>",
-                    parse_mode="HTML",
-                )
+            response, error, _ = await self.claude.chat(
+                retry_prompt, session_id, model=model,
+                workspace_path=workspace_path,
+            )
 
-                trace_id = set_trace_id()
-                queue_id = msg["id"]
-
-                async def _safe_retry(coro, qid):
+            if response and not error:
+                short_req = original_request[:30]
+                prefix = f"🔄 <b>[재시작 복구]</b>\n<code>{short_req}</code>\n\n"
+                full = prefix + response
+                max_len = 4000
+                for i in range(0, len(full), max_len):
+                    chunk = full[i:i + max_len]
                     try:
-                        await coro
-                    except Exception as exc:
-                        logger.error(f"재처리 태스크 실패 (id={qid}): {exc}", exc_info=True)
-                        repo.complete_message(qid, error=f"retry_task_failed: {exc}")
+                        await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
+                    except Exception:
+                        await bot.send_message(chat_id=chat_id, text=chunk)
 
-                asyncio.create_task(
-                    _safe_retry(
-                        self._process_claude_request_with_semaphore(
-                            bot=bot,
-                            chat_id=msg["chat_id"],
-                            user_id=str(msg["chat_id"]),
-                            session_id=msg["session_id"],
-                            message=msg["request"],
-                            is_new_session=False,
-                            trace_id=trace_id,
-                            model=msg.get("model", "sonnet"),
-                            queue_id=queue_id,
-                        ),
-                        queue_id,
-                    )
-                )
-                count += 1
-            except Exception as e:
-                logger.error(f"메시지 재처리 실패 (id={msg['id']}): {e}")
-                repo.complete_message(msg["id"], error=f"retry_failed: {e}")
+                repo.complete_message(msg_id, response=response[:500])
+                logger.info(f"메시지 복구 성공 (id={msg_id})")
+            else:
+                await self._notify_message_lost(bot, msg)
+                repo.complete_message(msg_id, error=f"recovery_failed: {error}")
+                logger.warning(f"메시지 복구 실패 (id={msg_id}): {error}")
 
-        logger.info(f"미완료 메시지 {count}개 재처리 시작됨")
-        return count
+        except Exception as e:
+            logger.error(f"메시지 복구 예외 (id={msg_id}): {e}", exc_info=True)
+            await self._notify_message_lost(bot, msg)
+            repo.complete_message(msg_id, error=f"recovery_exception: {e}")
 
     def set_schedule_manager(self, manager) -> None:
         """Set schedule manager."""
