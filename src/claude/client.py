@@ -3,9 +3,14 @@
 import asyncio
 from contextlib import suppress
 import json
+import re
 import shlex
 from pathlib import Path
 from typing import Optional
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
 from src.ai.catalog import get_profile
 from src.ai.client_types import ChatError, ChatResponse
@@ -226,10 +231,12 @@ class ClaudeClient:
             cmd.extend(["--model", model])
             logger.trace(f"--model {model} 옵션 추가됨")
 
-        # 세션이 있으면 항상 resume 사용
-        if session_id:
+        # 세션이 있으면 resume 사용 (유효한 UUID만)
+        if session_id and _UUID_RE.match(session_id):
             cmd.extend(["--resume", session_id])
             logger.trace("--resume 옵션 추가됨")
+        elif session_id:
+            logger.warning(f"Invalid UUID for --resume, starting new session: {session_id[:16]}")
 
         # JSON 출력 (session_id 파싱용)
         cmd.extend(["--print", "--output-format", "json"])

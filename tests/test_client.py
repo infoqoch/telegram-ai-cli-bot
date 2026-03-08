@@ -60,10 +60,11 @@ class TestClaudeClient:
 
     def test_build_command_with_resume(self, client):
         """세션 재개 명령어 빌드 확인."""
-        cmd = client._build_command("Hello", session_id="abc-123")
+        valid_uuid = "550e8400-e29b-41d4-a716-446655440000"
+        cmd = client._build_command("Hello", session_id=valid_uuid)
 
         assert "--resume" in cmd
-        assert "abc-123" in cmd
+        assert valid_uuid in cmd
 
     def test_command_parsing(self):
         """복잡한 명령어 파싱 확인."""

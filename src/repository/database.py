@@ -147,11 +147,14 @@ def _backfill_session_provider_data(conn: sqlite3.Connection) -> None:
     for session_id, model in rows:
         provider = infer_provider_from_model(model)
         conn.execute(
-            """UPDATE sessions
-               SET ai_provider = ?, provider_session_id = COALESCE(provider_session_id, id)
-               WHERE id = ?""",
+            "UPDATE sessions SET ai_provider = ? WHERE id = ?",
             (provider, session_id),
         )
+
+    # Clean up corrupted provider_session_id where internal hex ID was stored
+    conn.execute(
+        "UPDATE sessions SET provider_session_id = NULL WHERE provider_session_id = id"
+    )
 
     schedule_rows = conn.execute("SELECT id, model FROM schedules").fetchall()
     for schedule_id, model in schedule_rows:
