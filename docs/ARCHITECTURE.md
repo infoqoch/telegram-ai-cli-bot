@@ -28,6 +28,7 @@ Rules:
 - Handlers decide `which flow` to run.
 - Handlers should not own detached worker spawn, lock cleanup, or temp pending persistence logic inline.
 - Shared handler state must stay small and operational, not business-heavy.
+- Protected command entrypoints should use `authorized_only` / `authenticated_only` unless the command is intentionally public.
 
 ### Service Layer
 
@@ -53,6 +54,7 @@ Rules:
 - Runtime SQLite writes should prefer autocommit-sized operations.
 - Provider clients should encapsulate subprocess behavior, timeout/cancellation cleanup, and provider-specific parsing.
 - Session creation APIs use keyword-only options after `session_id` to avoid ambiguous positional calls.
+- Internal AI-assisted features such as workspace recommendation should use injected clients, not ad-hoc subprocess calls from adapters.
 
 ## Core Runtime Flows
 

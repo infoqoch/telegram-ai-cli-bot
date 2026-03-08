@@ -30,7 +30,7 @@ def build_default_registry(settings) -> AIRegistry:
     return AIRegistry(
         {
             "claude": ClaudeClient(
-                command="claude",
+                command=settings.ai_command,
                 system_prompt_file=settings.telegram_prompt_file,
                 timeout=None,
             ),

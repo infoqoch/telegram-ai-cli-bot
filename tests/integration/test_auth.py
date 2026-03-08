@@ -103,6 +103,16 @@ class TestAuthentication:
         reply = await get_reply_text(update)
         assert reply
 
+    @pytest.mark.asyncio
+    async def test_workspace_command_requires_auth(self, auth_required_handlers):
+        """`/workspace` 도 다른 보호 명령과 동일하게 인증이 필요하다."""
+        update, context = create_command_update("workspace")
+
+        await auth_required_handlers.workspace_command(update, context)
+
+        reply = await get_reply_text(update)
+        assert "Authentication required first" in reply
+
 
 class TestAuthManager:
     """AuthManager 단위 테스트."""

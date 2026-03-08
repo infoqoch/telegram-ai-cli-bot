@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from src.ai import AIRegistry, build_default_registry
 from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
+from src.claude.client import ClaudeClient
 from src.logging_config import logger
 from src.plugins.loader import PluginLoader
 from src.repository import Repository, init_repository
@@ -80,7 +81,14 @@ def build_bot_runtime(settings) -> BotRuntime:
     schedule_manager = ScheduleManagerAdapter(repo=repo)
     logger.info("예약 스케줄러 어댑터 초기화 완료")
 
-    workspace_registry = WorkspaceRegistryAdapter(repo=repo)
+    workspace_registry = WorkspaceRegistryAdapter(
+        repo=repo,
+        recommendation_client=ClaudeClient(
+            command=settings.ai_command,
+            system_prompt_file=None,
+            timeout=30,
+        ),
+    )
     logger.info("워크스페이스 레지스트리 어댑터 초기화 완료")
 
     return BotRuntime(

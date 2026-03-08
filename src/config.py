@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     admin_chat_id: int = Field(default=0, description="Chat ID for admin notifications")
 
     # AI
-    ai_command: str = Field(default="claude", alias="AI_COMMAND")
+    ai_command: str = Field(default="claude", alias="AI_COMMAND", description="Claude CLI command")
     session_timeout_hours: int = Field(default=24)
     
     # Authentication

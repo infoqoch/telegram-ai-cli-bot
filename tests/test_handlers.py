@@ -147,6 +147,36 @@ class TestBotHandlers:
         assert "Authentication required first" in call_args
 
     @pytest.mark.asyncio
+    async def test_workspace_command_unauthorized(self, handlers):
+        """권한 없는 사용자는 /workspace 를 사용할 수 없다."""
+        update = MagicMock()
+        update.effective_chat.id = 99999
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+
+        await handlers.workspace_command(update, context)
+
+        update.message.reply_text.assert_called_once()
+        call_args = update.message.reply_text.call_args[0][0]
+        assert "Access denied" in call_args
+
+    @pytest.mark.asyncio
+    async def test_workspace_command_unauthenticated(self, handlers, mock_auth_manager):
+        """미인증 사용자는 /workspace 를 사용할 수 없다."""
+        mock_auth_manager.is_authenticated.return_value = False
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+
+        await handlers.workspace_command(update, context)
+
+        update.message.reply_text.assert_called_once()
+        call_args = update.message.reply_text.call_args[0][0]
+        assert "Authentication required first" in call_args
+
+    @pytest.mark.asyncio
     async def test_handle_message_unauthenticated(self, handlers, mock_auth_manager):
         """미인증 사용자의 메시지 처리."""
         mock_auth_manager.is_authenticated.return_value = False

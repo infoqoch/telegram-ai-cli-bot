@@ -28,7 +28,7 @@ class BotHandlers(
     """Container for all bot command handlers.
 
     Composed from:
-    - BaseHandler: Common utilities, watchdog, task tracking
+    - BaseHandler: Common transport helpers and runtime collaborator wiring
     - SessionHandlers: Session commands (new, switch, delete, etc.)
     - MessageHandlers: Message intake and detached worker spawning
     - AdminHandlers: Admin commands (tasks, jobs, auth, etc.)

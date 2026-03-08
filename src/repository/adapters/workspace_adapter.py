@@ -1,16 +1,18 @@
 """Workspace registry adapter for backward compatibility."""
 
-import asyncio
 import json
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 from ..repository import Repository, Workspace
+
+if TYPE_CHECKING:
+    from src.ai.client_types import AIClient
 
 
 @dataclass
@@ -63,14 +65,11 @@ class WorkspaceData:
 
 
 class WorkspaceRegistryAdapter:
-    """Adapter that provides WorkspaceRegistry-compatible interface over Repository.
+    """Repository-backed workspace registry plus recommendation helper."""
 
-    This adapter maintains the same API as the original WorkspaceRegistry class
-    to ensure backward compatibility with existing code.
-    """
-
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: Repository, recommendation_client: Optional["AIClient"] = None):
         self._repo = repo
+        self._recommendation_client = recommendation_client
 
     def add(
         self,
@@ -161,12 +160,11 @@ class WorkspaceRegistryAdapter:
         user_id: str,
         purpose: str,
         allowed_patterns: list[str],
-        claude_client: Any = None
     ) -> list[dict[str, str]]:
         """Recommend workspace paths based on purpose.
 
         1. Search registered workspaces by keywords/name/description
-        2. Use Claude AI to match purpose against directory names
+        2. Use the injected recommendation client for directory-name matching
         """
         purpose_lower = purpose.lower()
         results = []
@@ -211,7 +209,11 @@ class WorkspaceRegistryAdapter:
     async def _ai_recommend(
         self, purpose: str, directories: list[str]
     ) -> list[dict[str, str]]:
-        """Use Claude CLI to recommend directories matching purpose."""
+        """Use the injected AI client to recommend directories matching purpose."""
+        if not self._recommendation_client:
+            logger.warning("AI recommend skipped: recommendation client not configured")
+            return []
+
         dir_names = "\n".join(f"- {d}" for d in directories)
         prompt = (
             f"사용자가 '{purpose}' 목적의 워크스페이스를 찾고 있습니다.\n"
@@ -222,17 +224,21 @@ class WorkspaceRegistryAdapter:
             f'[{{"path": "/full/path", "name": "표시이름", "description": "설명", "reason": "선택이유"}}]'
         )
 
-        ai_command = os.getenv("AI_COMMAND", "claude").split()
         try:
-            env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-            proc = await asyncio.create_subprocess_exec(
-                *ai_command, "-p", prompt, "--model", "opus",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
+            response = await self._recommendation_client.chat(
+                message=prompt,
+                session_id=None,
+                model="sonnet",
+                workspace_path=None,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-            output = stdout.decode().strip()
+            if response.error or not response.text.strip():
+                logger.warning(
+                    "AI recommend failed: %s",
+                    response.error.value if response.error else "empty response",
+                )
+                return []
+
+            output = response.text.strip()
 
             # Extract JSON array from output
             start = output.find("[")
@@ -253,9 +259,6 @@ class WorkspaceRegistryAdapter:
                         "reason": item.get("reason", "AI recommendation"),
                     })
             return valid
-        except asyncio.TimeoutError:
-            logger.warning("AI recommend timed out")
-            return []
         except Exception as e:
             logger.warning(f"AI recommend failed: {e}")
             return []

@@ -10,12 +10,15 @@ from src.ai import get_profile_label, get_provider_label
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from ..constants import get_model_emoji
+from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
 
 class WorkspaceHandlers(BaseHandler):
     """Workspace command handlers."""
 
+    @authorized_only
+    @authenticated_only
     async def workspace_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /workspace command - manage workspaces."""
         chat_id = update.effective_chat.id

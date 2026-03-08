@@ -173,3 +173,39 @@ async def test_run_job_marks_watchdog_timeout_without_completion_notice(repo, se
     sent_texts = [call.kwargs["text"] for call in fake_bot.send_message.await_args_list]
     assert any("Task exceeded 1 second and was stopped" in text for text in sent_texts)
     assert not any("Task complete!" in text for text in sent_texts)
+
+
+@pytest.mark.asyncio
+async def test_run_job_escapes_session_and_message_metadata(repo, session_service):
+    """Detached response envelope escapes user-controlled metadata for Telegram HTML."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="unsafe <tag>")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="질문 </code><i>x</i>",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(text="응답", error=None, session_id="sess1"))
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    sent_text = fake_bot.send_message.await_args_list[0].kwargs["text"]
+    assert "unsafe &lt;tag&gt;" in sent_text
+    assert "&lt;/code&gt;&lt;i&gt;x&lt;/i&gt;" in sent_text
+    assert "unsafe <tag>" not in sent_text
+    assert "</code><i>x</i>" not in sent_text
