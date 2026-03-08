@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
-from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, infer_provider_from_model
+from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS
 
 PERSISTENT_QUEUE_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
 
@@ -329,39 +329,11 @@ class Repository:
         ).fetchone()
         return row["previous_session_id"] if row else None
 
-    def _normalize_session_create_args(
-        self,
-        session_id: str,
-        ai_provider: str,
-        provider_session_id: Optional[str],
-        model: str,
-        name: Optional[str],
-        workspace_path: Optional[str],
-    ) -> tuple[str, Optional[str], str, Optional[str], Optional[str]]:
-        """Support legacy create_session positional calls.
-
-        Legacy signature:
-            create_session(user_id, session_id, model="sonnet", name=None, workspace_path=None, ...)
-        """
-        if ai_provider in SUPPORTED_PROVIDERS:
-            return ai_provider, provider_session_id, model, name, workspace_path
-
-        legacy_model = ai_provider or model or "sonnet"
-        legacy_name = provider_session_id if provider_session_id is not None else name
-        legacy_workspace_path = workspace_path
-
-        if legacy_workspace_path is None and name is not None:
-            legacy_workspace_path = name
-        elif legacy_workspace_path is None and model not in ("sonnet", "opus", "haiku"):
-            legacy_workspace_path = model
-
-        normalized_provider = infer_provider_from_model(legacy_model)
-        return normalized_provider, session_id, legacy_model, legacy_name, legacy_workspace_path
-
     def create_session(
         self,
         user_id: str,
         session_id: str,
+        *,
         ai_provider: str = DEFAULT_PROVIDER,
         provider_session_id: Optional[str] = None,
         model: str = "sonnet",
@@ -370,14 +342,6 @@ class Repository:
         switch_to: bool = True
     ) -> SessionData:
         """Create a new session."""
-        ai_provider, provider_session_id, model, name, workspace_path = self._normalize_session_create_args(
-            session_id=session_id,
-            ai_provider=ai_provider,
-            provider_session_id=provider_session_id,
-            model=model,
-            name=name,
-            workspace_path=workspace_path,
-        )
         now = self._now()
         self.get_or_create_user(user_id)
 
@@ -412,6 +376,7 @@ class Repository:
         self,
         user_id: str,
         session_id: str,
+        *,
         ai_provider: str = DEFAULT_PROVIDER,
         provider_session_id: Optional[str] = None,
         model: str = "sonnet",
@@ -625,7 +590,7 @@ class Repository:
         return cursor.lastrowid or 0
 
     def get_session_history(self, session_id: str, limit: Optional[int] = None) -> list[str]:
-        """Get session history messages (legacy format)."""
+        """Get session history as a plain message list."""
         query = "SELECT message FROM session_history WHERE session_id = ? ORDER BY timestamp ASC"
         params: list[Any] = [session_id]
 

@@ -37,6 +37,18 @@ class CallbackHandlers(BaseHandler):
         callback_data = query.data
         logger.info(f"Callback query: {callback_data} (chat_id={chat_id})")
 
+        if not self._is_authorized(chat_id):
+            logger.debug("Callback denied - unauthorized")
+            await query.answer("⛔ Access denied.", show_alert=True)
+            clear_context()
+            return
+
+        if not self._is_authenticated(str(chat_id)):
+            logger.debug("Callback denied - auth required")
+            await query.answer("🔒 Authentication required.\n/auth <key>", show_alert=True)
+            clear_context()
+            return
+
         await query.answer()
 
         # Plugin auto-routing (CALLBACK_PREFIX 기반)

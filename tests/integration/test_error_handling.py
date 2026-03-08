@@ -22,7 +22,7 @@ class TestClaudeErrors:
     @pytest.mark.asyncio
     async def test_timeout_error_shows_message(self, handlers, session_store):
         """타임아웃 에러 시 메시지 표시."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
         handlers.claude = MockClaude.create_client(error="TIMEOUT")
 
         update, context = create_message_update("질문")
@@ -36,7 +36,7 @@ class TestClaudeErrors:
     @pytest.mark.asyncio
     async def test_cli_error_shows_message(self, handlers, session_store):
         """CLI 에러 시 메시지 표시."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
         handlers.claude = MockClaude.create_client(error="CLI_ERROR")
 
         update, context = create_message_update("질문")
@@ -49,7 +49,7 @@ class TestClaudeErrors:
     @pytest.mark.asyncio
     async def test_session_not_found_error(self, handlers, session_store):
         """세션 없음 에러 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
         handlers.claude = MockClaude.create_client(error="SESSION_NOT_FOUND")
 
         update, context = create_message_update("질문")
@@ -63,7 +63,7 @@ class TestClaudeErrors:
     @pytest.mark.asyncio
     async def test_unknown_error_handled(self, handlers, session_store):
         """알 수 없는 에러 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
         handlers.claude = MockClaude.create_client(error="UNKNOWN_ERROR")
 
         update, context = create_message_update("질문")
@@ -80,7 +80,7 @@ class TestExceptionHandling:
     @pytest.mark.asyncio
     async def test_handler_exception_logged(self, handlers, session_store):
         """핸들러 예외 로깅."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         # 예외 발생시키는 mock
         handlers.claude = MagicMock()
@@ -113,7 +113,7 @@ class TestTelegramApiErrors:
     @pytest.mark.asyncio
     async def test_send_message_failure(self, handlers, session_store):
         """메시지 전송 실패 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_message_update("테스트")
 
@@ -175,7 +175,7 @@ class TestValidationErrors:
     @pytest.mark.asyncio
     async def test_empty_rename(self, handlers, session_store):
         """빈 이름으로 변경 시도."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_command_update("rename", args=[])
 

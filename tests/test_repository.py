@@ -124,6 +124,11 @@ class TestSessionOperations:
         current = repo.get_current_session_id("user1")
         assert current == "sess1"  # 여전히 sess1
 
+    def test_create_session_requires_keyword_options(self, repo):
+        """세션 생성 옵션은 session_id 이후 keyword-only다."""
+        with pytest.raises(TypeError):
+            repo.create_session("user1", "sess1", "claude", "provider-id")
+
     def test_list_sessions(self, repo):
         """세션 목록."""
         repo.create_session("user1", "sess1")

@@ -116,6 +116,37 @@ class TestBotHandlers:
         assert "Access denied" in call_args
 
     @pytest.mark.asyncio
+    async def test_chatid_unauthorized(self, handlers):
+        """권한 없는 사용자의 /chatid 처리."""
+        update = MagicMock()
+        update.effective_chat.id = 99999
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+
+        await handlers.chatid_command(update, context)
+
+        update.message.reply_text.assert_called_once()
+        call_args = update.message.reply_text.call_args[0][0]
+        assert "Access denied" in call_args
+
+    @pytest.mark.asyncio
+    async def test_plugins_command_unauthenticated(self, handlers, mock_auth_manager):
+        """미인증 사용자는 /plugins를 사용할 수 없다."""
+        mock_auth_manager.is_authenticated.return_value = False
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+        update.message.text = "/plugins"
+        context = MagicMock()
+
+        await handlers.plugins_command(update, context)
+
+        update.message.reply_text.assert_called_once()
+        call_args = update.message.reply_text.call_args[0][0]
+        assert "Authentication required first" in call_args
+
+    @pytest.mark.asyncio
     async def test_handle_message_unauthenticated(self, handlers, mock_auth_manager):
         """미인증 사용자의 메시지 처리."""
         mock_auth_manager.is_authenticated.return_value = False
@@ -123,6 +154,7 @@ class TestBotHandlers:
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "Hello"
+        update.message.reply_to_message = None
         update.message.reply_text = AsyncMock()
         context = MagicMock()
 
@@ -131,6 +163,59 @@ class TestBotHandlers:
         update.message.reply_text.assert_called_once()
         call_args = update.message.reply_text.call_args[0][0]
         assert "Authentication required" in call_args
+
+    @pytest.mark.asyncio
+    async def test_handle_message_unauthenticated_skips_plugins(self, handlers, mock_auth_manager):
+        """미인증 메시지는 플러그인 처리 전에 차단한다."""
+        mock_auth_manager.is_authenticated.return_value = False
+        handlers.plugins = MagicMock()
+        handlers.plugins.process_message = AsyncMock()
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.text = "메모"
+        update.message.reply_to_message = None
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+
+        await handlers.handle_message(update, context)
+
+        handlers.plugins.process_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_callback_query_unauthorized(self, handlers):
+        """권한 없는 콜백 쿼리는 즉시 차단한다."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "tasks:refresh"
+        update.callback_query.message = MagicMock()
+        update.callback_query.message.chat_id = 99999
+        update.callback_query.answer = AsyncMock()
+        context = MagicMock()
+
+        await handlers.callback_query_handler(update, context)
+
+        update.callback_query.answer.assert_awaited_once_with("⛔ Access denied.", show_alert=True)
+
+    @pytest.mark.asyncio
+    async def test_callback_query_unauthenticated(self, handlers, mock_auth_manager):
+        """미인증 콜백 쿼리는 인증 안내를 반환한다."""
+        mock_auth_manager.is_authenticated.return_value = False
+
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "tasks:refresh"
+        update.callback_query.message = MagicMock()
+        update.callback_query.message.chat_id = 12345
+        update.callback_query.answer = AsyncMock()
+        context = MagicMock()
+
+        await handlers.callback_query_handler(update, context)
+
+        update.callback_query.answer.assert_awaited_once_with(
+            "🔒 Authentication required.\n/auth <key>",
+            show_alert=True,
+        )
 
     @pytest.mark.asyncio
     async def test_error_handler_generic_message(self, handlers):

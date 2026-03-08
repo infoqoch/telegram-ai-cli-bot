@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from .base import BaseHandler, TaskInfo
+from .base import BaseHandler
 from .session_handlers import SessionHandlers
 from .message_handlers import MessageHandlers
 from .admin_handlers import AdminHandlers
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
 
-__all__ = ["BotHandlers", "TaskInfo"]
+__all__ = ["BotHandlers"]
 
 
 class BotHandlers(
@@ -43,8 +43,6 @@ class BotHandlers(
         auth_manager: "AuthManager",
         require_auth: bool,
         allowed_chat_ids: list[int],
-        response_notify_seconds: int = 60,
-        session_list_ai_summary: bool = False,
         plugin_loader: "PluginLoader" = None,
         ai_registry=None,
     ):
@@ -55,8 +53,6 @@ class BotHandlers(
             auth_manager=auth_manager,
             require_auth=require_auth,
             allowed_chat_ids=allowed_chat_ids,
-            response_notify_seconds=response_notify_seconds,
-            session_list_ai_summary=session_list_ai_summary,
             plugin_loader=plugin_loader,
             ai_registry=ai_registry,
         )

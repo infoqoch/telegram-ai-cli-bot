@@ -356,15 +356,5 @@ async def get_sent_message(context: MagicMock) -> str:
 
 async def wait_for_handlers(handlers, timeout: float = 2.0):
     """Wait for background tasks in handlers to complete."""
-    import asyncio
-
-    # handlers._active_tasks가 있으면 완료 대기
-    if hasattr(handlers, '_active_tasks'):
-        tasks = list(handlers._active_tasks.values())
-        if tasks:
-            task_objects = [t.task for t in tasks if t.task is not None]
-            if task_objects:
-                await asyncio.wait(task_objects, timeout=timeout)
-
-    # 추가로 짧은 대기
+    del handlers, timeout
     await asyncio.sleep(0.2)

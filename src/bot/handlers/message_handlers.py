@@ -153,6 +153,16 @@ class MessageHandlers(BaseHandler):
             message = message[:MAX_MESSAGE_LENGTH]
             logger.warning(f"Message length limited: {original_len} -> {MAX_MESSAGE_LENGTH}")
 
+        if not self._is_authenticated(user_id):
+            logger.debug("Message denied - auth required")
+            await update.message.reply_text(
+                "🔒 Authentication required.\n"
+                f"Use /auth <key> to authenticate. (Valid for {self.auth.timeout_minutes}m)\n"
+                "/help for commands"
+            )
+            clear_context()
+            return
+
         # ForceReply response handling
         if update.message.reply_to_message:
             reply_text = update.message.reply_to_message.text or ""
@@ -229,16 +239,6 @@ class MessageHandlers(BaseHandler):
                 logger.error(f"[PLUGIN] Error: {e}", exc_info=True)
         else:
             logger.debug("[PLUGIN] No plugin loader")
-
-        if not self._is_authenticated(user_id):
-            logger.debug("Message denied - auth required")
-            await update.message.reply_text(
-                "🔒 Authentication required.\n"
-                f"Use /auth <key> to authenticate. (Valid for {self.auth.timeout_minutes}m)\n"
-                "/help for commands"
-            )
-            clear_context()
-            return
 
         if user_id in self._creating_sessions:
             logger.info(f"Session creation in progress - message blocked: user={user_id}")

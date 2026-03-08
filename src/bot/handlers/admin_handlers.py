@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 from src.ai import get_provider_button, get_provider_label
 from src.logging_config import logger, clear_context
 from ..constants import MAX_LOCK_STATUS_PREVIEW
-from ..middleware import authorized_only
+from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
 
@@ -47,6 +47,8 @@ class AdminHandlers(BaseHandler):
             normalized = normalized[:max_length].rstrip() + "..."
         return html.escape(normalized)
 
+    @authorized_only
+    @authenticated_only
     async def tasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /tasks command - show active tasks with buttons."""
         chat_id = update.effective_chat.id
@@ -64,6 +66,8 @@ class AdminHandlers(BaseHandler):
         logger.trace("/tasks complete")
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def scheduler_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /scheduler command - manage schedules."""
         chat_id = update.effective_chat.id
@@ -95,6 +99,7 @@ class AdminHandlers(BaseHandler):
         logger.trace("/scheduler complete")
         clear_context()
 
+    @authorized_only
     async def chatid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /chatid command - show user's chat ID."""
         chat_id = update.effective_chat.id
@@ -121,6 +126,8 @@ class AdminHandlers(BaseHandler):
         logger.trace("/chatid complete")
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def plugins_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /plugins command - show plugin list."""
         chat_id = update.effective_chat.id
@@ -144,6 +151,8 @@ class AdminHandlers(BaseHandler):
         logger.trace("/plugins complete")
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def reload_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reload command - hot reload plugins."""
         chat_id = update.effective_chat.id
@@ -183,6 +192,8 @@ class AdminHandlers(BaseHandler):
 
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def plugin_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /plugin_name command - show specific plugin usage."""
         chat_id = update.effective_chat.id

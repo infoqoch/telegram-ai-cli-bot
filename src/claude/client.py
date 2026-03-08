@@ -199,6 +199,12 @@ class ClaudeClient:
                 logger.warning(f"[JSON ERROR] 원본 output: {repr(output[:500]) if output else 'EMPTY'}")
                 return ChatResponse(output or "(응답 없음)", None, None)
 
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Claude CLI timed out - session={session_id[:8] if session_id else 'None'}, "
+                f"timeout={self.timeout}"
+            )
+            return ChatResponse("", ChatError.TIMEOUT, session_id)
         except Exception as e:
             logger.exception(f"Claude CLI 오류: {e}")
             return ChatResponse("", ChatError.CLI_ERROR, None)

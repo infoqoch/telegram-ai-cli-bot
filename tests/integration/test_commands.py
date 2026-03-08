@@ -182,8 +182,8 @@ class TestSessionManagement:
     async def test_session_list_shows_sessions(self, handlers, session_store):
         """세션 목록 표시."""
         # 세션 몇 개 생성
-        session_store.create_session("12345", "session-1", "sonnet", "세션1")
-        session_store.create_session("12345", "session-2", "opus", "세션2")
+        session_store.create_session("12345", "session-1", model="sonnet", name="세션1")
+        session_store.create_session("12345", "session-2", model="opus", name="세션2")
 
         update, context = create_command_update("session_list")
 
@@ -213,8 +213,8 @@ class TestSessionManagement:
     async def test_switch_session(self, handlers, session_store):
         """세션 전환."""
         # 두 개의 세션 생성
-        session_store.create_session("12345", "session-aaa", "sonnet", "첫번째")
-        session_store.create_session("12345", "session-bbb", "opus", "두번째")
+        session_store.create_session("12345", "session-aaa", model="sonnet", name="첫번째")
+        session_store.create_session("12345", "session-bbb", model="opus", name="두번째")
         assert session_store.get_current_session_id("12345") == "session-bbb"
 
         # 첫번째로 전환
@@ -233,8 +233,8 @@ class TestSessionManagement:
     async def test_back_to_previous_session(self, handlers, session_store):
         """이전 세션으로 돌아가기."""
         # 세션 생성 및 전환
-        session_store.create_session("12345", "session-old", "sonnet", "이전")
-        session_store.create_session("12345", "session-new", "opus", "현재")
+        session_store.create_session("12345", "session-old", model="sonnet", name="이전")
+        session_store.create_session("12345", "session-new", model="opus", name="현재")
 
         update, context = create_command_update("back")
 
@@ -250,7 +250,7 @@ class TestModelCommands:
     @pytest.mark.asyncio
     async def test_model_command_shows_current(self, handlers, session_store):
         """현재 모델 표시."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_command_update("model")
 
@@ -266,7 +266,7 @@ class TestRenameCommand:
     @pytest.mark.asyncio
     async def test_rename_with_name(self, handlers, session_store):
         """세션 이름 변경."""
-        session_store.create_session("12345", "test-sess", "sonnet", "원래이름")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="원래이름")
 
         update, context = create_command_update("rename", args=["새이름"])
 
@@ -283,7 +283,7 @@ class TestHistoryCommand:
     async def test_history_shows_messages(self, handlers, session_store):
         """히스토리 표시."""
         # 세션 생성 및 메시지 추가
-        session_store.create_session("12345", "test-sess-12345678", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess-12345678", model="sonnet", name="테스트")
         session_store.add_message("test-sess-12345678", "첫 번째 메시지")
         session_store.add_message("test-sess-12345678", "두 번째 메시지")
 
@@ -304,7 +304,7 @@ class TestDeleteSessionCommand:
     @pytest.mark.asyncio
     async def test_delete_session(self, handlers, session_store):
         """세션 삭제."""
-        session_store.create_session("12345", "to-delete-123", "sonnet", "삭제할세션")
+        session_store.create_session("12345", "to-delete-123", model="sonnet", name="삭제할세션")
 
         update, context = create_command_update("d_to-delet")  # short id
         update.message.text = "/d_to-delet"

@@ -26,17 +26,10 @@ _process_lock = ProcessLock(Path("/tmp/telegram-bot.lock"))
 
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
-from src.ai import build_default_registry
-from src.bot.handlers import BotHandlers
-from src.bot.middleware import AuthManager
-from src.plugins.loader import PluginLoader
+from src.bootstrap import build_bot_runtime
 from src.scheduler_manager import scheduler_manager
-from src.repository import init_repository, get_repository, shutdown_repository
-from src.repository.adapters import (
-    ScheduleManagerAdapter,
-    WorkspaceRegistryAdapter,
-)
-from src.services.session_service import SessionService
+from src.repository import shutdown_repository
+from src.services.schedule_execution_service import ScheduleExecutionService
 
 # 예약 스케줄러 (경로 기반)
 _schedule_manager = None
@@ -68,61 +61,12 @@ def create_app() -> Application:
     logger.info(f"  allowed_chat_ids: {settings.allowed_chat_ids or '(모두 허용)'}")
     logger.info("=" * 60)
 
-    # Initialize Repository (SQLite)
-    logger.trace("Repository 초기화 시작")
-    repo = init_repository(settings.db_path)
-    logger.trace(f"Repository 초기화 완료 - db: {settings.db_path}")
-
-    # Initialize SessionService
-    logger.trace("SessionService 초기화 시작")
-    session_service = SessionService(
-        repo=repo,
-        session_timeout_hours=settings.session_timeout_hours,
-    )
-    logger.trace("SessionService 초기화 완료")
-
-    logger.trace("AIRegistry 초기화 시작")
-    ai_registry = build_default_registry(settings)
-    claude_client = ai_registry.get_client("claude")
-    logger.trace("AIRegistry 초기화 완료")
-
-    logger.trace("AuthManager 초기화 시작")
-    auth_manager = AuthManager(
-        secret_key=settings.auth_secret_key,
-        timeout_minutes=settings.auth_timeout_minutes,
-        repository=repo,
-    )
-    auth_manager.restore_from_db()
-    logger.trace(f"AuthManager 초기화 완료 - timeout: {settings.auth_timeout_minutes}분")
-
-    # 플러그인 로더 초기화 (Repository 주입)
-    logger.trace("PluginLoader 초기화 시작")
-    plugin_loader = PluginLoader(settings.base_dir, repository=repo)
-    loaded_plugins = plugin_loader.load_all()
-    if loaded_plugins:
-        logger.info(f"플러그인 로드됨: {', '.join(loaded_plugins)}")
-    else:
-        logger.warning("로드된 플러그인 없음")
-    logger.trace(f"PluginLoader 초기화 완료 - {len(loaded_plugins)}개 플러그인")
-
-    logger.trace("BotHandlers 초기화 시작")
-    handlers = BotHandlers(
-        session_service=session_service,
-        claude_client=claude_client,
-        ai_registry=ai_registry,
-        auth_manager=auth_manager,
-        require_auth=settings.require_auth,
-        allowed_chat_ids=settings.allowed_chat_ids,
-        response_notify_seconds=settings.response_notify_seconds,
-        session_list_ai_summary=settings.session_list_ai_summary,
-        plugin_loader=plugin_loader,
-    )
-    handlers._restore_temp_pending()
-    logger.trace("BotHandlers 초기화 완료")
+    runtime = build_bot_runtime(settings)
+    handlers = runtime.handlers
 
     # 봇 시작 후 미완료 메시지 재처리 콜백
     async def post_init(application):
-        count = await handlers._cleanup_detached_jobs(application.bot)
+        count = await handlers.cleanup_detached_jobs(application.bot)
         if count:
             logger.info(f"Detached job cleanup count: {count}")
 
@@ -142,79 +86,27 @@ def create_app() -> Application:
     logger.info("SchedulerManager 초기화 완료")
 
     # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
-    _setup_hourly_ping_scheduler(app, settings, plugin_loader)
+    _setup_hourly_ping_scheduler(app, settings, runtime.plugin_loader)
 
     # 예약 스케줄러 설정 (Repository 어댑터 사용)
     global _schedule_manager
-    _schedule_manager = ScheduleManagerAdapter(repo=repo)
-    # Executor는 나중에 설정 (bot 필요)
-    logger.info("예약 스케줄러 어댑터 초기화 완료")
+    _schedule_manager = runtime.schedule_manager
 
-    # 워크스페이스 레지스트리 설정 (Repository 어댑터 사용)
-    workspace_registry = WorkspaceRegistryAdapter(repo=repo)
-    logger.info("워크스페이스 레지스트리 어댑터 초기화 완료")
-
-    # Schedule executor 설정 (provider CLI 호출 / 플러그인 실행)
-    async def schedule_executor(schedule):
-        """Execute scheduled task."""
-        from src.repository.repository import Schedule
-        try:
-            # Plugin type: execute plugin action directly
-            if schedule.type == "plugin" and schedule.plugin_name and schedule.action_name:
-                plugin = plugin_loader.get_plugin_by_name(schedule.plugin_name)
-                if not plugin:
-                    raise RuntimeError(f"Plugin '{schedule.plugin_name}' not found")
-
-                response = await plugin.execute_scheduled_action(
-                    schedule.action_name, schedule.chat_id
-                )
-            else:
-                # AI/Workspace type: call provider CLI
-                workspace_path = None
-                if schedule.type == "workspace" and schedule.workspace_path:
-                    workspace_path = schedule.workspace_path
-
-                client = ai_registry.get_client(schedule.ai_provider or "claude")
-                text, error, _ = await client.chat(
-                    message=schedule.message,
-                    session_id=None,
-                    model=schedule.model,
-                    workspace_path=workspace_path,
-                )
-                response = text or error or "(no response)"
-
-            # Send response to Telegram
-            if app.bot and schedule.chat_id and response:
-                max_len = 4000
-                for i in range(0, len(response), max_len):
-                    chunk = response[i:i + max_len]
-                    try:
-                        await app.bot.send_message(
-                            chat_id=schedule.chat_id,
-                            text=f"📅 <b>{schedule.name}</b>\n\n{chunk}",
-                            parse_mode="HTML",
-                        )
-                    except Exception:
-                        await app.bot.send_message(
-                            chat_id=schedule.chat_id,
-                            text=f"📅 {schedule.name}\n\n{chunk}",
-                        )
-
-            _schedule_manager.update_run(schedule.id)
-            logger.info(f"Schedule {schedule.id} executed successfully")
-
-        except Exception as e:
-            _schedule_manager.update_run(schedule.id, last_error=str(e))
-            logger.error(f"Schedule {schedule.id} failed: {e}")
+    schedule_execution_service = ScheduleExecutionService(
+        bot=app.bot,
+        ai_registry=runtime.ai_registry,
+        plugin_loader=runtime.plugin_loader,
+        schedule_manager=_schedule_manager,
+    )
 
     _schedule_manager.set_scheduler_manager(scheduler_manager)
-    _schedule_manager.set_executor(schedule_executor)
+    _schedule_manager.set_executor(schedule_execution_service.execute)
     _schedule_manager.register_all_to_scheduler()
     logger.info("예약 스케줄러 executor 설정 완료")
 
     # BotHandlers에 schedule_manager, workspace_registry 설정
     handlers.set_schedule_manager(_schedule_manager)
-    handlers.set_workspace_registry(workspace_registry)
+    handlers.set_workspace_registry(runtime.workspace_registry)
 
     # Register handlers
     logger.trace("핸들러 등록 시작")
@@ -249,8 +141,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("ai", handlers.ai_command))
 
     # 동적 플러그인 명령어 (예: /memo)
-    if plugin_loader.plugins:
-        plugin_names = [p.name for p in plugin_loader.plugins]
+    if runtime.plugin_loader.plugins:
+        plugin_names = [p.name for p in runtime.plugin_loader.plugins]
         for name in plugin_names:
             app.add_handler(CommandHandler(name, handlers.plugin_help_command))
         logger.trace(f"플러그인 명령어 등록: {plugin_names}")

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
     
     # Telegram
@@ -26,8 +27,6 @@ class Settings(BaseSettings):
     # AI
     ai_command: str = Field(default="claude", alias="AI_COMMAND")
     session_timeout_hours: int = Field(default=24)
-    response_notify_seconds: int = Field(default=60, description="응답 대기 알림 시간(초)")
-    session_list_ai_summary: bool = Field(default=False, description="세션 목록에서 AI 요약 사용")
     
     # Authentication
     require_auth: bool = Field(default=True)

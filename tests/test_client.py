@@ -9,7 +9,7 @@ ClaudeClient 클래스의 핵심 기능 검증:
 import asyncio
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -200,6 +200,21 @@ class TestRunCommand:
             assert len(result) == 3
             assert result == ("out", "err", 1)
 
+    @pytest.mark.asyncio
+    async def test_run_command_kills_subprocess_on_timeout(self, client):
+        """타임아웃 발생 시 subprocess를 종료한다."""
+        with patch('asyncio.create_subprocess_exec') as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+            mock_process.kill = MagicMock()
+            mock_exec.return_value = mock_process
+
+            with pytest.raises(asyncio.TimeoutError):
+                await client._run_command(["claude", "--print"], timeout=1)
+
+            assert mock_process.kill.call_count == 1
+            assert mock_process.communicate.await_count >= 1
+
 
 class TestChatMethod:
     """chat() 메서드 테스트."""
@@ -245,6 +260,18 @@ class TestChatMethod:
             assert response.error == ChatError.SESSION_NOT_FOUND
             assert response.text == ""
             assert response.session_id is None
+
+    @pytest.mark.asyncio
+    async def test_chat_timeout(self, client):
+        """subprocess timeout은 TIMEOUT 에러로 노출된다."""
+        from src.claude.client import ChatError
+
+        with patch.object(client, "_run_command", side_effect=asyncio.TimeoutError):
+            response = await client.chat("Hello", "session-123")
+
+        assert response.error == ChatError.TIMEOUT
+        assert response.text == ""
+        assert response.session_id == "session-123"
 
     @pytest.mark.asyncio
     async def test_chat_cli_error(self, client):

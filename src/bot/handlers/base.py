@@ -1,14 +1,7 @@
 """Base handler class with common utilities."""
 
 import asyncio
-import os
-import subprocess
-import sys
-import time
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from telegram import Update, InlineKeyboardButton
@@ -26,11 +19,7 @@ from src.ai import (
     normalize_model,
 )
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
-from ..constants import (
-    WATCHDOG_INTERVAL_SECONDS,
-    TASK_TIMEOUT_SECONDS,
-    MAX_TASK_MESSAGE_PREVIEW,
-)
+from ..runtime import DetachedJobManager, PendingRequestStore
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
@@ -38,17 +27,6 @@ if TYPE_CHECKING:
     from src.services.session_service import SessionService
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
-
-
-@dataclass
-class TaskInfo:
-    """Background task metadata."""
-    user_id: str
-    session_id: str
-    trace_id: str
-    message: str = ""
-    started_at: float = field(default_factory=time.time)
-    task: Optional[asyncio.Task] = None
 
 
 class BaseHandler:
@@ -61,8 +39,6 @@ class BaseHandler:
         auth_manager: "AuthManager",
         require_auth: bool,
         allowed_chat_ids: list[int],
-        response_notify_seconds: int = 60,
-        session_list_ai_summary: bool = False,
         plugin_loader: "PluginLoader" = None,
         ai_registry: Optional[AIRegistry] = None,
     ):
@@ -73,25 +49,17 @@ class BaseHandler:
         self.auth = auth_manager
         self.require_auth = require_auth
         self.allowed_chat_ids = allowed_chat_ids
-        self.response_notify_seconds = response_notify_seconds
-        self.session_list_ai_summary = session_list_ai_summary
         self.plugins = plugin_loader
 
         # Instance variables (previously class variables - fixed bug where all instances shared state)
         self._user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._user_semaphores: dict[str, asyncio.Semaphore] = defaultdict(
-            lambda: asyncio.Semaphore(3)
-        )
-        self._active_tasks: dict[int, TaskInfo] = {}
-        self._watchdog_task: Optional[asyncio.Task] = None
         self._creating_sessions: set[str] = set()
         self._sched_pending: dict[str, dict] = {}
         self._schedule_manager = None
         self._workspace_registry = None
         self._ws_pending: dict[str, dict] = {}
-        self._watchdog_started = False
-        # Temporary pending for session queue callbacks (keyed by pending_key)
-        self._temp_pending: dict[str, dict] = {}
+        self._pending_requests = PendingRequestStore(self._repository)
+        self._detached_jobs = DetachedJobManager(self._repository)
 
         logger.trace(f"BaseHandler config - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
 
@@ -99,6 +67,16 @@ class BaseHandler:
     def _repository(self) -> Optional["Repository"]:
         """Access repository via SessionService."""
         return getattr(self.sessions, '_repo', None)
+
+    @property
+    def _temp_pending(self) -> dict[str, dict]:
+        """Compatibility accessor for temp pending state."""
+        return self._pending_requests.data
+
+    @_temp_pending.setter
+    def _temp_pending(self, value: dict[str, dict]) -> None:
+        """Compatibility setter for tests and transitional code."""
+        self._pending_requests.data = value
 
     def _get_selected_ai_provider(self, user_id: str) -> str:
         """Return the currently selected provider for a user."""
@@ -158,113 +136,23 @@ class BaseHandler:
 
     def _save_temp_pending(self, key: str, data: dict) -> None:
         """Save pending data to memory and DB."""
-        self._temp_pending[key] = data
-        repo = self._repository
-        if repo:
-            repo.save_pending_message(
-                key=key,
-                user_id=data["user_id"],
-                chat_id=data["chat_id"],
-                message=data["message"],
-                model=data.get("model", ""),
-                is_new_session=data.get("is_new_session", False),
-                workspace_path=data.get("workspace_path", ""),
-                current_session_id=data.get("current_session_id", ""),
-                created_at=data.get("created_at", time.time()),
-            )
+        self._pending_requests.save(key, data)
 
     def _delete_temp_pending(self, key: str) -> None:
         """Delete pending data from memory and DB."""
-        self._temp_pending.pop(key, None)
-        repo = self._repository
-        if repo:
-            repo.delete_pending_message(key)
+        self._pending_requests.delete(key)
 
     def _restore_temp_pending(self) -> int:
         """Restore non-expired pending messages from DB. Returns count restored."""
-        repo = self._repository
-        if not repo:
-            return 0
-        repo.clear_expired_pending_messages(ttl_seconds=300)
-        all_pending = repo.get_all_pending_messages()
-        now = time.time()
-        count = 0
-        for key, data in all_pending.items():
-            if now - data.get("created_at", 0) <= 300:
-                self._temp_pending[key] = data
-                count += 1
-        if count:
-            logger.info(f"DB에서 pending message {count}개 복원")
-        return count
-
-    def _is_pid_alive(self, pid: Optional[int]) -> bool:
-        """Check whether a local process PID is still alive."""
-        if not pid or pid <= 0:
-            return False
-
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
+        return self._pending_requests.restore()
 
     def _get_live_session_lock(self, session_id: str) -> Optional[dict]:
         """Return a live detached-worker lock or clean it up if stale."""
-        repo = self._repository
-        if not repo:
-            return None
-
-        lock = repo.get_session_lock(session_id)
-        if not lock:
-            return None
-
-        worker_pid = lock.get("worker_pid")
-        if worker_pid:
-            if self._is_pid_alive(int(worker_pid)):
-                return lock
-
-            logger.warning(f"Dead detached worker lock cleaned: session={session_id[:8]}, pid={worker_pid}")
-            repo.release_session_lock(session_id, lock.get("job_id"))
-            job = repo.get_message_log(lock["job_id"])
-            if job and job["processed"] != 2:
-                repo.complete_message(lock["job_id"], error="worker_lost")
-            return None
-
-        acquired_at = lock.get("acquired_at")
-        if acquired_at:
-            age = datetime.now(timezone.utc) - datetime.fromisoformat(acquired_at)
-            if age.total_seconds() > 60:
-                logger.warning(f"Stale unattached lock cleaned: session={session_id[:8]}, job={lock['job_id']}")
-                repo.release_session_lock(session_id, lock.get("job_id"))
-                job = repo.get_message_log(lock["job_id"])
-                if job and job["processed"] != 2:
-                    repo.complete_message(lock["job_id"], error="worker_spawn_timeout")
-                return None
-
-        return lock
+        return self._detached_jobs.get_live_session_lock(session_id)
 
     def _is_session_locked(self, session_id: str) -> bool:
         """Check if a session is actively locked by a detached worker."""
-        return self._get_live_session_lock(session_id) is not None
-
-    def _spawn_detached_worker(self, job_id: int) -> int:
-        """Spawn a detached worker process for a message_log job."""
-        env = os.environ.copy()
-        env.pop("CLAUDECODE", None)
-        env.setdefault("PYTHONUNBUFFERED", "1")
-        env.setdefault("PYTHONPYCACHEPREFIX", ".build")
-        base_dir = Path(__file__).resolve().parents[3]
-
-        process = subprocess.Popen(
-            [sys.executable, "-u", "-m", "src.worker_job", "--job-id", str(job_id)],
-            cwd=str(base_dir),
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        logger.info(f"Detached worker spawned: job_id={job_id}, pid={process.pid}")
-        return process.pid
+        return self._detached_jobs.is_session_locked(session_id)
 
     def _start_detached_job(
         self,
@@ -275,178 +163,40 @@ class BaseHandler:
         workspace_path: Optional[str] = None,
     ) -> tuple[Optional[int], Optional[str]]:
         """Create a message_log job, reserve the session lock, and spawn a worker."""
-        repo = self._repository
-        if not repo:
-            raise RuntimeError("Repository not initialized")
-
-        job_id = repo.enqueue_message(
+        job_id, error = self._detached_jobs.prepare_job(
             chat_id=chat_id,
             session_id=session_id,
-            request=message,
+            message=message,
             model=model or "sonnet",
             workspace_path=workspace_path,
         )
-
-        if not repo.reserve_session_lock(session_id, job_id):
-            repo.complete_message(job_id, error="session_locked_before_spawn")
-            return None, "session_locked"
+        if error:
+            return None, error
 
         try:
             worker_pid = self._spawn_detached_worker(job_id)
-            attached = repo.attach_worker_to_session_lock(session_id, job_id, worker_pid)
-            if not attached:
-                lock = repo.get_session_lock(session_id)
-                if not lock or lock["job_id"] != job_id:
-                    raise RuntimeError("failed to attach worker to reserved lock")
-        except Exception as e:
-            repo.release_session_lock(session_id, job_id)
-            repo.complete_message(job_id, error=f"worker_spawn_failed: {e}")
-            logger.exception(f"Detached worker spawn failed: job_id={job_id}, error={e}")
+            self._detached_jobs.attach_worker(session_id, job_id, worker_pid)
+        except Exception as exc:
+            self._detached_jobs.fail_job_spawn(session_id, job_id, exc)
             raise
 
         return job_id, None
 
+    def _spawn_detached_worker(self, job_id: int) -> int:
+        """Spawn one detached worker for a prepared job."""
+        return self._detached_jobs.spawn_worker(job_id)
+
     async def _cleanup_detached_jobs(self, bot) -> int:
         """Cleanup stale lock reservations or dead detached workers after bot startup."""
-        repo = self._repository
-        if not repo:
-            return 0
+        return await self._detached_jobs.cleanup_orphaned_jobs(bot)
 
-        cleaned = 0
+    def restore_pending_requests(self) -> int:
+        """Restore persisted temp pending state after startup."""
+        return self._restore_temp_pending()
 
-        for lock in repo.clear_unattached_session_locks(max_age_seconds=60):
-            cleaned += 1
-            job = repo.get_message_log(lock["job_id"])
-            if job and job["processed"] != 2:
-                repo.complete_message(lock["job_id"], error="worker_spawn_timeout")
-                await self._notify_message_lost(bot, job, reason="worker start timed out")
-
-        for lock in repo.list_all_session_locks():
-            worker_pid = lock.get("worker_pid")
-            if worker_pid and self._is_pid_alive(int(worker_pid)):
-                continue
-
-            cleaned += 1
-            repo.release_session_lock(lock["session_id"], lock["job_id"])
-            job = repo.get_message_log(lock["job_id"])
-            if job and job["processed"] != 2:
-                repo.complete_message(lock["job_id"], error="worker_lost")
-                await self._notify_message_lost(bot, job, reason="worker stopped unexpectedly")
-
-        if cleaned:
-            logger.warning(f"Detached job cleanup completed: cleaned={cleaned}")
-
-        return cleaned
-
-    async def _retry_interrupted_messages(self, bot) -> int:
-        """봇 재시작 후 미완료 메시지의 응답을 복구.
-
-        Claude 세션에 '이전 답변 복구' 요청을 보내 응답을 재전달한다.
-        각 메시지는 1회만 복구 시도하며, 실패 시 유실 알림 후 종료.
-        """
-        repo = self._repository
-        if not repo:
-            return 0
-
-        # 모든 미완료 메시지 조회 (retry_count 무관)
-        unfinished = repo.get_unfinished_messages(max_age_minutes=30, max_retries=999)
-        if not unfinished:
-            return 0
-
-        logger.info(f"재시작 후 미완료 메시지 {len(unfinished)}개 발견")
-
-        recover_count = 0
-        lost_count = 0
-
-        for msg in unfinished:
-            retry_count = msg.get("retry_count", 0)
-
-            if retry_count >= 1:
-                # 이전 복구 시도가 실패한 메시지 → 유실 알림
-                await self._notify_message_lost(bot, msg)
-                repo.complete_message(msg["id"], error="response_lost")
-                lost_count += 1
-            else:
-                # 첫 복구 시도
-                repo.increment_retry_count(msg["id"])
-                repo.claim_message(msg["id"])
-                asyncio.create_task(self._recover_interrupted_message(bot, msg))
-                recover_count += 1
-
-        if lost_count:
-            logger.warning(f"복구 불가 메시지 {lost_count}개 유실 처리")
-        if recover_count:
-            logger.info(f"미완료 메시지 {recover_count}개 복구 시작")
-
-        return recover_count
-
-    async def _notify_message_lost(self, bot, msg: dict, reason: str = "bot restart") -> None:
-        """유실된 메시지에 대해 사용자에게 알림."""
-        try:
-            short_req = msg["request"][:50]
-            await bot.send_message(
-                chat_id=msg["chat_id"],
-                text=(
-                    f"⚠️ {reason} 때문에 아래 메시지의 응답을 전달하지 못했습니다.\n"
-                    f"<code>{short_req}</code>\n\n"
-                    f"다시 메시지를 보내주세요."
-                ),
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            logger.error(f"유실 알림 전송 실패 (id={msg['id']}): {e}")
-
-    async def _recover_interrupted_message(self, bot, msg: dict) -> None:
-        """Claude 세션을 이용해 미완료 메시지의 응답을 복구."""
-        repo = self._repository
-        msg_id = msg["id"]
-        chat_id = msg["chat_id"]
-        session_id = msg["session_id"]
-        original_request = msg["request"]
-        model = msg.get("model", "sonnet")
-
-        try:
-            retry_prompt = (
-                "System: The bot was restarted and your previous response was lost. "
-                "If you already answered the user's last message, please send the same answer again. "
-                "If you haven't answered yet, please answer now.\n\n"
-                f"User's original message:\n{original_request}"
-            )
-
-            workspace_path = None
-            try:
-                workspace_path = self.sessions.get_workspace_path(session_id)
-            except Exception:
-                pass
-
-            response, error, _ = await self.claude.chat(
-                retry_prompt, session_id, model=model,
-                workspace_path=workspace_path,
-            )
-
-            if response and not error:
-                short_req = original_request[:30]
-                prefix = f"🔄 <b>[재시작 복구]</b>\n<code>{short_req}</code>\n\n"
-                full = prefix + response
-                max_len = 4000
-                for i in range(0, len(full), max_len):
-                    chunk = full[i:i + max_len]
-                    try:
-                        await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
-                    except Exception:
-                        await bot.send_message(chat_id=chat_id, text=chunk)
-
-                repo.complete_message(msg_id, response=response[:500])
-                logger.info(f"메시지 복구 성공 (id={msg_id})")
-            else:
-                await self._notify_message_lost(bot, msg)
-                repo.complete_message(msg_id, error=f"recovery_failed: {error}")
-                logger.warning(f"메시지 복구 실패 (id={msg_id}): {error}")
-
-        except Exception as e:
-            logger.error(f"메시지 복구 예외 (id={msg_id}): {e}", exc_info=True)
-            await self._notify_message_lost(bot, msg)
-            repo.complete_message(msg_id, error=f"recovery_exception: {e}")
+    async def cleanup_detached_jobs(self, bot) -> int:
+        """Cleanup orphaned detached jobs after startup."""
+        return await self._cleanup_detached_jobs(bot)
 
     def set_schedule_manager(self, manager) -> None:
         """Set schedule manager."""
@@ -464,106 +214,6 @@ class BaseHandler:
         set_user_id(str(chat_id))
         logger.trace(f"Request context setup - trace_id={trace_id}, user_id={chat_id}")
         return trace_id
-
-    def _ensure_watchdog(self) -> None:
-        """Start watchdog task (lazy initialization)."""
-        logger.trace("_ensure_watchdog() called")
-        if self._watchdog_started:
-            logger.trace("Watchdog already started - skip")
-            return
-        try:
-            if self._watchdog_task is None or self._watchdog_task.done():
-                self._watchdog_task = asyncio.create_task(self._watchdog_loop())
-                self._watchdog_started = True
-                logger.info("Watchdog task started")
-        except RuntimeError:
-            logger.trace("Watchdog start failed - no event loop")
-            pass
-
-    async def _watchdog_loop(self) -> None:
-        """Periodically check and cleanup long-running tasks."""
-        logger.trace("_watchdog_loop() started")
-        while True:
-            try:
-                await asyncio.sleep(WATCHDOG_INTERVAL_SECONDS)
-                logger.trace(f"Watchdog check - active tasks: {len(self._active_tasks)}")
-                await self._cleanup_zombie_tasks()
-            except asyncio.CancelledError:
-                logger.info("Watchdog task cancelled")
-                break
-            except Exception as e:
-                logger.exception(f"Watchdog error: {e}")
-
-    async def _cleanup_zombie_tasks(self) -> None:
-        """Cleanup tasks running for more than 30 minutes."""
-        logger.trace("_cleanup_zombie_tasks() started")
-        now = time.time()
-        zombie_tasks = []
-
-        for task_id, info in list(self._active_tasks.items()):
-            elapsed = now - info.started_at
-            logger.trace(f"Task check - id={task_id}, user={info.user_id}, elapsed={elapsed:.0f}s")
-            if elapsed > TASK_TIMEOUT_SECONDS:
-                zombie_tasks.append((task_id, info))
-
-        logger.trace(f"Zombie tasks found: {len(zombie_tasks)}")
-
-        for task_id, info in zombie_tasks:
-            elapsed_min = int((now - info.started_at) / 60)
-            logger.warning(
-                f"Zombie task detected: trace={info.trace_id}, user={info.user_id}, "
-                f"elapsed={elapsed_min}min, session={info.session_id[:8]}"
-            )
-
-            if info.task and not info.task.done():
-                info.task.cancel()
-                logger.info(f"Task cancelled - trace={info.trace_id}")
-
-            await self._kill_claude_process(info.session_id)
-            self._active_tasks.pop(task_id, None)
-
-    async def _kill_claude_process(self, session_id: str) -> None:
-        """Kill Claude process for a specific session."""
-        logger.trace(f"_kill_claude_process() - session={session_id[:8]}")
-        try:
-            result = subprocess.run(
-                ["pgrep", "-f", f"claude.*{session_id}"],
-                capture_output=True,
-                text=True,
-            )
-            pids = result.stdout.strip().split("\n")
-            pids = [p for p in pids if p]
-
-            logger.trace(f"Claude process PIDs: {pids}")
-
-            for pid in pids:
-                try:
-                    subprocess.run(["kill", "-9", pid], check=True)
-                    logger.info(f"Claude process killed: PID {pid}")
-                except subprocess.CalledProcessError:
-                    logger.trace(f"Process already terminated: PID {pid}")
-        except Exception as e:
-            logger.warning(f"Failed to kill Claude process: {e}")
-
-    def _register_task(self, task: asyncio.Task, user_id: str, session_id: str, trace_id: str, message: str = "") -> int:
-        """Register task for tracking."""
-        task_id = id(task)
-        self._active_tasks[task_id] = TaskInfo(
-            user_id=user_id,
-            session_id=session_id,
-            trace_id=trace_id,
-            message=message[:MAX_TASK_MESSAGE_PREVIEW],
-            task=task,
-        )
-        task.add_done_callback(lambda t: self._active_tasks.pop(id(t), None))
-        logger.trace(f"Task registered - task_id={task_id}, trace={trace_id}, session={session_id[:8]}")
-        return task_id
-
-    def get_active_task_count(self, user_id: str = None) -> int:
-        """Return active task count. If user_id specified, only that user."""
-        if user_id is None:
-            return len(self._active_tasks)
-        return sum(1 for info in self._active_tasks.values() if info.user_id == user_id)
 
     def _is_authorized(self, chat_id: int) -> bool:
         """Check if chat_id is authorized."""
@@ -639,19 +289,6 @@ class BaseHandler:
                 if i == 0:
                     logger.trace(f"HTML send failed, retrying as plain text: {e}")
                 await bot.send_message(chat_id=chat_id, text=chunk)
-
-    async def _send_long_message(self, update: Update, text: str, max_length: int = 4000) -> None:
-        """Send message, splitting if too long. (Legacy - uses update.reply_text)"""
-        logger.trace(f"_send_long_message - length={len(text)}")
-
-        chunks = self._split_message(text, max_length)
-        logger.trace(f"Message split: {len(chunks)} chunks")
-
-        for chunk in chunks:
-            try:
-                await update.message.reply_text(chunk, parse_mode="HTML")
-            except Exception:
-                await update.message.reply_text(chunk)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

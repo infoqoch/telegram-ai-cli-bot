@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import uuid4
 
-from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, get_default_model, get_profile_badge, infer_provider_from_model, normalize_model
+from src.ai import DEFAULT_PROVIDER, get_default_model, get_profile_badge, normalize_model
 from src.logging_config import logger
 from src.repository import Repository
 
@@ -65,49 +65,11 @@ class SessionService:
         """Switch the active AI provider without touching sessions."""
         self._repo.set_selected_ai_provider(user_id, ai_provider)
 
-    def _normalize_create_args(
-        self,
-        session_id: Optional[str],
-        ai_provider: Optional[str],
-        provider_session_id: Optional[str],
-        model: Optional[str],
-        name: Optional[str],
-        workspace_path: Optional[str],
-    ) -> tuple[str, Optional[str], str, Optional[str], Optional[str]]:
-        """Support legacy positional create_session calls."""
-        if ai_provider in SUPPORTED_PROVIDERS or ai_provider is None:
-            return (
-                session_id or uuid4().hex,
-                provider_session_id,
-                ai_provider or DEFAULT_PROVIDER,
-                model or get_default_model(ai_provider or DEFAULT_PROVIDER),
-                name,
-                workspace_path,
-            )
-
-        legacy_session_id = session_id or uuid4().hex
-        legacy_model = ai_provider or model or "sonnet"
-        legacy_name = provider_session_id if provider_session_id is not None else name
-        legacy_workspace_path = workspace_path
-
-        if legacy_workspace_path is None and name is not None:
-            legacy_workspace_path = name
-        elif legacy_workspace_path is None and model not in (None, "sonnet", "opus", "haiku"):
-            legacy_workspace_path = model
-
-        return (
-            legacy_session_id,
-            legacy_session_id,
-            infer_provider_from_model(legacy_model),
-            legacy_model,
-            legacy_name,
-            legacy_workspace_path,
-        )
-
     def create_session(
         self,
         user_id: str,
         session_id: Optional[str] = None,
+        *,
         ai_provider: Optional[str] = None,
         provider_session_id: Optional[str] = None,
         model: Optional[str] = None,
@@ -116,14 +78,8 @@ class SessionService:
         first_message: str = "",
     ) -> str:
         """Create new session and switch to it."""
-        session_id, provider_session_id, provider, model, name, workspace_path = self._normalize_create_args(
-            session_id=session_id,
-            ai_provider=ai_provider or self.get_selected_ai_provider(user_id) or DEFAULT_PROVIDER,
-            provider_session_id=provider_session_id,
-            model=model,
-            name=name,
-            workspace_path=workspace_path,
-        )
+        provider = ai_provider or self.get_selected_ai_provider(user_id) or DEFAULT_PROVIDER
+        session_id = session_id or uuid4().hex
         model = normalize_model(provider, model or get_default_model(provider))
         self._repo.create_session(
             user_id=user_id,

@@ -49,8 +49,8 @@ class TestSessionSwitching:
     async def test_switch_between_sessions(self, handlers, session_store):
         """세션 간 전환."""
         # 두 세션 생성
-        session_store.create_session("12345", "session-a", "sonnet", "세션A")
-        session_store.create_session("12345", "session-b", "opus", "세션B")
+        session_store.create_session("12345", "session-a", model="sonnet", name="세션A")
+        session_store.create_session("12345", "session-b", model="opus", name="세션B")
 
         # 현재 세션 확인
         current = session_store.get_current_session_id("12345")
@@ -90,7 +90,7 @@ class TestSessionHistory:
 
     def test_clear_history(self, session_store):
         """히스토리 삭제."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         session_store.add_message("test-sess", "메시지1")
         session_store.add_message("test-sess", "메시지2")
@@ -107,7 +107,7 @@ class TestSessionDeletion:
 
     def test_soft_delete_session(self, session_store):
         """소프트 삭제."""
-        session_store.create_session("12345", "to-delete", "sonnet", "삭제할세션")
+        session_store.create_session("12345", "to-delete", model="sonnet", name="삭제할세션")
 
         result = session_store.delete_session("12345", "to-delete")
         assert result is True
@@ -119,7 +119,7 @@ class TestSessionDeletion:
 
     def test_restore_deleted_session(self, session_store):
         """삭제된 세션 복구."""
-        session_store.create_session("12345", "to-restore", "sonnet", "복구할세션")
+        session_store.create_session("12345", "to-restore", model="sonnet", name="복구할세션")
 
         # 삭제
         session_store.delete_session("12345", "to-restore")
@@ -135,7 +135,7 @@ class TestSessionDeletion:
 
     def test_hard_delete_session(self, session_store):
         """완전 삭제."""
-        session_store.create_session("12345", "hard-delete", "sonnet", "완전삭제")
+        session_store.create_session("12345", "hard-delete", model="sonnet", name="완전삭제")
         session_store.add_message("hard-delete", "메시지")
 
         result = session_store.hard_delete_session("hard-delete")
@@ -152,7 +152,7 @@ class TestSessionRename:
 
     def test_rename_session(self, session_store):
         """세션 이름 변경."""
-        session_store.create_session("12345", "test-sess", "sonnet", "원래이름")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="원래이름")
 
         result = session_store.update_session_name("test-sess", "새이름")
         assert result is True
@@ -175,7 +175,7 @@ class TestSessionExpiration:
         )
 
         # 세션 생성
-        short_timeout_store.create_session("12345", "expired-sess", "sonnet", "만료세션")
+        short_timeout_store.create_session("12345", "expired-sess", model="sonnet", name="만료세션")
 
         # 즉시 만료되어 None 반환
         # (실제로는 last_used 시간 조작이 필요할 수 있음)
@@ -203,11 +203,11 @@ class TestWorkspaceSession:
     def test_is_workspace_session(self, session_store):
         """워크스페이스 세션 확인."""
         # 일반 세션
-        session_store.create_session("12345", "normal-sess", "sonnet", "일반")
+        session_store.create_session("12345", "normal-sess", model="sonnet", name="일반")
 
         # 워크스페이스 세션
         session_store.create_session(
-            "12345", "ws-sess", "sonnet", "워크스페이스",
+            "12345", "ws-sess", model="sonnet", name="워크스페이스",
             workspace_path="/Users/test/project"
         )
 
@@ -217,7 +217,7 @@ class TestWorkspaceSession:
     def test_get_workspace_path(self, session_store):
         """워크스페이스 경로 조회."""
         session_store.create_session(
-            "12345", "ws-sess", "sonnet", "워크스페이스",
+            "12345", "ws-sess", model="sonnet", name="워크스페이스",
             workspace_path="/Users/test/myproject"
         )
 
@@ -255,9 +255,9 @@ class TestPreviousSession:
     def test_previous_session_tracking(self, session_store):
         """이전 세션 추적."""
         # 순서대로 세션 생성
-        session_store.create_session("12345", "first", "sonnet", "첫번째")
-        session_store.create_session("12345", "second", "sonnet", "두번째")
-        session_store.create_session("12345", "third", "sonnet", "세번째")
+        session_store.create_session("12345", "first", model="sonnet", name="첫번째")
+        session_store.create_session("12345", "second", model="sonnet", name="두번째")
+        session_store.create_session("12345", "third", model="sonnet", name="세번째")
 
         # 이전 세션은 second
         previous = session_store.get_previous_session_id("12345")
@@ -265,8 +265,8 @@ class TestPreviousSession:
 
     def test_switch_updates_previous(self, session_store):
         """전환 시 이전 세션 업데이트."""
-        session_store.create_session("12345", "sess-a", "sonnet", "A")
-        session_store.create_session("12345", "sess-b", "sonnet", "B")
+        session_store.create_session("12345", "sess-a", model="sonnet", name="A")
+        session_store.create_session("12345", "sess-b", model="sonnet", name="B")
 
         # B가 현재, A가 이전
         assert session_store.get_current_session_id("12345") == "sess-b"

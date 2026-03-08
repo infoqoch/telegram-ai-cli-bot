@@ -276,7 +276,7 @@ class TestSessionLocksRepository:
 
     def test_reserve_attach_release_session_lock(self, repo):
         """세션 락 예약/worker 연결/해제."""
-        repo.create_session("u1", "sess1", "sonnet", "테스트")
+        repo.create_session("u1", "sess1", model="sonnet", name="테스트")
         job_id = repo.enqueue_message(
             chat_id=123,
             session_id="sess1",
@@ -299,7 +299,7 @@ class TestSessionLocksRepository:
 
     def test_rebind_session_lock(self, repo):
         """같은 worker가 다음 queued job으로 넘어갈 때 lock job_id를 갱신한다."""
-        repo.create_session("u1", "sess1", "sonnet", "테스트")
+        repo.create_session("u1", "sess1", model="sonnet", name="테스트")
         first_job_id = repo.enqueue_message(
             chat_id=123,
             session_id="sess1",
@@ -324,7 +324,7 @@ class TestSessionLocksRepository:
 
     def test_clear_unattached_session_locks(self, repo):
         """worker가 붙지 못한 오래된 락 정리."""
-        repo.create_session("u1", "sess1", "sonnet", "테스트")
+        repo.create_session("u1", "sess1", model="sonnet", name="테스트")
         job_id = repo.enqueue_message(
             chat_id=123,
             session_id="sess1",

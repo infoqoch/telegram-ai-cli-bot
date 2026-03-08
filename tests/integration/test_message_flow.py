@@ -23,7 +23,7 @@ class TestBasicMessageFlow:
     async def test_simple_message_to_claude(self, handlers, mock_claude, session_store):
         """일반 메시지가 Claude로 전달."""
         # 세션 생성
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_message_update("안녕하세요")
 
@@ -47,7 +47,7 @@ class TestBasicMessageFlow:
     @pytest.mark.asyncio
     async def test_long_message_handled(self, handlers, mock_claude, session_store):
         """긴 메시지 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         long_message = "테스트 " * 500  # 긴 메시지
 
@@ -66,7 +66,7 @@ class TestClaudeResponses:
     @pytest.mark.asyncio
     async def test_normal_response(self, handlers, session_store):
         """정상 응답 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         # 정상 응답하는 Claude mock
         handlers.claude = MockClaude.create_client(default_response="정상 응답입니다.")
@@ -82,7 +82,7 @@ class TestClaudeResponses:
     @pytest.mark.asyncio
     async def test_timeout_error_response(self, handlers, session_store):
         """타임아웃 에러 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         # 타임아웃 에러 반환하는 Claude mock
         handlers.claude = MockClaude.create_client(error="TIMEOUT")
@@ -98,7 +98,7 @@ class TestClaudeResponses:
     @pytest.mark.asyncio
     async def test_cli_error_response(self, handlers, session_store):
         """CLI 에러 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         # CLI 에러 반환
         handlers.claude = MockClaude.create_client(error="CLI_ERROR")
@@ -117,7 +117,7 @@ class TestCallbackQueries:
     @pytest.mark.asyncio
     async def test_callback_handled(self, handlers, session_store):
         """콜백 쿼리 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_callback_update("session:switch:test-sess")
 
@@ -135,7 +135,7 @@ class TestMessageHistory:
     async def test_message_added_to_history(self, handlers, session_store, mock_claude):
         """메시지가 히스토리에 추가됨."""
         session_id = "test-sess-hist"
-        session_store.create_session("12345", session_id, "sonnet", "테스트")
+        session_store.create_session("12345", session_id, model="sonnet", name="테스트")
 
         update, context = create_message_update("히스토리 테스트 메시지")
 
@@ -155,7 +155,7 @@ class TestConcurrentMessages:
     @pytest.mark.asyncio
     async def test_multiple_messages_handled(self, handlers, session_store, mock_claude):
         """여러 메시지 동시 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         # 여러 메시지 생성
         updates_contexts = [
@@ -185,7 +185,7 @@ class TestSpecialCharacters:
     @pytest.mark.asyncio
     async def test_html_characters(self, handlers, session_store, mock_claude):
         """HTML 특수 문자 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_message_update("<script>alert('xss')</script>")
 
@@ -198,7 +198,7 @@ class TestSpecialCharacters:
     @pytest.mark.asyncio
     async def test_emoji_message(self, handlers, session_store, mock_claude):
         """이모지 메시지 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_message_update("안녕하세요 👋 🎉 🚀")
 
@@ -210,7 +210,7 @@ class TestSpecialCharacters:
     @pytest.mark.asyncio
     async def test_unicode_message(self, handlers, session_store, mock_claude):
         """유니코드 메시지 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         update, context = create_message_update("한글 日本語 中文 العربية")
 
@@ -249,7 +249,7 @@ class TestEmptyAndEdgeCases:
     @pytest.mark.asyncio
     async def test_very_long_message(self, handlers, session_store, mock_claude):
         """매우 긴 메시지 처리."""
-        session_store.create_session("12345", "test-sess", "sonnet", "테스트")
+        session_store.create_session("12345", "test-sess", model="sonnet", name="테스트")
 
         # 4096자 초과 메시지
         very_long = "A" * 5000

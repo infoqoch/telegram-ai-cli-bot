@@ -187,10 +187,10 @@ class TestMultipleUsers:
     async def test_different_users_isolated(self, handlers, session_store, mock_claude):
         """다른 사용자 격리."""
         # 사용자 1 세션
-        session_store.create_session("user1", "sess-user1", "sonnet", "User1 세션")
+        session_store.create_session("user1", "sess-user1", model="sonnet", name="User1 세션")
 
         # 사용자 2 세션
-        session_store.create_session("user2", "sess-user2", "opus", "User2 세션")
+        session_store.create_session("user2", "sess-user2", model="opus", name="User2 세션")
 
         # 각 사용자 세션 확인
         assert session_store.get_current_session_id("user1") == "sess-user1"
@@ -199,7 +199,7 @@ class TestMultipleUsers:
     @pytest.mark.asyncio
     async def test_user_cannot_access_other_session(self, session_store):
         """다른 사용자 세션 접근 불가."""
-        session_store.create_session("user1", "private-sess", "sonnet", "비공개")
+        session_store.create_session("user1", "private-sess", model="sonnet", name="비공개")
 
         # user2가 user1 세션 목록 조회 시 안 보임
         user2_sessions = session_store.list_sessions("user2")
