@@ -4,12 +4,14 @@ import csv
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.plugins.loader import Plugin, PluginResult
+from src.plugins.storage import WeatherLocationStore
+from src.repository.adapters import RepositoryWeatherLocationStore
 
 
 def _load_cities_csv(csv_path: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -102,6 +104,15 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         80: ("🌦️", "Showers"), 81: ("🌦️", "Showers"), 82: ("⛈️", "Heavy showers"),
         95: ("⛈️", "Thunderstorm"), 96: ("⛈️", "Thunderstorm (hail)"), 99: ("⛈️", "Thunderstorm (hail)"),
     }
+
+    @property
+    def store(self) -> WeatherLocationStore:
+        """Weather location storage adapter bound by the plugin runtime."""
+        return cast(WeatherLocationStore, self.storage)
+
+    def build_storage(self, repository):
+        """Bind weather persistence through a bounded adapter."""
+        return RepositoryWeatherLocationStore(repository)
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         msg = message.strip()
@@ -308,7 +319,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         )
 
     def _load_location(self, chat_id: int) -> Optional[dict]:
-        loc = self.repository.get_weather_location(chat_id)
+        loc = self.store.get(chat_id)
         if loc:
             return {
                 "name": loc.name,
@@ -319,7 +330,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         return None
 
     def _save_location(self, chat_id: int, location: dict) -> None:
-        self.repository.set_weather_location(
+        self.store.set(
             chat_id=chat_id,
             name=location.get("name", "Unknown"),
             lat=location.get("lat", 0.0),

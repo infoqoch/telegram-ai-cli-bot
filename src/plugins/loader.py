@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.logging_config import logger
+from src.plugins.storage import PluginDatabase
+from src.repository.adapters import RepositoryPluginDatabase
 
 if TYPE_CHECKING:
     from src.repository import Repository
@@ -58,11 +60,28 @@ class Plugin(ABC):
 
     # Repository 인스턴스 (PluginLoader가 주입)
     _repository: Optional["Repository"] = None
+    _storage: Any = None
 
     @property
     def repository(self):
         """Repository 인스턴스 반환."""
         return self._repository
+
+    @property
+    def storage(self) -> Any:
+        """Plugin-scoped storage adapter lazily built from the runtime repository."""
+        if self._storage is None and self._repository is not None:
+            self._storage = self.build_storage(self._repository)
+        return self._storage
+
+    def bind_runtime(self, repository: Optional["Repository"]) -> None:
+        """Bind or rebind runtime services injected by the plugin loader."""
+        self._repository = repository
+        self._storage = None
+
+    def build_storage(self, repository: "Repository") -> Any:
+        """Create a plugin-owned persistence adapter."""
+        return repository
 
     def get_schema(self) -> str:
         """플러그인 전용 DDL을 반환. 오버라이드하여 사용."""
@@ -123,12 +142,15 @@ class PluginLoader:
         self.plugins: list[Plugin] = []
         self._loaded_modules: dict[str, any] = {}
         self._repository = repository
+        self._database: Optional[PluginDatabase] = None
+        self.set_repository(repository)
 
     def set_repository(self, repository: any) -> None:
         """Repository 설정 및 모든 플러그인에 주입."""
         self._repository = repository
+        self._database = RepositoryPluginDatabase(repository) if repository is not None else None
         for plugin in self.plugins:
-            plugin._repository = repository
+            plugin.bind_runtime(repository)
 
     def load_all(self) -> list[str]:
         """모든 플러그인 로드 (builtin + custom).
@@ -228,17 +250,15 @@ class PluginLoader:
 
     def _init_plugin_schemas(self) -> None:
         """로드된 플러그인의 DDL을 실행하여 테이블 생성."""
-        if not self._repository or not hasattr(self._repository, '_conn'):
+        if not self._database:
             logger.trace("Repository 없음 - 플러그인 스키마 초기화 스킵")
             return
 
-        conn = self._repository._conn
         for plugin in self.plugins:
             schema = plugin.get_schema()
             if schema:
                 try:
-                    conn.executescript(schema)
-                    conn.commit()
+                    self._database.executescript(schema)
                     logger.trace(f"플러그인 스키마 초기화: {plugin.name}")
                 except Exception as e:
                     logger.error(f"플러그인 스키마 실패 ({plugin.name}): {e}")
@@ -287,7 +307,7 @@ class PluginLoader:
                 ):
                     plugin = attr()
                     plugin._base_dir = self.base_dir
-                    plugin._repository = self._repository
+                    plugin.bind_runtime(self._repository)
                     self._loaded_modules[package_path.name] = module
                     logger.trace(f"Plugin 클래스 발견: {attr_name} -> {plugin.name}")
                     return plugin
@@ -338,7 +358,7 @@ class PluginLoader:
                 ):
                     plugin = attr()
                     plugin._base_dir = self.base_dir  # 데이터 디렉토리용
-                    plugin._repository = self._repository
+                    plugin.bind_runtime(self._repository)
                     self._loaded_modules[file_path.stem] = module
                     logger.trace(f"Plugin 인스턴스 생성: {plugin.name} (class: {attr_name})")
                     return plugin

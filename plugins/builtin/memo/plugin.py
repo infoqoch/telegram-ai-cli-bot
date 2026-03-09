@@ -1,11 +1,13 @@
 """Memo plugin - button-based single entry point."""
 
 import re
-from typing import Optional
+from typing import Optional, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
 from src.plugins.loader import Plugin, PluginResult
+from src.plugins.storage import MemoStore
+from src.repository.adapters import RepositoryMemoStore
 
 
 class MemoPlugin(Plugin):
@@ -45,6 +47,15 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
     def __init__(self):
         super().__init__()
         self._selected: dict[int, set[int]] = {}  # chat_id -> set of memo_ids
+
+    @property
+    def store(self) -> MemoStore:
+        """Memo storage adapter bound by the plugin runtime."""
+        return cast(MemoStore, self.storage)
+
+    def build_storage(self, repository):
+        """Bind memo persistence through a bounded adapter."""
+        return RepositoryMemoStore(repository)
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """Check if message is memo-related."""
@@ -117,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
 
     def _handle_main(self, chat_id: int) -> dict:
         """Main menu."""
-        memos = self.repository.list_memos(chat_id)
+        memos = self.store.list_by_chat(chat_id)
         count = len(memos)
 
         buttons = [
@@ -137,7 +148,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
 
     def _handle_list(self, chat_id: int) -> dict:
         """Memo list."""
-        memos = self.repository.list_memos(chat_id)
+        memos = self.store.list_by_chat(chat_id)
 
         if not memos:
             buttons = [
@@ -187,7 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
 
     def _handle_select_mode(self, chat_id: int) -> dict:
         """Multi-select mode."""
-        memos = self.repository.list_memos(chat_id)
+        memos = self.store.list_by_chat(chat_id)
         selected = self._get_selection(chat_id)
 
         if not memos:
@@ -246,7 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
         if not selected:
             return self._handle_select_mode(chat_id)
 
-        memos = self.repository.list_memos(chat_id)
+        memos = self.store.list_by_chat(chat_id)
         selected_memos = [m for m in memos if m.id in selected]
 
         lines = [f"🗑️ <b>Delete {len(selected_memos)} Memos?</b>\n"]
@@ -278,7 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
 
         deleted_count = 0
         for memo_id in selected:
-            if self.repository.delete_memo(memo_id):
+            if self.store.delete(memo_id):
                 deleted_count += 1
 
         self._clear_selection(chat_id)
@@ -289,7 +300,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
 
     def _handle_add_prompt(self, chat_id: int) -> dict:
         """Add memo - ForceReply."""
-        memos = self.repository.list_memos(chat_id)
+        memos = self.store.list_by_chat(chat_id)
         if len(memos) >= self.MAX_MEMOS:
             keyboard = [
                 [InlineKeyboardButton("📄 List", callback_data="memo:list")],
@@ -312,7 +323,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
         }
 
     def _handle_delete(self, chat_id: int, memo_id: int) -> dict:
-        memo = self.repository.get_memo(memo_id)
+        memo = self.store.get(memo_id)
 
         if not memo:
             return {"text": f"❌ Memo #{memo_id} not found.", "edit": True}
@@ -331,13 +342,13 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
         }
 
     def _handle_confirm_delete(self, chat_id: int, memo_id: int) -> dict:
-        memo = self.repository.get_memo(memo_id)
+        memo = self.store.get(memo_id)
 
         if not memo:
             return {"text": f"❌ Memo #{memo_id} not found.", "edit": True}
 
         content = memo.content
-        self.repository.delete_memo(memo_id)
+        self.store.delete(memo_id)
 
         result = self._handle_list(chat_id)
         result["text"] = f"🗑️ Deleted: <s>{content[:20]}</s>\n\n" + result["text"]
@@ -354,7 +365,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
                 ]]),
             }
 
-        memos = self.repository.list_memos(chat_id)
+        memos = self.store.list_by_chat(chat_id)
         if len(memos) >= self.MAX_MEMOS:
             return {
                 "text": f"❌ Maximum {self.MAX_MEMOS} memos reached.\nDelete some before adding new ones.",
@@ -363,7 +374,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
                 ]),
             }
 
-        memo = self.repository.add_memo(chat_id, content)
+        memo = self.store.add(chat_id, content)
 
         keyboard = [
             [

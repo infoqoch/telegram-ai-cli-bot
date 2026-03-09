@@ -64,7 +64,7 @@ class TestTodoPluginScheduledActions:
     def todo_plugin(self):
         from plugins.builtin.todo.plugin import TodoPlugin
         plugin = TodoPlugin()
-        plugin._repository = MagicMock()
+        plugin.bind_runtime(MagicMock())
         return plugin
 
     def test_get_scheduled_actions(self, todo_plugin):

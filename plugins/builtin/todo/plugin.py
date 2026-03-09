@@ -2,11 +2,14 @@
 
 import re
 from datetime import date, timedelta
+from typing import cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
 from src.logging_config import logger
 from src.plugins.loader import Plugin, PluginResult, ScheduledAction
+from src.plugins.storage import TodoStore
+from src.repository.adapters import RepositoryTodoStore
 from src.time_utils import app_today
 
 
@@ -63,6 +66,15 @@ END;
         super().__init__()
         self._multi_selections: dict[int, set[int]] = {}
         self._yesterday_selections: dict[int, set[int]] = {}
+
+    @property
+    def store(self) -> TodoStore:
+        """Todo storage adapter bound by the plugin runtime."""
+        return cast(TodoStore, self.storage)
+
+    def build_storage(self, repository):
+        """Bind todo persistence through a bounded adapter."""
+        return RepositoryTodoStore(repository)
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """Check if message is todo-related."""
@@ -142,7 +154,7 @@ END;
     def _generate_yesterday_report(self, chat_id: int) -> str:
         """Generate yesterday's todo report text."""
         yesterday = (app_today() - timedelta(days=1)).isoformat()
-        todos = self.repository.list_todos_by_date(chat_id, yesterday)
+        todos = self.store.list_by_date(chat_id, yesterday)
         if not todos:
             return ""
 
@@ -165,7 +177,7 @@ END;
     def _generate_daily_wrap(self, chat_id: int) -> str:
         """Generate daily wrap-up report text."""
         today = self._today()
-        stats = self.repository.get_todo_stats(chat_id, today)
+        stats = self.store.stats_for_date(chat_id, today)
         if stats["total"] == 0:
             return ""
 
@@ -177,7 +189,7 @@ END;
             lines.append(f"📊 Today's progress: {stats['done']}/{stats['total']} completed\n")
             lines.append("<b>Incomplete:</b>")
 
-            pending = self.repository.get_pending_todos(chat_id, today)
+            pending = self.store.pending_for_date(chat_id, today)
             for todo in pending:
                 lines.append(f"  ⬜ {todo.text}")
 
@@ -193,7 +205,7 @@ END;
     def _handle_list(self, chat_id: int) -> dict:
         """Show todo list."""
         today = self._today()
-        todos = self.repository.list_todos_by_date(chat_id, today)
+        todos = self.store.list_by_date(chat_id, today)
 
         lines = [f"📋 <b>Todos for {today}</b>\n"]
         buttons = []
@@ -211,7 +223,7 @@ END;
                     )
                 ])
 
-        stats = self.repository.get_todo_stats(chat_id, today)
+        stats = self.store.stats_for_date(chat_id, today)
         if stats["total"] == 0:
             lines.append("\nNo todos yet.")
         else:
@@ -252,7 +264,7 @@ END;
 
     def _handle_item_menu(self, chat_id: int, todo_id: int) -> dict:
         """Item detail menu."""
-        todo = self.repository.get_todo(todo_id)
+        todo = self.store.get(todo_id)
         if not todo:
             return {"text": "❌ Item not found.", "edit": True}
 
@@ -273,7 +285,7 @@ END;
 
     def _handle_done(self, chat_id: int, todo_id: int) -> dict:
         """Mark as done."""
-        if self.repository.mark_todo_done(todo_id):
+        if self.store.mark_done(todo_id):
             result = self._handle_list(chat_id)
             result["text"] = "✅ Marked as done!\n\n" + result["text"]
             return result
@@ -281,7 +293,7 @@ END;
 
     def _handle_delete(self, chat_id: int, todo_id: int) -> dict:
         """Delete item."""
-        if self.repository.delete_todo(todo_id):
+        if self.store.delete(todo_id):
             result = self._handle_list(chat_id)
             result["text"] = "🗑️ Deleted!\n\n" + result["text"]
             return result
@@ -290,7 +302,7 @@ END;
     def _handle_tomorrow(self, chat_id: int, todo_id: int) -> dict:
         """Move to tomorrow."""
         tomorrow = (app_today() + timedelta(days=1)).isoformat()
-        if self.repository.move_todos_to_date([todo_id], tomorrow):
+        if self.store.move_to_date([todo_id], tomorrow):
             result = self._handle_list(chat_id)
             result["text"] = "📅 Moved to tomorrow!\n\n" + result["text"]
             return result
@@ -306,7 +318,7 @@ END;
     def _render_multi_view(self, chat_id: int) -> dict:
         """Multi-select view."""
         today = self._today()
-        pending = self.repository.get_pending_todos(chat_id, today)
+        pending = self.store.pending_for_date(chat_id, today)
         selections = self._multi_selections.get(chat_id, set())
 
         if not pending:
@@ -372,7 +384,7 @@ END;
         selections = self._multi_selections.get(chat_id, set())
         count = 0
         for todo_id in selections:
-            if self.repository.mark_todo_done(todo_id):
+            if self.store.mark_done(todo_id):
                 count += 1
 
         self._multi_selections.pop(chat_id, None)
@@ -385,7 +397,7 @@ END;
         selections = self._multi_selections.get(chat_id, set())
         count = 0
         for todo_id in selections:
-            if self.repository.delete_todo(todo_id):
+            if self.store.delete(todo_id):
                 count += 1
 
         self._multi_selections.pop(chat_id, None)
@@ -397,7 +409,7 @@ END;
         """Move selected to tomorrow."""
         selections = self._multi_selections.get(chat_id, set())
         tomorrow = (app_today() + timedelta(days=1)).isoformat()
-        count = self.repository.move_todos_to_date(list(selections), tomorrow)
+        count = self.store.move_to_date(list(selections), tomorrow)
 
         self._multi_selections.pop(chat_id, None)
         result = self._handle_list(chat_id)
@@ -419,7 +431,7 @@ END;
     def _render_yesterday_view(self, chat_id: int) -> dict:
         """Yesterday incomplete items selection view."""
         yesterday = (app_today() - timedelta(days=1)).isoformat()
-        pending = self.repository.get_pending_todos(chat_id, yesterday)
+        pending = self.store.pending_for_date(chat_id, yesterday)
         selections = self._yesterday_selections.get(chat_id, set())
 
         if not pending:
@@ -487,7 +499,7 @@ END;
         """Carry selected yesterday items to today."""
         selections = self._yesterday_selections.get(chat_id, set())
         today = self._today()
-        count = self.repository.move_todos_to_date(list(selections), today)
+        count = self.store.move_to_date(list(selections), today)
 
         self._yesterday_selections.pop(chat_id, None)
         result = self._handle_list(chat_id)
@@ -497,10 +509,10 @@ END;
     def _handle_yesterday_all(self, chat_id: int) -> dict:
         """Carry all yesterday incomplete items to today."""
         yesterday = (app_today() - timedelta(days=1)).isoformat()
-        pending = self.repository.get_pending_todos(chat_id, yesterday)
+        pending = self.store.pending_for_date(chat_id, yesterday)
         today = self._today()
         ids = [t.id for t in pending]
-        count = self.repository.move_todos_to_date(ids, today)
+        count = self.store.move_to_date(ids, today)
 
         self._yesterday_selections.pop(chat_id, None)
         result = self._handle_list(chat_id)
@@ -517,7 +529,7 @@ END;
             target = app_today()
 
         target_str = target.isoformat()
-        todos = self.repository.list_todos_by_date(chat_id, target_str)
+        todos = self.store.list_by_date(chat_id, target_str)
         is_today = target == app_today()
         date_label = "Today" if is_today else target.strftime("%m/%d")
 
@@ -565,7 +577,7 @@ END;
         end = center + timedelta(days=3)
         today = app_today()
 
-        todos_by_date = self.repository.get_todos_by_date_range(
+        todos_by_date = self.store.by_date_range(
             chat_id, start.isoformat(), end.isoformat()
         )
 
@@ -629,7 +641,7 @@ END;
             return {"text": "❌ No todo entered.", "reply_markup": None}
 
         for task_text in tasks:
-            self.repository.add_todo(chat_id, today, task_text)
+            self.store.add(chat_id, today, task_text)
 
         lines = [f"✅ {len(tasks)} added!\n"]
         for task in tasks:

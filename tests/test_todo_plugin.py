@@ -17,7 +17,7 @@ def repo_and_plugin():
         repo = init_repository(db_path)
 
         plugin = TodoPlugin()
-        plugin._repository = repo
+        plugin.bind_runtime(repo)
         # 플러그인 스키마 초기화
         repo._conn.executescript(plugin.get_schema())
         repo._conn.commit()

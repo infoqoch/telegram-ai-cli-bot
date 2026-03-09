@@ -8,12 +8,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
+from src.plugins.storage import TodoStore
 from src.scheduler_manager import scheduler_manager
 from src.time_utils import app_today, get_app_timezone
 
 if TYPE_CHECKING:
     from telegram.ext import Application
-    from src.repository import Repository
 
 KST = get_app_timezone()
 
@@ -23,8 +23,8 @@ class TodoScheduler:
 
     OWNER = "TodoScheduler"
 
-    def __init__(self, repository: "Repository", chat_ids: list[int]):
-        self.repository = repository
+    def __init__(self, store: TodoStore, chat_ids: list[int]):
+        self.store = store
         self.chat_ids = chat_ids
         self._app: Optional["Application"] = None
 
@@ -56,7 +56,7 @@ class TodoScheduler:
 
         for chat_id in self.chat_ids:
             try:
-                todos = self.repository.list_todos_by_date(chat_id, yesterday)
+                todos = self.store.list_by_date(chat_id, yesterday)
                 if not todos:
                     continue
 
@@ -99,7 +99,7 @@ class TodoScheduler:
 
         for chat_id in self.chat_ids:
             try:
-                stats = self.repository.get_todo_stats(chat_id, today)
+                stats = self.store.stats_for_date(chat_id, today)
                 if stats["total"] == 0:
                     continue
 
@@ -111,7 +111,7 @@ class TodoScheduler:
                     lines.append(f"📊 Today's progress: {stats['done']}/{stats['total']} completed\n")
                     lines.append("<b>Incomplete:</b>")
 
-                    pending = self.repository.get_pending_todos(chat_id, today)
+                    pending = self.store.pending_for_date(chat_id, today)
                     for todo in pending:
                         lines.append(f"  ⬜ {escape_html(todo.text)}")
 

@@ -292,3 +292,30 @@ class TestSystemJobRegistration:
 
         assert plugin.seen_context.app is app
         assert plugin.seen_context.maintainer_chat_id == 12345
+
+
+class TestPluginRuntimeBinding:
+    """플러그인 런타임 바인딩 테스트."""
+
+    def test_bind_runtime_builds_storage_lazily(self):
+        """bind_runtime 후 storage는 최초 접근 시 생성된다."""
+        sentinel_repo = object()
+        sentinel_store = object()
+
+        class StoragePlugin(Plugin):
+            name = "storage"
+
+            async def can_handle(self, message: str, chat_id: int) -> bool:
+                return False
+
+            async def handle(self, message: str, chat_id: int) -> PluginResult:
+                return PluginResult(handled=False)
+
+            def build_storage(self, repository):
+                assert repository is sentinel_repo
+                return sentinel_store
+
+        plugin = StoragePlugin()
+        plugin.bind_runtime(sentinel_repo)
+
+        assert plugin.storage is sentinel_store
