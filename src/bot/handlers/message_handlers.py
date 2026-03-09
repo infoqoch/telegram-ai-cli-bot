@@ -95,13 +95,18 @@ class MessageHandlers(BaseHandler):
 
         # ForceReply response handling
         if update.message.reply_to_message:
-            reply_text = update.message.reply_to_message.text or ""
-            import re
-
-            if "td:add" in reply_text:
-                await self._handle_todo_force_reply(update, chat_id, message)
+            reply_to_message = update.message.reply_to_message
+            interaction = self._pop_plugin_interaction(
+                prompt_message_id=getattr(reply_to_message, "message_id", None),
+                chat_id=chat_id,
+            )
+            if interaction:
+                await self._handle_plugin_interaction_reply(update, chat_id, message, interaction)
                 clear_context()
                 return
+
+            reply_text = reply_to_message.text or ""
+            import re
 
             if "sess_name:" in reply_text:
                 sess_match = re.search(r"sess_name:(\w+)", reply_text)
@@ -118,11 +123,6 @@ class MessageHandlers(BaseHandler):
                     await self._handle_rename_force_reply(update, chat_id, message, session_id)
                     clear_context()
                     return
-
-            if "memo_add" in reply_text:
-                await self._handle_memo_force_reply(update, chat_id, message)
-                clear_context()
-                return
 
             if "schedule_input" in reply_text and user_id in self._sched_pending:
                 await self._handle_schedule_force_reply(update, chat_id, message)

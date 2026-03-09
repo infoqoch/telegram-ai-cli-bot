@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from src.plugins.loader import PluginLoader
+from src.plugins.loader import Plugin, PluginLoader, PluginResult
 
 
 @pytest.fixture
@@ -265,3 +265,30 @@ class TestWarningMessageContent:
         assert "intruder" in logs
         assert "owner" in logs
         assert "shared:" in logs
+
+
+class TestSystemJobRegistration:
+    """플러그인 system job 등록은 이름 하드코딩 없이 generic하게 호출된다."""
+
+    def test_loader_registers_system_jobs_for_all_plugins(self, base_dir):
+        class JobPlugin(Plugin):
+            name = "jobber"
+
+            async def can_handle(self, message: str, chat_id: int) -> bool:
+                return False
+
+            async def handle(self, message: str, chat_id: int) -> PluginResult:
+                return PluginResult(handled=False)
+
+            def register_system_jobs(self, context) -> None:
+                self.seen_context = context
+
+        loader = PluginLoader(base_dir)
+        plugin = JobPlugin()
+        loader.plugins = [plugin]
+
+        app = object()
+        loader.register_system_jobs(app, 12345)
+
+        assert plugin.seen_context.app is app
+        assert plugin.seen_context.maintainer_chat_id == 12345

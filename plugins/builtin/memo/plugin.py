@@ -303,11 +303,11 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
 
         return {
             "text": "📝 <b>Add Memo</b>\n\nEnter your memo below.",
+            "force_reply_prompt": "📝 Enter memo:",
             "force_reply": ForceReply(
                 selective=True,
                 input_field_placeholder="Enter memo..."
             ),
-            "force_reply_marker": "memo_add",
             "edit": False,
         }
 

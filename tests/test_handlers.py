@@ -220,6 +220,38 @@ class TestBotHandlers:
         handlers.plugins.process_message.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_handle_message_routes_reply_to_plugin_interaction(self, handlers):
+        """플러그인 ForceReply 응답은 message_id 기반 interaction으로 라우팅된다."""
+        plugin = MagicMock()
+        plugin.handle_interaction.return_value = {
+            "text": "✅ Saved!",
+            "reply_markup": None,
+        }
+        handlers.plugins = MagicMock()
+        handlers.plugins.get_plugin_by_name.return_value = plugin
+        handlers.plugins.process_message = AsyncMock()
+
+        handlers._register_plugin_interaction(
+            prompt_message_id=321,
+            chat_id=12345,
+            plugin_name="memo",
+        )
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.text = "테스트 메모"
+        update.message.reply_to_message = MagicMock(message_id=321, text="📝 Enter memo:")
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+
+        await handlers.handle_message(update, context)
+
+        plugin.handle_interaction.assert_called_once()
+        handlers.plugins.process_message.assert_not_called()
+        update.message.reply_text.assert_called_once()
+        assert 321 not in handlers._plugin_interactions
+
+    @pytest.mark.asyncio
     async def test_callback_query_unauthorized(self, handlers):
         """권한 없는 콜백 쿼리는 즉시 차단한다."""
         update = MagicMock()

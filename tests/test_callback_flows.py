@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 
 
 # =============================================================================
@@ -27,7 +27,7 @@ def make_query():
     query.from_user = MagicMock()
     query.from_user.id = 12345
     query.message = MagicMock()
-    query.message.reply_text = AsyncMock()
+    query.message.reply_text = AsyncMock(return_value=MagicMock(message_id=987))
     query.message.chat_id = 12345
     query.get_bot = MagicMock(return_value=MagicMock())
     return query
@@ -721,6 +721,27 @@ class TestSessionCallbackFlows:
         callbacks = get_callback_data(query)
         assert "memo:list" in callbacks
         assert "plug:list:menu" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_plugin_callback_registers_interaction_for_force_reply(self, handlers):
+        """ForceReply 플러그인 콜백은 prompt message_id 기준으로 interaction을 등록한다."""
+        plugin = MagicMock()
+        plugin.name = "memo"
+        plugin.handle_callback_async = AsyncMock(return_value={
+            "text": "📝 <b>Add Memo</b>",
+            "force_reply_prompt": "📝 Enter memo:",
+            "force_reply": ForceReply(selective=True, input_field_placeholder="Enter memo..."),
+            "edit": False,
+        })
+
+        query = make_query()
+        await handlers._handle_plugin_callback(query, 12345, "memo:add", plugin)
+
+        query.message.reply_text.assert_called_once()
+        assert 987 in handlers._plugin_interactions
+        interaction = handlers._plugin_interactions[987]
+        assert interaction.plugin_name == "memo"
+        assert interaction.chat_id == 12345
 
     @pytest.mark.asyncio
     async def test_sess_delete_confirm(self, handlers):

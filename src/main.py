@@ -55,17 +55,6 @@ async def _sync_bot_commands(bot, settings, runtime) -> None:
         logger.info(f"Telegram admin commands synced for chat_id={settings.admin_chat_id}")
 
 
-def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
-    """Wire optional HourlyPing plugin jobs into the shared job queue."""
-    try:
-        hourly_ping_plugin = plugin_loader.get_plugin_by_name("hourly_ping")
-        if hourly_ping_plugin and hasattr(hourly_ping_plugin, "setup_scheduler"):
-            hourly_ping_plugin.setup_scheduler(app, settings.admin_chat_id)
-            logger.info("HourlyPing 스케줄러 활성화 (08:00~19:00 매 정시)")
-    except Exception as exc:
-        logger.debug(f"HourlyPing 스케줄러 비활성화: {exc}")
-
-
 def create_app(settings) -> Application:
     """Create and configure the Telegram application."""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -109,7 +98,8 @@ def create_app(settings) -> Application:
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager 초기화 완료")
 
-    _setup_hourly_ping_scheduler(app, settings, runtime.plugin_loader)
+    if hasattr(runtime.plugin_loader, "register_system_jobs"):
+        runtime.plugin_loader.register_system_jobs(app, settings.admin_chat_id)
 
     global _schedule_manager
     _schedule_manager = runtime.schedule_manager

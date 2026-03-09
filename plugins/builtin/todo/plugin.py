@@ -245,8 +245,8 @@ END;
         """Add todo ForceReply."""
         return {
             "text": "📝 <b>Add Todo</b>\n\nSeparate multiple items with line breaks.",
+            "force_reply_prompt": "📝 Enter todos (one per line):",
             "force_reply": ForceReply(selective=True, input_field_placeholder="Enter todo..."),
-            "force_reply_marker": "td:add",
             "edit": False,
         }
 

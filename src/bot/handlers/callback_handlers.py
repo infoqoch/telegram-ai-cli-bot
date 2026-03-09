@@ -372,26 +372,6 @@ class CallbackHandlers(BaseHandler):
         keyboard.append([InlineKeyboardButton(BUTTON_BACK, callback_data=back_callback)])
         return InlineKeyboardMarkup(keyboard)
 
-    async def _handle_todo_force_reply(self, update: Update, chat_id: int, message: str) -> None:
-        """Handle Todo ForceReply response."""
-        logger.info(f"Todo ForceReply processing: msg={message[:50]}")
-
-        todo_plugin = None
-        if self.plugins:
-            todo_plugin = self.plugins.get_plugin_by_name("todo")
-
-        if not todo_plugin or not hasattr(todo_plugin, 'handle_force_reply'):
-            await update.message.reply_text("Todo plugin not found.")
-            return
-
-        result = todo_plugin.handle_force_reply(message, chat_id)
-
-        await update.message.reply_text(
-            text=result.get("text", ""),
-            reply_markup=result.get("reply_markup"),
-            parse_mode="HTML"
-        )
-
     async def _handle_new_session_force_reply(self, update: Update, chat_id: int, name: str, model: str) -> None:
         """Handle session creation ForceReply response."""
         logger.info(f"Session creation ForceReply processing: model={model}, name={name}")
@@ -456,26 +436,6 @@ class CallbackHandlers(BaseHandler):
         else:
             await update.message.reply_text("❌ Rename failed.")
 
-    async def _handle_memo_force_reply(self, update: Update, chat_id: int, message: str) -> None:
-        """Handle memo add ForceReply response."""
-        logger.info(f"Memo ForceReply processing: msg={message[:50]}")
-
-        memo_plugin = None
-        if self.plugins:
-            memo_plugin = self.plugins.get_plugin_by_name("memo")
-
-        if not memo_plugin or not hasattr(memo_plugin, 'handle_force_reply'):
-            await update.message.reply_text("Memo plugin not found.")
-            return
-
-        result = memo_plugin.handle_force_reply(message, chat_id)
-
-        await update.message.reply_text(
-            text=result.get("text", ""),
-            reply_markup=result.get("reply_markup"),
-            parse_mode="HTML"
-        )
-
     async def _handle_plugin_callback(self, query, chat_id: int, callback_data: str, plugin) -> None:
         """Handle plugin callback with auto-routing."""
         try:
@@ -490,11 +450,17 @@ class CallbackHandlers(BaseHandler):
                     text=result.get("text", "Enter input"),
                     parse_mode="HTML"
                 )
-                marker_text = result.get("force_reply_marker", plugin.FORCE_REPLY_MARKER or f"{plugin.name}_add")
-                await query.message.reply_text(
-                    text=marker_text,
+                prompt_message = await query.message.reply_text(
+                    text=result.get("force_reply_prompt", "Reply below."),
                     reply_markup=result["force_reply"],
                     parse_mode="HTML"
+                )
+                self._register_plugin_interaction(
+                    prompt_message_id=getattr(prompt_message, "message_id", None),
+                    chat_id=chat_id,
+                    plugin_name=plugin.name,
+                    action=result.get("interaction_action", "force_reply"),
+                    state=result.get("interaction_state"),
                 )
                 return
 

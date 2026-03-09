@@ -2,9 +2,9 @@
 
 import importlib.util
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.logging_config import logger
 
@@ -26,6 +26,24 @@ class ScheduledAction:
     """플러그인 스케줄 가능 액션."""
     name: str  # 액션 식별자 (e.g., "morning_check")
     description: str  # 표시용 설명 (e.g., "오전 할일 체크")
+
+
+@dataclass
+class PluginInteraction:
+    """Ephemeral plugin-owned interaction captured via a ForceReply prompt."""
+
+    plugin_name: str
+    chat_id: int
+    action: str = "force_reply"
+    state: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PluginSystemJobContext:
+    """Runtime services exposed to plugins that register system jobs."""
+
+    app: Any
+    maintainer_chat_id: Optional[int] = None
 
 
 class Plugin(ABC):
@@ -72,6 +90,16 @@ class Plugin(ABC):
         """ForceReply 응답 처리. 오버라이드하여 사용."""
         raise NotImplementedError
 
+    def handle_interaction(
+        self,
+        message: str,
+        chat_id: int,
+        interaction: Optional[PluginInteraction] = None,
+    ) -> dict:
+        """Handle one plugin-owned interaction started by the core runtime."""
+        del interaction
+        return self.handle_force_reply(message, chat_id)
+
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         """스케줄 가능한 액션 목록. 오버라이드하여 사용."""
         return []
@@ -79,6 +107,10 @@ class Plugin(ABC):
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
         """스케줄된 액션 실행. 결과 텍스트(HTML) 반환."""
         raise NotImplementedError(f"Action '{action_name}' not implemented")
+
+    def register_system_jobs(self, context: PluginSystemJobContext) -> None:
+        """Register plugin-owned system jobs into the shared app runtime."""
+        del context
 
 
 
@@ -403,6 +435,15 @@ class PluginLoader:
                 failed.append(name)
 
         return success, failed
+
+    def register_system_jobs(self, app: Any, maintainer_chat_id: Optional[int]) -> None:
+        """Let plugins register their own background jobs without core special-casing."""
+        context = PluginSystemJobContext(app=app, maintainer_chat_id=maintainer_chat_id)
+        for plugin in self.plugins:
+            try:
+                plugin.register_system_jobs(context)
+            except Exception as exc:
+                logger.error(f"플러그인 system job 등록 실패 ({plugin.name}): {exc}", exc_info=True)
 
     async def process_message(self, message: str, chat_id: int) -> Optional[PluginResult]:
         """메시지를 플러그인으로 처리 시도.

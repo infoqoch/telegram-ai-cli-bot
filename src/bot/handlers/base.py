@@ -38,6 +38,7 @@ from ..command_catalog import build_menu_specs
 from ..constants import get_model_badge
 from ..formatters import escape_html
 from ..runtime import DetachedJobManager, PendingRequestStore
+from src.plugins.loader import PluginInteraction
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
@@ -76,6 +77,7 @@ class BaseHandler:
         self._schedule_manager = None
         self._workspace_registry = None
         self._ws_pending: dict[str, dict] = {}
+        self._plugin_interactions: dict[int, PluginInteraction] = {}
         self._pending_requests = PendingRequestStore(self._repository)
         self._detached_jobs = DetachedJobManager(self._repository)
 
@@ -363,6 +365,83 @@ class BaseHandler:
     def _delete_temp_pending(self, key: str) -> None:
         """Delete pending data from memory and DB."""
         self._pending_requests.delete(key)
+
+    def _register_plugin_interaction(
+        self,
+        *,
+        prompt_message_id: Optional[int],
+        chat_id: int,
+        plugin_name: str,
+        action: str = "force_reply",
+        state: Optional[dict] = None,
+    ) -> None:
+        """Track one plugin interaction by the ForceReply prompt message id."""
+        if not prompt_message_id:
+            logger.warning(f"Plugin interaction prompt missing message_id: plugin={plugin_name}")
+            return
+
+        self._plugin_interactions[prompt_message_id] = PluginInteraction(
+            plugin_name=plugin_name,
+            chat_id=chat_id,
+            action=action,
+            state=state or {},
+        )
+        logger.debug(
+            f"Plugin interaction registered: prompt_message_id={prompt_message_id}, "
+            f"plugin={plugin_name}, action={action}"
+        )
+
+    def _pop_plugin_interaction(
+        self,
+        *,
+        prompt_message_id: Optional[int],
+        chat_id: int,
+    ) -> Optional[PluginInteraction]:
+        """Consume one pending plugin interaction for the same chat."""
+        if not prompt_message_id:
+            return None
+
+        interaction = self._plugin_interactions.get(prompt_message_id)
+        if not interaction:
+            return None
+        if interaction.chat_id != chat_id:
+            logger.warning(
+                f"Plugin interaction chat mismatch: prompt_message_id={prompt_message_id}, "
+                f"expected={interaction.chat_id}, got={chat_id}"
+            )
+            return None
+        self._plugin_interactions.pop(prompt_message_id, None)
+        return interaction
+
+    async def _handle_plugin_interaction_reply(self, update: Update, chat_id: int, message: str, interaction: PluginInteraction) -> None:
+        """Dispatch one ForceReply follow-up back to the owning plugin."""
+        if not self.plugins:
+            await update.message.reply_text("Plugin loader unavailable.")
+            return
+
+        plugin = self.plugins.get_plugin_by_name(interaction.plugin_name)
+        if not plugin:
+            await update.message.reply_text(
+                f"Plugin <code>{escape_html(interaction.plugin_name)}</code> not found.",
+                parse_mode="HTML",
+            )
+            return
+
+        try:
+            result = plugin.handle_interaction(message, chat_id, interaction=interaction)
+        except Exception as exc:
+            logger.exception(f"Plugin interaction failed ({interaction.plugin_name}): {exc}")
+            await update.message.reply_text(
+                f"Plugin interaction failed.\n\n<code>{escape_html(str(exc))}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        await update.message.reply_text(
+            text=result.get("text", ""),
+            reply_markup=result.get("reply_markup"),
+            parse_mode="HTML",
+        )
 
     def _restore_temp_pending(self) -> int:
         """Restore non-expired pending messages from DB. Returns count restored."""
