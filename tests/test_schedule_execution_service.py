@@ -1,5 +1,6 @@
 """Unit tests for schedule execution runtime service."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -130,4 +131,42 @@ class TestScheduleExecutionService:
 
         mock_schedule_manager.update_run.assert_called_once()
         assert mock_schedule_manager.update_run.call_args.kwargs["last_error"] == "Plugin 'missing' not found"
+        mock_bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_records_timeout_for_hung_schedule(
+        self, mock_bot, mock_plugins, mock_schedule_manager
+    ):
+        registry = MagicMock()
+
+        async def slow_chat(**kwargs):
+            await asyncio.sleep(0.05)
+            return ("늦은 응답", None, None)
+
+        client = MagicMock()
+        client.chat = slow_chat
+        registry.get_client.return_value = client
+
+        service = ScheduleExecutionService(
+            bot=mock_bot,
+            ai_registry=registry,
+            plugin_loader=mock_plugins,
+            schedule_manager=mock_schedule_manager,
+            execution_timeout_seconds=0.01,
+        )
+
+        schedule = MagicMock()
+        schedule.id = "schedule-timeout"
+        schedule.type = "workspace"
+        schedule.workspace_path = "/Users/test/project"
+        schedule.ai_provider = "claude"
+        schedule.message = "테스트"
+        schedule.model = "sonnet"
+        schedule.chat_id = 12345
+        schedule.name = "느린 스케줄"
+
+        await service.execute(schedule)
+
+        mock_schedule_manager.update_run.assert_called_once()
+        assert "timed out" in mock_schedule_manager.update_run.call_args.kwargs["last_error"]
         mock_bot.send_message.assert_not_called()

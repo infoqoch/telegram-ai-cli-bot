@@ -23,7 +23,7 @@ class TestScheduleCreation:
             minute=0,
             message="아침 인사",
             name="모닝콜",
-            schedule_type="claude",
+            schedule_type="chat",
             model="sonnet"
         )
 
@@ -51,6 +51,25 @@ class TestScheduleCreation:
 
         assert schedule.type == "workspace"
         assert schedule.workspace_path == "/Users/test/project"
+
+    def test_add_one_time_schedule(self, repository):
+        """1회성 스케줄 추가."""
+        adapter = ScheduleManagerAdapter(repository)
+
+        schedule = adapter.add(
+            user_id="12345",
+            chat_id=12345,
+            hour=22,
+            minute=20,
+            message="한 번만 실행",
+            name="원타임",
+            trigger_type="once",
+        )
+
+        assert schedule.trigger_type == "once"
+        assert schedule.run_at_local is not None
+        assert schedule.cron_expr is None
+        assert "Once at" in schedule.trigger_summary
 
 
 class TestScheduleManagement:
@@ -121,6 +140,34 @@ class TestScheduleToggle:
         result = adapter.toggle("nonexistent-id")
         assert result is None
 
+    def test_toggle_once_schedule_rearms_next_occurrence(self, repository):
+        """과거 1회성 스케줄을 다시 켜면 다음 로컬 시각으로 재무장."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        schedule = repository.add_schedule(
+            user_id="12345",
+            chat_id=12345,
+            hour=7,
+            minute=5,
+            message="한 번만",
+            name="원타임",
+            trigger_type="once",
+            run_at_local="2020-01-01T07:05:00+09:00",
+        )
+        repository.toggle_schedule(schedule.id)  # disable first
+
+        mock_scheduler = MagicMock()
+        mock_executor = AsyncMock()
+        adapter = ScheduleManagerAdapter(repository, mock_scheduler, mock_executor)
+
+        new_state = adapter.toggle(schedule.id)
+
+        assert new_state is True
+        updated = adapter.get(schedule.id)
+        assert updated is not None
+        assert updated.run_at_local != "2020-01-01T07:05:00+09:00"
+        mock_scheduler.register_once_at.assert_called_once()
+
 
 class TestScheduleExecution:
     """스케줄 실행 테스트."""
@@ -155,6 +202,50 @@ class TestScheduleExecution:
 
         updated = adapter.get(schedule.id)
         assert updated.last_error == "TIMEOUT"
+
+    def test_one_time_schedule_disables_after_successful_run(self, repository):
+        """1회성 스케줄은 성공 실행 후 자동 비활성화."""
+        adapter = ScheduleManagerAdapter(repository)
+
+        schedule = adapter.add(
+            "12345",
+            12345,
+            8,
+            0,
+            "메시지",
+            "원타임",
+            trigger_type="once",
+        )
+
+        adapter.update_run(schedule.id, last_run=datetime.utcnow().isoformat())
+
+        updated = adapter.get(schedule.id)
+        assert updated is not None
+        assert updated.enabled is False
+        assert updated.run_count == 1
+
+    def test_stale_one_time_schedule_is_disabled_on_registration(self, repository):
+        """지난 1회성 스케줄은 재시작 시 다시 등록하지 않고 비활성화."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        schedule = repository.add_schedule(
+            user_id="12345",
+            chat_id=12345,
+            hour=7,
+            minute=5,
+            message="한 번만",
+            name="지난 스케줄",
+            trigger_type="once",
+            run_at_local="2020-01-01T07:05:00+09:00",
+        )
+
+        adapter = ScheduleManagerAdapter(repository, MagicMock(), AsyncMock())
+        count = adapter.register_all_to_scheduler()
+
+        assert count == 0
+        updated = adapter.get(schedule.id)
+        assert updated is not None
+        assert updated.enabled is False
 
 
 class TestScheduleList:

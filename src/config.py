@@ -4,6 +4,7 @@ import fnmatch
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
     # Paths
     base_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
     working_dir: Optional[Path] = Field(default=None, description="봇이 작업할 디렉토리")
+    app_timezone: str = Field(default="Asia/Seoul", alias="APP_TIMEZONE", description="앱 전체 로컬 시간대")
 
     # Project Sessions (쉼표로 구분된 문자열로 저장, 프로퍼티로 리스트 반환)
     allowed_project_paths_raw: str = Field(
@@ -59,6 +61,13 @@ class Settings(BaseSettings):
             return None
         path = Path(v).expanduser()
         return path
+
+    @field_validator("app_timezone")
+    @classmethod
+    def validate_app_timezone(cls, v: str) -> str:
+        """Validate one IANA timezone string."""
+        ZoneInfo(v)
+        return v
 
     @property
     def effective_working_dir(self) -> Path:

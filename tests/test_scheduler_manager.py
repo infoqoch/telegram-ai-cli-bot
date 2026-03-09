@@ -129,6 +129,22 @@ class TestSchedulerManager:
         result = self.manager.unregister("nonexistent")
         assert result is False
 
+    def test_unregister_handles_missing_underlying_job(self):
+        """APScheduler에서 이미 사라진 job도 안전하게 해제."""
+        from apscheduler.jobstores.base import JobLookupError
+
+        mock_app = MagicMock()
+        mock_job = MagicMock()
+        mock_job.schedule_removal.side_effect = JobLookupError("gone")
+        mock_app.job_queue.run_daily.return_value = mock_job
+        self.manager.set_app(mock_app)
+
+        callback = AsyncMock()
+        self.manager.register_daily("gone_job", callback, time(10, 0), "OwnerA")
+
+        assert self.manager.unregister("gone_job") is True
+        assert "gone_job" not in self.manager._jobs
+
     def test_unregister_by_owner(self):
         """특정 owner의 모든 작업 해제."""
         mock_app = MagicMock()

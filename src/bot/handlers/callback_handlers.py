@@ -6,11 +6,11 @@ from telegram.ext import ContextTypes
 from src.ai import (
     get_default_model,
     get_profile_label,
-    get_provider_label,
-    get_provider_profiles,
+    infer_provider_from_model,
     is_supported_model,
 )
 from src.logging_config import logger, clear_context
+from src.ui_emoji import BUTTON_BACK, BUTTON_NEW_SESSION, BUTTON_REFRESH, BUTTON_SESSION, BUTTON_SESSION_LIST, BUTTON_SWITCH_AI
 from ..constants import get_model_emoji
 from ..formatters import escape_html
 from .base import BaseHandler
@@ -30,7 +30,7 @@ class CallbackHandlers(BaseHandler):
             return
 
         self._setup_request_context(chat_id)
-        callback_data = query.data
+        callback_data = query.data or ""
         logger.info(f"Callback query: {callback_data} (chat_id={chat_id})")
 
         if not self._is_authorized(chat_id):
@@ -39,13 +39,22 @@ class CallbackHandlers(BaseHandler):
             clear_context()
             return
 
-        if not self._is_authenticated(str(chat_id)):
+        allow_unauthenticated_menu = callback_data in {"menu:open", "menu:help"}
+        if not allow_unauthenticated_menu and not self._is_authenticated(str(chat_id)):
             logger.debug("Callback denied - auth required")
             await query.answer("🔒 Authentication required.\n/auth <key>", show_alert=True)
             clear_context()
             return
 
         await query.answer()
+
+        if callback_data.startswith("menu:"):
+            await self._handle_menu_callback(query, chat_id, callback_data)
+            return
+
+        if callback_data.startswith("plug:"):
+            await self._handle_plugin_hub_callback(query, chat_id, callback_data)
+            return
 
         # Plugin auto-routing (CALLBACK_PREFIX 기반)
         if self.plugins:
@@ -56,6 +65,10 @@ class CallbackHandlers(BaseHandler):
 
         if callback_data.startswith("ai:"):
             await self._handle_ai_callback(query, chat_id, callback_data)
+            return
+
+        if callback_data.startswith("resp:"):
+            await self._handle_response_session_callback(query, chat_id, callback_data)
             return
 
         # Session callback
@@ -85,6 +98,280 @@ class CallbackHandlers(BaseHandler):
 
         logger.warning(f"Unknown callback: {callback_data}")
 
+    async def _handle_menu_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """Handle `/menu` launcher callbacks."""
+        action = callback_data.split(":", 1)[1] if ":" in callback_data else "open"
+        user_id = str(chat_id)
+
+        if action == "open":
+            await query.edit_message_text(
+                self._build_menu_text(chat_id),
+                reply_markup=self._build_menu_keyboard(chat_id),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "help":
+            await query.edit_message_text(
+                self._build_main_help_text(),
+                reply_markup=self._build_menu_back_markup(),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "sessions":
+            text, buttons = self._build_session_list_view(
+                user_id,
+                include_timestamp=True,
+                launcher_context="menu",
+            )
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "new":
+            keyboard = [
+                *self._build_new_session_picker_keyboard(),
+                [
+                    InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="menu:sessions"),
+                    InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="menu:ai"),
+                ],
+                [InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")],
+            ]
+            await query.edit_message_text(
+                self._build_new_session_picker_text(user_id),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "ai":
+            provider = self._get_selected_ai_provider(user_id)
+            keyboard = self._build_ai_selector_keyboard(provider, launcher_context="menu")
+            keyboard.insert(1, [
+                InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="menu:sessions"),
+                InlineKeyboardButton(BUTTON_NEW_SESSION, callback_data="menu:new"),
+            ])
+            await query.edit_message_text(
+                self._build_provider_switch_text(user_id, provider),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "tasks":
+            text, _ = self._build_tasks_status(user_id)
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(BUTTON_REFRESH, callback_data="menu:tasks"),
+                        InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="menu:sessions"),
+                    ],
+                    [InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")],
+                ]),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "workspace":
+            if not self._workspace_registry:
+                await query.edit_message_text(
+                    "Workspace feature not initialized.",
+                    reply_markup=self._build_menu_back_markup(),
+                )
+                return
+
+            keyboard = self._build_workspace_keyboard(user_id)
+            keyboard.append([InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")])
+            await query.edit_message_text(
+                self._workspace_registry.get_status_text(user_id),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "scheduler":
+            if not self._schedule_manager:
+                await query.edit_message_text(
+                    "Schedule feature not initialized.",
+                    reply_markup=self._build_menu_back_markup(),
+                )
+                return
+
+            keyboard = self._build_scheduler_keyboard(user_id)
+            keyboard.append([InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")])
+            await query.edit_message_text(
+                self._build_scheduler_screen_text(user_id),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "plugins":
+            await query.edit_message_text(
+                self._build_plugins_text(),
+                reply_markup=self._build_plugins_markup(launcher_context="menu"),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "claude_usage":
+            usage_text = "<b>Claude Usage</b>\n\nPlan: <b>unknown</b>\n5h / wk: unavailable right now"
+            usage = None
+            if hasattr(self.claude, "get_usage_snapshot"):
+                usage = await self.claude.get_usage_snapshot()
+
+            if usage:
+                plan = escape_html(usage.get("subscription_type", "unknown"))
+                lines = [
+                    "<b>Claude Usage</b>",
+                    "",
+                    f"Plan: <b>{plan}</b>",
+                ]
+                if {"five_hour_percent", "five_hour_reset", "weekly_percent", "weekly_reset"} <= usage.keys():
+                    lines.extend([
+                        f"5h: <b>{escape_html(usage['five_hour_percent'])}%</b> "
+                        f"({escape_html(usage['five_hour_reset'])})",
+                        f"wk: <b>{escape_html(usage['weekly_percent'])}%</b> "
+                        f"({escape_html(usage['weekly_reset'])})",
+                    ])
+                else:
+                    lines.append("5h / wk: unavailable right now")
+                    reason = usage.get("unavailable_reason")
+                    if reason:
+                        lines.append(f"Reason: {escape_html(reason)}")
+                    checked_at = usage.get("checked_at")
+                    if checked_at:
+                        lines.append(f"Checked: <code>{escape_html(checked_at)}</code>")
+                usage_text = "\n".join(lines)
+
+            await query.edit_message_text(
+                usage_text,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(BUTTON_REFRESH, callback_data="menu:claude_usage"),
+                    InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open"),
+                ]]),
+                parse_mode="HTML",
+            )
+            return
+
+        await query.edit_message_text(
+            "Unknown menu action.",
+            reply_markup=self._build_menu_back_markup(),
+        )
+
+    async def _handle_plugin_hub_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """Handle plugin launcher callbacks shared by `/plugins` and `/menu`."""
+        parts = callback_data.split(":")
+        action = parts[1] if len(parts) > 1 else "list"
+
+        if action == "list":
+            origin = parts[2] if len(parts) > 2 else None
+            launcher_context = origin if origin == "menu" else None
+            await query.edit_message_text(
+                self._build_plugins_text(),
+                reply_markup=self._build_plugins_markup(launcher_context=launcher_context),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "open" and len(parts) > 2:
+            plugin_name = parts[2]
+            origin = parts[3] if len(parts) > 3 else "standalone"
+            await self._open_plugin_launcher(query, chat_id, plugin_name, origin)
+            return
+
+        await query.edit_message_text(
+            "Unknown plugin launcher action.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(BUTTON_BACK, callback_data="plug:list:standalone")]]),
+        )
+
+    async def _open_plugin_launcher(self, query, chat_id: int, plugin_name: str, origin: str) -> None:
+        """Open one plugin root screen from the plugin launcher."""
+        if not self.plugins:
+            await query.edit_message_text("No plugins loaded.")
+            return
+
+        plugin = self.plugins.get_plugin_by_name(plugin_name)
+        if not plugin:
+            await query.edit_message_text(
+                f"Plugin not found: <code>{escape_html(plugin_name)}</code>",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(BUTTON_BACK, callback_data=f"plug:list:{origin}"),
+                ]]),
+                parse_mode="HTML",
+            )
+            return
+
+        try:
+            result = await plugin.handle(plugin.name, chat_id)
+        except Exception as exc:
+            logger.exception(f"Plugin launcher open failed ({plugin_name}): {exc}")
+            await query.edit_message_text(
+                f"Error opening <code>/{escape_html(plugin.name)}</code>.\n\n"
+                f"<code>{escape_html(str(exc))}</code>",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(BUTTON_BACK, callback_data=f"plug:list:{origin}"),
+                ]]),
+                parse_mode="HTML",
+            )
+            return
+
+        if result.handled:
+            reply_markup = self._append_plugin_launcher_back(
+                getattr(result, "reply_markup", None),
+                origin,
+            )
+            await query.edit_message_text(
+                text=result.response or plugin.usage,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+            return
+
+        await query.edit_message_text(
+            text=(
+                f"<b>/{escape_html(plugin.name)}</b>\n\n"
+                "This plugin has no interactive menu.\n"
+                f"Help: <code>/help_{escape_html(plugin.name)}</code>"
+            ),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(BUTTON_BACK, callback_data=f"plug:list:{origin}"),
+            ]]),
+            parse_mode="HTML",
+        )
+
+    @staticmethod
+    def _find_plugin_launcher_return_callback(reply_markup) -> str | None:
+        """Return the active plugin-launcher back callback, if present."""
+        if not reply_markup or not getattr(reply_markup, "inline_keyboard", None):
+            return None
+
+        for row in reply_markup.inline_keyboard:
+            for button in row:
+                callback_data = getattr(button, "callback_data", "") or ""
+                if callback_data.startswith("plug:list:"):
+                    return callback_data
+        return None
+
+    def _append_plugin_launcher_back(self, reply_markup, origin: str):
+        """Append one launcher back row while preserving the plugin's own buttons."""
+        back_callback = f"plug:list:{origin}"
+        existing_back = self._find_plugin_launcher_return_callback(reply_markup)
+        if existing_back == back_callback:
+            return reply_markup
+
+        keyboard = []
+        if reply_markup and getattr(reply_markup, "inline_keyboard", None):
+            keyboard = [list(row) for row in reply_markup.inline_keyboard]
+
+        keyboard.append([InlineKeyboardButton(BUTTON_BACK, callback_data=back_callback)])
+        return InlineKeyboardMarkup(keyboard)
+
     async def _handle_todo_force_reply(self, update: Update, chat_id: int, message: str) -> None:
         """Handle Todo ForceReply response."""
         logger.info(f"Todo ForceReply processing: msg={message[:50]}")
@@ -110,11 +397,15 @@ class CallbackHandlers(BaseHandler):
         logger.info(f"Session creation ForceReply processing: model={model}, name={name}")
 
         user_id = str(chat_id)
-        provider = self._get_selected_ai_provider(user_id)
+        selected_provider = self._get_selected_ai_provider(user_id)
+        provider = infer_provider_from_model(model)
+        if not is_supported_model(provider, model):
+            provider = selected_provider
         model_name = model if is_supported_model(provider, model) else get_default_model(provider)
 
         session_name = name.strip()[:50] if name.strip() else ""
 
+        self._set_selected_ai_provider(user_id, provider)
         session_id = self.sessions.create_session(
             user_id=user_id,
             ai_provider=provider,
@@ -128,12 +419,13 @@ class CallbackHandlers(BaseHandler):
         name_line = f"\n<b>Name:</b> {escape_html(session_name)}" if session_name else ""
 
         keyboard = [[
-            InlineKeyboardButton("Session List", callback_data="sess:list"),
+            InlineKeyboardButton(BUTTON_SESSION, callback_data=f"sess:switch:{session_id}"),
+            InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
         ]]
 
         await update.message.reply_text(
             text=f"New session created!\n\n"
-                 f"<b>AI:</b> {get_provider_label(provider)}\n"
+                 f"<b>AI:</b> {self._format_provider_display(provider)}\n"
                  f"{model_emoji} <b>Model:</b> {get_profile_label(provider, model_name)}\n"
                  f"<b>ID:</b> <code>{short_id}</code>{name_line}",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -187,6 +479,9 @@ class CallbackHandlers(BaseHandler):
     async def _handle_plugin_callback(self, query, chat_id: int, callback_data: str, plugin) -> None:
         """Handle plugin callback with auto-routing."""
         try:
+            plugin_launcher_back = self._find_plugin_launcher_return_callback(
+                getattr(query.message, "reply_markup", None)
+            )
             result = await plugin.handle_callback_async(callback_data, chat_id)
 
             # ForceReply 처리
@@ -204,16 +499,21 @@ class CallbackHandlers(BaseHandler):
                 return
 
             # 메시지 편집/전송
+            reply_markup = result.get("reply_markup")
+            if plugin_launcher_back:
+                origin = plugin_launcher_back.split(":")[-1]
+                reply_markup = self._append_plugin_launcher_back(reply_markup, origin)
+
             if result.get("edit", True) and query.message:
                 await query.edit_message_text(
                     text=result.get("text", ""),
-                    reply_markup=result.get("reply_markup"),
+                    reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
             else:
                 await query.message.reply_text(
                     text=result.get("text", ""),
-                    reply_markup=result.get("reply_markup"),
+                    reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
         except BadRequest as e:
@@ -236,6 +536,7 @@ class CallbackHandlers(BaseHandler):
         user_id = str(chat_id)
         parts = callback_data.split(":")
         action = parts[1] if len(parts) > 1 else ""
+        origin = parts[3] if action == "select" and len(parts) > 3 else parts[2] if action == "open" and len(parts) > 2 else ""
 
         if action == "cancel":
             await query.edit_message_text("Provider selection cancelled.")
@@ -243,15 +544,22 @@ class CallbackHandlers(BaseHandler):
 
         if action == "open":
             provider = self._get_selected_ai_provider(user_id)
-            keyboard = self._build_ai_selector_keyboard(provider)
-            keyboard.append([
-                InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
-                InlineKeyboardButton("🆕 New Session", callback_data="sess:new"),
+            keyboard = self._build_ai_selector_keyboard(
+                provider,
+                launcher_context="menu" if origin == "menu" else None,
+            )
+            keyboard.insert(1, [
+                InlineKeyboardButton(
+                    BUTTON_SESSION_LIST,
+                    callback_data="menu:sessions" if origin == "menu" else "sess:list",
+                ),
+                InlineKeyboardButton(
+                    BUTTON_NEW_SESSION,
+                    callback_data="menu:new" if origin == "menu" else "sess:new",
+                ),
             ])
             await query.edit_message_text(
-                f"<b>Select AI</b>\n\n"
-                f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
-                f"Choose which provider `/new`, `/sl`, `/session`, `/model`, `/ai`, and normal chat should use.",
+                self._build_provider_switch_text(user_id, provider),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML",
             )
@@ -266,12 +574,20 @@ class CallbackHandlers(BaseHandler):
                 if current_session_id else
                 "Current session: none"
             )
-            keyboard = [
-                [InlineKeyboardButton("📋 Session List", callback_data="sess:list")],
-                [InlineKeyboardButton("🆕 New Session", callback_data="sess:new")],
-            ]
+            keyboard = [[
+                InlineKeyboardButton(
+                    BUTTON_SESSION_LIST,
+                    callback_data="menu:sessions" if origin == "menu" else "sess:list",
+                ),
+                InlineKeyboardButton(
+                    BUTTON_NEW_SESSION,
+                    callback_data="menu:new" if origin == "menu" else "sess:new",
+                ),
+            ]]
+            if origin == "menu":
+                keyboard.append([InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")])
             await query.edit_message_text(
-                f"✅ Current AI switched to <b>{get_provider_label(provider)}</b>.\n\n"
+                f"✅ Current AI switched to <b>{self._format_provider_display(provider)}</b>.\n\n"
                 f"{current_line}",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML",

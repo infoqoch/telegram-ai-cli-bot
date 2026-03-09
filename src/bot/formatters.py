@@ -3,6 +3,9 @@
 import html
 import re
 
+from src.ai import get_provider_icon, infer_provider_from_model
+from .constants import get_model_badge
+
 
 def escape_html(text: str) -> str:
     """Escape text for safe embedding in Telegram HTML messages."""
@@ -85,20 +88,20 @@ def format_session_quick_list(sessions: list[dict], histories: dict[str, list[st
     if not sessions:
         return "📭 No saved sessions."
 
-    model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}
-
     lines = []
     for s in sessions:
         history = histories.get(s["full_session_id"], [])
         last_msg = truncate_message(history[-1]) if history else "-"
         current_mark = " ⬅️" if s.get("is_current") else ""
         model = s.get("model", "sonnet")
-        emoji = model_emoji.get(model, "")
+        emoji = get_model_badge(model)
+        provider = s.get("ai_provider") or infer_provider_from_model(model)
+        provider_icon = get_provider_icon(provider)
         name = s.get("name", "")
         name_display = f" <b>{escape_html(name)}</b>" if name else ""
 
         lines.append(
-            f"/s_{s['session_id']}{name_display} {emoji}{model} ({s['history_count']}){current_mark}\n"
+            f"/s_{s['session_id']}{name_display} {provider_icon} {emoji}{model} ({s['history_count']}){current_mark}\n"
             f"   └ Recent: {escape_html(last_msg)}\n"
             f"   └ /h_{s['session_id']} /r_{s['session_id']} /d_{s['session_id']}"
         )

@@ -8,14 +8,21 @@ from telegram.ext import ContextTypes
 from src.ai import (
     get_default_model,
     get_profile_label,
-    get_profile_short_label,
-    get_provider_label,
     get_provider_profiles,
+    infer_provider_from_model,
     is_supported_model,
     is_supported_provider,
 )
 from src.logging_config import logger, clear_context
-from ..constants import MAX_SESSION_NAME_LENGTH, get_model_emoji, get_model_badge
+from src.ui_emoji import (
+    BUTTON_HISTORY,
+    BUTTON_NEW_SESSION,
+    BUTTON_RENAME,
+    BUTTON_SESSION_LIST,
+    BUTTON_SWITCH_AI,
+    BUTTON_DELETE,
+)
+from ..constants import MAX_SESSION_NAME_LENGTH, get_model_emoji
 from ..formatters import escape_html, truncate_message
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
@@ -38,7 +45,6 @@ class SessionHandlers(BaseHandler):
 
     def _build_provider_switch_text(self, user_id: str, provider: str) -> str:
         """Build a short provider selection summary."""
-        provider_label = get_provider_label(provider)
         current_session_id = self.sessions.get_current_session_id(user_id, provider)
         current_line = (
             f"Current session: <code>{current_session_id[:8]}</code>"
@@ -47,7 +53,7 @@ class SessionHandlers(BaseHandler):
         )
         return (
             f"<b>Select AI</b>\n\n"
-            f"Current AI: <b>{provider_label}</b>\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
             f"{current_line}\n\n"
             f"Choose which provider `/new`, `/sl`, `/session`, `/model`, `/ai`, and normal chat should use."
         )
@@ -74,7 +80,7 @@ class SessionHandlers(BaseHandler):
 
             self._set_selected_ai_provider(user_id, provider)
             await update.message.reply_text(
-                f"✅ Current AI switched to <b>{get_provider_label(provider)}</b>.\n\n"
+                f"✅ Current AI switched to <b>{self._format_provider_display(provider)}</b>.\n\n"
                 f"{self._build_provider_switch_text(user_id, provider)}",
                 parse_mode="HTML",
             )
@@ -83,8 +89,8 @@ class SessionHandlers(BaseHandler):
 
         keyboard = self._build_ai_selector_keyboard(current_provider)
         keyboard.append([
-            InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
-            InlineKeyboardButton("🆕 New Session", callback_data="sess:new"),
+            InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
+            InlineKeyboardButton(BUTTON_NEW_SESSION, callback_data="sess:new"),
         ])
 
         await update.message.reply_text(
@@ -108,19 +114,18 @@ class SessionHandlers(BaseHandler):
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
         provider = self._get_selected_ai_provider(user_id)
-        provider_label = get_provider_label(provider)
-        provider_profiles = get_provider_profiles(provider)
+        provider_label = self._format_provider_display(provider)
 
         if not context.args:
             keyboard = [
-                self._build_model_buttons(provider, "sess:new:"),
+                *self._build_new_session_picker_keyboard(),
                 [
-                    InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
-                    InlineKeyboardButton("Switch AI", callback_data="ai:open"),
+                    InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
+                    InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="ai:open"),
                 ]
             ]
             await update.message.reply_text(
-                f"🆕 <b>New Session</b>\n\nCurrent AI: <b>{provider_label}</b>\nSelect a model:",
+                self._build_new_session_picker_text(user_id),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
@@ -131,9 +136,11 @@ class SessionHandlers(BaseHandler):
         session_name = ""
 
         first_arg = context.args[0].lower()
-        valid_keys = {profile.key for profile in provider_profiles}
-        if first_arg in valid_keys:
+        target_provider = infer_provider_from_model(first_arg)
+        if is_supported_model(target_provider, first_arg):
+            provider = target_provider
             model = first_arg
+            provider_label = self._format_provider_display(provider)
             if len(context.args) > 1:
                 session_name = " ".join(context.args[1:])
         else:
@@ -148,9 +155,13 @@ class SessionHandlers(BaseHandler):
 
         model_emoji = get_model_emoji(model)
         logger.trace("Sending session creation message")
-        await update.message.reply_text(f"Creating new {provider_label} session... {model_emoji} {get_profile_label(provider, model)}")
+        await update.message.reply_text(
+            f"Creating new {provider_label} session... "
+            f"{model_emoji} {get_profile_label(provider, model)}"
+        )
 
         logger.trace("Saving session")
+        self._set_selected_ai_provider(user_id, provider)
         session_id = self.sessions.create_session(
             user_id=user_id,
             ai_provider=provider,
@@ -222,7 +233,7 @@ class SessionHandlers(BaseHandler):
         user_id = str(chat_id)
         args = context.args or []
         provider = self._get_selected_ai_provider(user_id)
-        provider_label = get_provider_label(provider)
+        provider_label = self._format_provider_display(provider)
         provider_profiles = get_provider_profiles(provider)
 
         if not args:
@@ -337,7 +348,7 @@ class SessionHandlers(BaseHandler):
             logger.trace("No active session")
             await update.message.reply_text(
                 "❌ No active session.\n\n"
-                f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
                 "Create one with:\n"
                 "<code>/new</code>\n"
                 f"Or pick a profile directly: <code>/new {get_default_model(provider)}</code>",
@@ -390,21 +401,23 @@ class SessionHandlers(BaseHandler):
 
         user_id = str(chat_id)
         provider = self._get_selected_ai_provider(user_id)
-        provider_label = get_provider_label(provider)
+        provider_label = self._format_provider_display(provider)
 
         logger.trace("Getting current session")
         session_id = self.sessions.get_current_session_id(user_id)
         if not session_id:
             logger.trace("No active session")
             keyboard = [
-                self._build_model_buttons(provider, "sess:new:"),
+                *self._build_new_session_picker_keyboard(),
                 [
-                    InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
-                    InlineKeyboardButton("Switch AI", callback_data="ai:open"),
+                    InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
+                    InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="ai:open"),
                 ]
             ]
             await update.message.reply_text(
-                f"❌ No active session.\n\nCurrent AI: <b>{provider_label}</b>\nCreate new session:",
+                f"❌ No active session.\n\n"
+                f"Current AI: <b>{provider_label}</b>\n"
+                f"Select a model. Choosing one also switches the current AI:",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
@@ -446,29 +459,27 @@ class SessionHandlers(BaseHandler):
 
         name_line = f"- Name: {escape_html(session_name)}\n" if session_name else ""
 
-        model_buttons = [
-            InlineKeyboardButton(
-                profile.button_label,
-                callback_data=f"sess:model:{profile.key}:{session_id}",
-            )
-            for profile in get_provider_profiles(session_provider)
-        ]
+        model_buttons = self._build_model_buttons(
+            session_provider,
+            "sess:model:",
+            callback_suffix=f":{session_id}",
+        )
         keyboard = [
             model_buttons,
             [
-                InlineKeyboardButton("✏️ Rename", callback_data=f"sess:rename:{session_id}"),
-                InlineKeyboardButton("📜 History", callback_data=f"sess:history:{session_id}"),
-                InlineKeyboardButton("🗑️ Delete", callback_data=f"sess:delete:{session_id}"),
+                InlineKeyboardButton(BUTTON_RENAME, callback_data=f"sess:rename:{session_id}"),
+                InlineKeyboardButton(BUTTON_HISTORY, callback_data=f"sess:history:{session_id}"),
+                InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sess:delete:{session_id}"),
             ],
             [
-                InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
-                InlineKeyboardButton("Switch AI", callback_data="ai:open"),
+                InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
+                InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="ai:open"),
             ]
         ]
 
         await update.message.reply_text(
             f"<b>Current Session</b>\n\n"
-            f"- AI: {get_provider_label(session_provider)}\n"
+            f"- AI: {self._format_provider_display(session_provider)}\n"
             f"- ID: <code>{session_id[:8]}</code>\n"
             f"{name_line}"
             f"- Model: {model_emoji} {get_profile_label(session_provider, model)}\n"
@@ -489,54 +500,10 @@ class SessionHandlers(BaseHandler):
         logger.info("/session_list command received")
 
         user_id = str(chat_id)
-        provider = self._get_selected_ai_provider(user_id)
-        provider_label = get_provider_label(provider)
-
-        logger.trace("Getting session list")
-        sessions = self.sessions.list_sessions(user_id)
-
-        current_session_id = self.sessions.get_current_session_id(user_id)
-
-        lines = [f"<b>Session List</b>\nCurrent AI: <b>{provider_label}</b>\n"]
-        buttons = []
-
-        if not sessions:
-            lines.append("No sessions.")
-        else:
-            for s in sessions[:10]:
-                sid = s["full_session_id"]
-                short_id = s["session_id"]
-                name = s.get("name") or f"Session {short_id}"
-                model = s.get("model", "sonnet")
-                session_provider = s.get("ai_provider", provider)
-                model_badge = get_model_badge(model)
-                model_label = get_profile_short_label(session_provider, model)
-
-                is_current = "> " if sid == current_session_id else ""
-                is_locked = self._is_session_locked(sid)
-                lock_indicator = " 🔒" if is_locked else ""
-                lines.append(
-                    f"{is_current}{model_badge} <b>{escape_html(name)}</b> "
-                    f"({model_label}, <code>{short_id}</code>){lock_indicator}"
-                )
-
-                buttons.append([
-                    InlineKeyboardButton(f"{name[:10]}", callback_data=f"sess:switch:{sid}"),
-                    InlineKeyboardButton("History", callback_data=f"sess:history:{sid}"),
-                    InlineKeyboardButton("Del", callback_data=f"sess:delete:{sid}"),
-                ])
-
-        buttons.append(self._build_model_buttons(provider, "sess:new:"))
-        buttons.append([
-            InlineKeyboardButton("Refresh", callback_data="sess:list"),
-            InlineKeyboardButton("Tasks", callback_data="tasks:refresh"),
-        ])
-        buttons.append([
-            InlineKeyboardButton("Switch AI", callback_data="ai:open"),
-        ])
+        text, buttons = self._build_session_list_view(user_id)
 
         await update.message.reply_text(
-            "\n".join(lines),
+            text,
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
@@ -572,11 +539,12 @@ class SessionHandlers(BaseHandler):
         full_session_id = target_info["full_session_id"]
         if self.sessions.switch_session(user_id, full_session_id):
             logger.info(f"Session switch successful: {target_info['session_id']}")
+            model_emoji = get_model_emoji(target_info["model"])
             await update.message.reply_text(
                 f"Session switched!\n\n"
-                f"- AI: {get_provider_label(target_info['ai_provider'])}\n"
+                f"- AI: {self._format_provider_display(target_info['ai_provider'])}\n"
                 f"- ID: <code>{target_info['session_id']}</code>\n"
-                f"- Model: {get_profile_label(target_info['ai_provider'], target_info['model'])}\n"
+                f"- Model: {model_emoji} {get_profile_label(target_info['ai_provider'], target_info['model'])}\n"
                 f"- Messages: {target_info['history_count']}",
                 parse_mode="HTML"
             )
@@ -806,7 +774,7 @@ class SessionHandlers(BaseHandler):
         if not prev_session_id:
             await update.message.reply_text(
                 "❌ No previous session.\n\n"
-                "Use /sl to see sessions for the current AI."
+                "Use /sl to see sessions across both AIs."
             )
             clear_context()
             return
@@ -826,7 +794,7 @@ class SessionHandlers(BaseHandler):
 
         await update.message.reply_text(
             f"✅ Switched back!\n\n"
-            f"- AI: {get_provider_label(self.sessions.get_session_ai_provider(prev_session_id) or self._get_selected_ai_provider(user_id))}\n"
+            f"- AI: {self._format_provider_display(self.sessions.get_session_ai_provider(prev_session_id) or self._get_selected_ai_provider(user_id))}\n"
             f"- ID: <code>{prev_session_id[:8]}</code>{name_display}",
             parse_mode="HTML"
         )

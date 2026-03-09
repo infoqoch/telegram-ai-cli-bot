@@ -114,6 +114,8 @@ class PluginLoader:
 
         def try_register(plugin: Plugin, location: str) -> bool:
             """플러그인 충돌 여부 확인 후 등록. 충돌 시 False 반환."""
+            source_group = location.split("/", 1)[0]
+
             # name 중복 체크
             if plugin.name in registered_names:
                 logger.warning(
@@ -144,6 +146,8 @@ class PluginLoader:
             if plugin.FORCE_REPLY_MARKER:
                 registered_force_reply_markers[plugin.FORCE_REPLY_MARKER] = plugin.name
 
+            plugin._source_group = source_group
+            plugin._source_location = location
             self.plugins.append(plugin)
             loaded.append(location)
             logger.info(f"플러그인 로드됨: {location}")
@@ -342,6 +346,8 @@ class PluginLoader:
                 self._invalidate_module_cache(name)
                 plugin = self._load_plugin_from_package(package_path)
                 if plugin:
+                    plugin._source_group = plugin_dir
+                    plugin._source_location = f"{plugin_dir}/{plugin.name}"
                     self.plugins.append(plugin)
                     logger.info(f"플러그인 리로드됨 (패키지): {name}")
                     return True
@@ -352,6 +358,8 @@ class PluginLoader:
                 self._invalidate_module_cache(name)
                 plugin = self._load_plugin_safe(file_path)
                 if plugin:
+                    plugin._source_group = plugin_dir
+                    plugin._source_location = f"{plugin_dir}/{plugin.name}"
                     self.plugins.append(plugin)
                     logger.info(f"플러그인 리로드됨 (파일): {name}")
                     return True

@@ -8,6 +8,18 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS
+from src.schedule_utils import (
+    DEFAULT_SCHEDULE_TYPE,
+    DEFAULT_TRIGGER_TYPE,
+    build_daily_cron,
+    next_run_at,
+    normalize_schedule_type,
+    normalize_trigger_type,
+    schedule_time_label,
+    trigger_summary,
+)
+from src.time_utils import format_local_datetime
+from src.ui_emoji import ENTITY_AI, ENTITY_PLUGIN, ENTITY_WORKSPACE
 
 PERSISTENT_QUEUE_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
 
@@ -87,6 +99,9 @@ class Schedule:
     message: str
     name: str
     schedule_type: str
+    trigger_type: str
+    cron_expr: Optional[str]
+    run_at_local: Optional[str]
     ai_provider: str
     model: str
     workspace_path: Optional[str]
@@ -100,17 +115,56 @@ class Schedule:
 
     @property
     def time_str(self) -> str:
-        """Return formatted time string HH:MM KST."""
-        return f"{self.hour:02d}:{self.minute:02d} KST"
+        """Return the primary schedule time label."""
+        return schedule_time_label(
+            hour=self.hour,
+            minute=self.minute,
+            trigger_type=self.trigger_type,
+            run_at_local=self.run_at_local,
+        )
+
+    @property
+    def type(self) -> str:
+        """Backward-compatible alias for schedule_type."""
+        return self.schedule_type
+
+    @property
+    def trigger_summary(self) -> str:
+        """Return a human-readable trigger summary."""
+        return trigger_summary(
+            self.trigger_type,
+            cron_expr=self.cron_expr,
+            run_at_local=self.run_at_local,
+        )
+
+    @property
+    def next_run_at(self) -> Optional[str]:
+        """Return the next local run time as ISO string."""
+        next_fire = next_run_at(
+            self.trigger_type,
+            cron_expr=self.cron_expr,
+            run_at_local=self.run_at_local,
+        )
+        return next_fire.isoformat() if next_fire else None
+
+    @property
+    def next_run_text(self) -> str:
+        """Return the next local run time label."""
+        next_fire = next_run_at(
+            self.trigger_type,
+            cron_expr=self.cron_expr,
+            run_at_local=self.run_at_local,
+        )
+        return format_local_datetime(next_fire) if next_fire else "No upcoming run"
 
     @property
     def type_emoji(self) -> str:
         """Return emoji representing the schedule type."""
         if self.schedule_type == "workspace":
-            return "📂"
+            return ENTITY_WORKSPACE
         if self.schedule_type == "plugin":
-            return "🔌"
-        return "🤖"
+            return ENTITY_PLUGIN
+        return ENTITY_AI
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +176,9 @@ class Schedule:
             "message": self.message,
             "name": self.name,
             "type": self.schedule_type,
+            "trigger_type": self.trigger_type,
+            "cron_expr": self.cron_expr,
+            "run_at_local": self.run_at_local,
             "ai_provider": self.ai_provider,
             "model": self.model,
             "workspace_path": self.workspace_path,
@@ -749,7 +806,10 @@ class Repository:
         minute: int,
         message: str,
         name: str,
-        schedule_type: str = "claude",
+        schedule_type: str = DEFAULT_SCHEDULE_TYPE,
+        trigger_type: str = DEFAULT_TRIGGER_TYPE,
+        cron_expr: Optional[str] = None,
+        run_at_local: Optional[str] = None,
         ai_provider: str = DEFAULT_PROVIDER,
         model: str = "sonnet",
         workspace_path: Optional[str] = None,
@@ -760,14 +820,21 @@ class Repository:
         schedule_id = uuid4().hex[:8]
         now = self._now()
         self.get_or_create_user(user_id)
+        normalized_type = normalize_schedule_type(schedule_type)
+        normalized_trigger = normalize_trigger_type(trigger_type)
+        next_cron = cron_expr
+        if normalized_trigger == "cron" and not next_cron:
+            next_cron = build_daily_cron(hour, minute)
 
         self._conn.execute(
             """INSERT INTO schedules
-               (id, user_id, chat_id, hour, minute, message, name, schedule_type, ai_provider, model,
-                workspace_path, plugin_name, action_name, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, user_id, chat_id, hour, minute, message, name, schedule_type, trigger_type,
+                cron_expr, run_at_local, ai_provider, model, workspace_path, plugin_name,
+                action_name, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (schedule_id, user_id, chat_id, hour, minute, message, name,
-             schedule_type, ai_provider, model, workspace_path, plugin_name, action_name, now)
+             normalized_type, normalized_trigger, next_cron, run_at_local, ai_provider, model,
+             workspace_path, plugin_name, action_name, now)
         )
         self._conn.commit()
 
@@ -779,7 +846,10 @@ class Repository:
             minute=minute,
             message=message,
             name=name,
-            schedule_type=schedule_type,
+            schedule_type=normalized_type,
+            trigger_type=normalized_trigger,
+            cron_expr=next_cron,
+            run_at_local=run_at_local,
             ai_provider=ai_provider,
             model=model,
             workspace_path=workspace_path,
@@ -812,7 +882,10 @@ class Repository:
             minute=row["minute"],
             message=row["message"],
             name=row["name"],
-            schedule_type=row["schedule_type"],
+            schedule_type=normalize_schedule_type(row["schedule_type"]),
+            trigger_type=normalize_trigger_type(row["trigger_type"] if "trigger_type" in row.keys() else None),
+            cron_expr=row["cron_expr"] if "cron_expr" in row.keys() else build_daily_cron(row["hour"], row["minute"]),
+            run_at_local=row["run_at_local"] if "run_at_local" in row.keys() else None,
             ai_provider=row["ai_provider"],
             model=row["model"],
             workspace_path=row["workspace_path"],
@@ -862,11 +935,39 @@ class Repository:
         )
         self._conn.commit()
 
-    def update_schedule_time(self, schedule_id: str, hour: int, minute: int) -> bool:
-        """Update schedule time."""
+    def update_schedule_time(
+        self,
+        schedule_id: str,
+        hour: int,
+        minute: int,
+        *,
+        cron_expr: Optional[str] = None,
+        run_at_local: Optional[str] = None,
+    ) -> bool:
+        """Update schedule time-related fields."""
         cursor = self._conn.execute(
-            "UPDATE schedules SET hour = ?, minute = ? WHERE id = ?",
-            (hour, minute, schedule_id)
+            "UPDATE schedules SET hour = ?, minute = ?, cron_expr = COALESCE(?, cron_expr), run_at_local = COALESCE(?, run_at_local) WHERE id = ?",
+            (hour, minute, cron_expr, run_at_local, schedule_id)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def update_schedule_trigger(
+        self,
+        schedule_id: str,
+        *,
+        trigger_type: str,
+        cron_expr: Optional[str],
+        run_at_local: Optional[str],
+        hour: int,
+        minute: int,
+    ) -> bool:
+        """Update one schedule trigger definition."""
+        cursor = self._conn.execute(
+            """UPDATE schedules
+               SET trigger_type = ?, cron_expr = ?, run_at_local = ?, hour = ?, minute = ?
+               WHERE id = ?""",
+            (normalize_trigger_type(trigger_type), cron_expr, run_at_local, hour, minute, schedule_id),
         )
         self._conn.commit()
         return cursor.rowcount > 0
@@ -874,7 +975,7 @@ class Repository:
     def list_schedules_by_user(self, user_id: str) -> list[Schedule]:
         """List schedules for user."""
         cursor = self._conn.execute(
-            "SELECT * FROM schedules WHERE user_id = ? ORDER BY hour, minute",
+            "SELECT * FROM schedules WHERE user_id = ? ORDER BY created_at, id",
             (user_id,)
         )
         return [self._row_to_schedule(row) for row in cursor.fetchall()]
@@ -882,14 +983,14 @@ class Repository:
     def list_all_schedules(self) -> list[Schedule]:
         """List all schedules."""
         cursor = self._conn.execute(
-            "SELECT * FROM schedules ORDER BY hour, minute"
+            "SELECT * FROM schedules ORDER BY created_at, id"
         )
         return [self._row_to_schedule(row) for row in cursor.fetchall()]
 
     def list_enabled_schedules(self) -> list[Schedule]:
         """List all enabled schedules."""
         cursor = self._conn.execute(
-            "SELECT * FROM schedules WHERE enabled = 1 ORDER BY hour, minute"
+            "SELECT * FROM schedules WHERE enabled = 1 ORDER BY created_at, id"
         )
         return [self._row_to_schedule(row) for row in cursor.fetchall()]
 

@@ -7,8 +7,8 @@ from src.ai.catalog import (
     get_provider_profiles,
 )
 
-# 스케줄 가능 시간대 (06:00 ~ 22:00)
-AVAILABLE_HOURS = list(range(6, 23))
+# 스케줄 가능 시간대 (00:00 ~ 23:00)
+AVAILABLE_HOURS = list(range(24))
 
 SUPPORTED_MODELS = [profile.key for profile in get_provider_profiles(DEFAULT_PROVIDER)]
 DEFAULT_MODEL = get_default_model(DEFAULT_PROVIDER)

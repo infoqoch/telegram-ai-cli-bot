@@ -44,16 +44,28 @@ class TestMemoPlugin:
         assert reply or context.bot.send_message.called
 
     @pytest.mark.asyncio
-    async def test_memo_command_shows_usage(self, handlers):
-        """메모 명령어 사용법 표시."""
+    async def test_memo_command_redirects_to_help_topic(self, handlers):
+        """`/memo`는 canonical help topic으로 안내한다."""
         update, context = create_message_update("/memo")
         update.message.text = "/memo"
 
-        # plugin_help_command 또는 직접 처리
         await handlers.plugin_help_command(update, context)
 
         reply = await get_reply_text(update)
-        assert reply
+        assert "/help_memo" in reply
+        assert "/plugins" in reply
+
+    @pytest.mark.asyncio
+    async def test_help_memo_command_shows_usage(self, handlers):
+        """`/help_memo`는 메모 플러그인 도움말을 보여준다."""
+        update, context = create_message_update("/help_memo")
+        update.message.text = "/help_memo"
+
+        await handlers.help_topic_command(update, context)
+
+        reply = await get_reply_text(update)
+        assert "Memo" in reply or "메모" in reply
+        assert "/memo" in reply
 
 
 class TestTodoPlugin:

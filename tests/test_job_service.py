@@ -68,6 +68,12 @@ async def test_run_job_completes_message_and_releases_lock(repo, session_service
     assert saved["response"] == "응답"
     assert repo.get_session_lock("sess1") is None
     assert fake_bot.send_message.called
+    sent_call = fake_bot.send_message.await_args_list[-1]
+    markup = sent_call.kwargs["reply_markup"]
+    callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    assert callbacks == ["resp:switch:sess1"]
+    assert "/s_sess1" not in sent_call.kwargs["text"]
+    assert "/h_sess1" not in sent_call.kwargs["text"]
 
 
 @pytest.mark.asyncio

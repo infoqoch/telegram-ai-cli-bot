@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, infer_provider_from_model
+from src.schedule_utils import build_daily_cron
 
 _connection: Optional[sqlite3.Connection] = None
 _lock = threading.Lock()
@@ -96,6 +97,9 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
     if _table_exists(conn, "schedules"):
         _ensure_column(conn, "schedules", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+        _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
+        _ensure_column(conn, "schedules", "cron_expr", "TEXT")
+        _ensure_column(conn, "schedules", "run_at_local", "TEXT")
 
 
 def _migrate_schema(conn: sqlite3.Connection) -> None:
@@ -104,6 +108,9 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
     _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
     _ensure_column(conn, "schedules", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+    _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
+    _ensure_column(conn, "schedules", "cron_expr", "TEXT")
+    _ensure_column(conn, "schedules", "run_at_local", "TEXT")
 
     # Workspace uniqueness must be provider-aware.
     conn.execute("DROP INDEX IF EXISTS idx_sessions_workspace_unique")
@@ -164,6 +171,21 @@ def _backfill_session_provider_data(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE schedules SET ai_provider = ? WHERE id = ?",
             (provider, schedule_id),
+        )
+
+    conn.execute(
+        "UPDATE schedules SET schedule_type = 'chat' WHERE schedule_type IS NULL OR schedule_type = '' OR schedule_type = 'claude'"
+    )
+
+    schedule_rows = conn.execute(
+        "SELECT id, hour, minute, trigger_type, cron_expr FROM schedules"
+    ).fetchall()
+    for schedule_id, hour, minute, trigger_type, cron_expr in schedule_rows:
+        normalized_trigger = "once" if trigger_type == "once" else "cron"
+        next_cron = cron_expr or build_daily_cron(hour, minute)
+        conn.execute(
+            "UPDATE schedules SET trigger_type = ?, cron_expr = ? WHERE id = ?",
+            (normalized_trigger, next_cron if normalized_trigger == "cron" else cron_expr, schedule_id),
         )
 
     conn.execute(

@@ -31,6 +31,13 @@ def mock_claude_client():
     """모의 Claude 클라이언트."""
     client = MagicMock()
     client.chat = AsyncMock(return_value=("응답 텍스트", None, None))
+    client.get_usage_snapshot = AsyncMock(return_value={
+        "subscription_type": "max",
+        "five_hour_percent": "2",
+        "five_hour_reset": "3h58m",
+        "weekly_percent": "56",
+        "weekly_reset": "3d21h",
+    })
     return client
 
 
@@ -245,6 +252,68 @@ class TestBotHandlers:
         update.callback_query.answer.assert_awaited_once_with(
             "🔒 Authentication required.\n/auth <key>",
             show_alert=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_callback_query_allows_menu_help_without_auth(self, handlers, mock_auth_manager):
+        """`menu:help`는 인증 전에도 열 수 있다."""
+        mock_auth_manager.is_authenticated.return_value = False
+
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "menu:help"
+        update.callback_query.message = MagicMock()
+        update.callback_query.message.chat_id = 12345
+        update.callback_query.answer = AsyncMock()
+        context = MagicMock()
+        handlers._handle_menu_callback = AsyncMock()
+
+        await handlers.callback_query_handler(update, context)
+
+        handlers._handle_menu_callback.assert_awaited_once_with(
+            update.callback_query,
+            12345,
+            "menu:help",
+        )
+
+    @pytest.mark.asyncio
+    async def test_callback_query_routes_response_shortcuts(self, handlers):
+        """AI 응답 shortcut 콜백은 별도 라우트로 분기한다."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "resp:list"
+        update.callback_query.message = MagicMock()
+        update.callback_query.message.chat_id = 12345
+        update.callback_query.answer = AsyncMock()
+        context = MagicMock()
+        handlers._handle_response_session_callback = AsyncMock()
+
+        await handlers.callback_query_handler(update, context)
+
+        handlers._handle_response_session_callback.assert_awaited_once_with(
+            update.callback_query,
+            12345,
+            "resp:list",
+        )
+
+    @pytest.mark.asyncio
+    async def test_callback_query_routes_menu_callbacks(self, handlers):
+        """`menu:*` callback은 launcher 전용 라우트로 분기한다."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "menu:open"
+        update.callback_query.message = MagicMock()
+        update.callback_query.message.chat_id = 12345
+        update.callback_query.answer = AsyncMock()
+        context = MagicMock()
+        handlers._handle_menu_callback = AsyncMock()
+
+        await handlers.callback_query_handler(update, context)
+
+        handlers._handle_menu_callback.assert_awaited_once_with(
+            update.callback_query,
+            12345,
+            "menu:open",
         )
 
     @pytest.mark.asyncio

@@ -177,6 +177,13 @@ class MockClaude:
 
         client.chat = AsyncMock(return_value=response)
         client.create_session = AsyncMock(return_value="new-session-id-12345678")
+        client.get_usage_snapshot = AsyncMock(return_value={
+            "subscription_type": "max",
+            "five_hour_percent": "2",
+            "five_hour_reset": "3h58m",
+            "weekly_percent": "56",
+            "weekly_reset": "3d21h",
+        })
 
         # resume_session also returns ChatResponse
         resume_response = ChatResponse(text=default_response, error=None, session_id=None)

@@ -2,6 +2,16 @@
 
 from dataclasses import dataclass
 
+from src.ui_emoji import (
+    MODEL_BADGE_LIGHT,
+    MODEL_BADGE_MID,
+    MODEL_BADGE_TOP,
+    PROVIDER_BUTTON_CLAUDE,
+    PROVIDER_BUTTON_CODEX,
+    PROVIDER_ICON_CLAUDE,
+    PROVIDER_ICON_CODEX,
+)
+
 
 SUPPORTED_PROVIDERS = ["claude", "codex"]
 DEFAULT_PROVIDER = "claude"
@@ -27,9 +37,15 @@ PROVIDER_LABELS = {
 }
 
 
+PROVIDER_ICONS = {
+    "claude": PROVIDER_ICON_CLAUDE,
+    "codex": PROVIDER_ICON_CODEX,
+}
+
+
 PROVIDER_BUTTONS = {
-    "claude": "Claude",
-    "codex": "Codex",
+    "claude": PROVIDER_BUTTON_CLAUDE,
+    "codex": PROVIDER_BUTTON_CODEX,
 }
 
 
@@ -41,7 +57,7 @@ MODEL_PROFILES = {
             label="Opus",
             short_label="Opus",
             button_label="Opus",
-            badge="🧠",
+            badge=MODEL_BADGE_TOP,
             provider_model="opus",
         ),
         ModelProfile(
@@ -50,7 +66,7 @@ MODEL_PROFILES = {
             label="Sonnet",
             short_label="Sonnet",
             button_label="Sonnet",
-            badge="⚡",
+            badge=MODEL_BADGE_MID,
             provider_model="sonnet",
         ),
         ModelProfile(
@@ -59,30 +75,30 @@ MODEL_PROFILES = {
             label="Haiku",
             short_label="Haiku",
             button_label="Haiku",
-            badge="🚀",
+            badge=MODEL_BADGE_LIGHT,
             provider_model="haiku",
         ),
     ],
     "codex": [
-        ModelProfile(
-            key="gpt54_high",
-            provider="codex",
-            label="GPT-5.4 High",
-            short_label="5.4 High",
-            button_label="5.4 High",
-            badge="🧩",
-            provider_model="gpt-5.4",
-            reasoning_effort="high",
-        ),
         ModelProfile(
             key="gpt54_xhigh",
             provider="codex",
             label="GPT-5.4 XHigh",
             short_label="5.4 XHigh",
             button_label="5.4 XHigh",
-            badge="🧩",
+            badge=MODEL_BADGE_TOP,
             provider_model="gpt-5.4",
             reasoning_effort="xhigh",
+        ),
+        ModelProfile(
+            key="gpt54_high",
+            provider="codex",
+            label="GPT-5.4 High",
+            short_label="5.4 High",
+            button_label="5.4 High",
+            badge=MODEL_BADGE_MID,
+            provider_model="gpt-5.4",
+            reasoning_effort="high",
         ),
         ModelProfile(
             key="gpt53_codex_medium",
@@ -90,7 +106,7 @@ MODEL_PROFILES = {
             label="GPT-5.3 Codex Medium",
             short_label="5.3 Codex",
             button_label="5.3 Codex",
-            badge="🧩",
+            badge=MODEL_BADGE_LIGHT,
             provider_model="gpt-5.3-codex",
             reasoning_effort="medium",
         ),
@@ -123,6 +139,13 @@ def get_provider_button(provider: str) -> str:
     if provider not in SUPPORTED_PROVIDERS:
         provider = DEFAULT_PROVIDER
     return PROVIDER_BUTTONS.get(provider, provider.title())
+
+
+def get_provider_icon(provider: str) -> str:
+    """Return provider icon used in compact UI."""
+    if provider not in SUPPORTED_PROVIDERS:
+        provider = DEFAULT_PROVIDER
+    return PROVIDER_ICONS.get(provider, PROVIDER_ICONS[DEFAULT_PROVIDER])
 
 
 def get_provider_profiles(provider: str) -> list[ModelProfile]:

@@ -258,8 +258,8 @@ class TestPluginScheduleCallbackFlow:
         assert any("sched:minute:" in c for c in callbacks)
 
     @pytest.mark.asyncio
-    async def test_plugin_minute_registers_directly(self, handlers):
-        """sched:minute:30 (plugin) → 모델/메시지 스킵, 바로 등록."""
+    async def test_plugin_minute_shows_trigger_then_registers(self, handlers):
+        """plugin은 minute 뒤 trigger 선택 후 바로 등록."""
         # Set up state through full flow
         query = make_query()
         await handlers._handle_scheduler_callback(query, 12345, "sched:add:plugin")
@@ -278,11 +278,17 @@ class TestPluginScheduleCallbackFlow:
         mock_schedule.action_name = "yesterday_report"
         handlers._schedule_manager.add.return_value = mock_schedule
 
-        # Select minute → should register directly
+        # Select minute → trigger selection
         query5 = make_query()
         await handlers._handle_scheduler_callback(query5, 12345, "sched:minute:30")
 
         text = get_text(query5)
+        assert "Choose schedule mode" in text
+
+        query6 = make_query()
+        await handlers._handle_scheduler_callback(query6, 12345, "sched:trigger:cron")
+
+        text = get_text(query6)
         assert "Registered" in text
         assert "Plugin" in text
         handlers._schedule_manager.add.assert_called_once()
@@ -290,6 +296,7 @@ class TestPluginScheduleCallbackFlow:
         # Verify add was called with plugin fields
         call_kwargs = handlers._schedule_manager.add.call_args[1]
         assert call_kwargs["schedule_type"] == "plugin"
+        assert call_kwargs["trigger_type"] == "cron"
         assert call_kwargs["plugin_name"] == "todo"
         assert call_kwargs["action_name"] == "yesterday_report"
 
@@ -306,19 +313,24 @@ class TestPluginScheduleCallbackFlow:
         assert "No schedulable plugins" in text
 
     @pytest.mark.asyncio
-    async def test_claude_schedule_still_shows_model(self, handlers):
-        """claude 타입은 여전히 모델 선택 표시."""
+    async def test_chat_schedule_shows_trigger_then_model(self, handlers):
+        """chat 타입은 minute 뒤 trigger 선택, 그 다음 모델 선택."""
         user_id = str(12345)
         handlers._sched_pending[user_id] = {
-            "type": "claude",
+            "type": "chat",
             "hour": 9,
         }
 
         query = make_query()
         await handlers._handle_scheduler_callback(query, 12345, "sched:minute:0")
 
-        # Should show model selection, not register directly
         callbacks = get_callback_data(query)
+        assert any("sched:trigger:" in c for c in callbacks)
+
+        query2 = make_query()
+        await handlers._handle_scheduler_callback(query2, 12345, "sched:trigger:cron")
+
+        callbacks = get_callback_data(query2)
         assert any("sched:model:" in c for c in callbacks)
 
 
@@ -461,10 +473,12 @@ class TestPluginScheduleFullFlow:
         callbacks = get_callback_data(q4)
         assert any("sched:minute:" in c for c in callbacks)
 
-        # Step 5: select minute → register
+        # Step 5: select minute → trigger selection
         mock_sched = MagicMock()
         mock_sched.name = "todo:어제 할일 리포트"
         mock_sched.time_str = "10:00"
+        mock_sched.trigger_summary = "At 10:00"
+        mock_sched.next_run_text = "2026-03-09 10:00 KST"
         mock_sched.plugin_name = "todo"
         mock_sched.action_name = "yesterday_report"
         h._schedule_manager.add.return_value = mock_sched
@@ -472,12 +486,61 @@ class TestPluginScheduleFullFlow:
         q5 = make_query()
         await h._handle_scheduler_callback(q5, 12345, "sched:minute:0")
 
-        text = get_text(q5)
+        callbacks = get_callback_data(q5)
+        assert any("sched:trigger:" in c for c in callbacks)
+
+        q6 = make_query()
+        await h._handle_scheduler_callback(q6, 12345, "sched:trigger:cron")
+
+        text = get_text(q6)
         assert "Registered" in text
         h._schedule_manager.add.assert_called_once()
 
         # No ForceReply (model/message skipped)
-        assert not q5.message.reply_text.called
+        assert not q6.message.reply_text.called
+
+    @pytest.mark.asyncio
+    async def test_full_flow_plugin_one_time_schedule(self):
+        """플러그인 1회성 스케줄 해피 케이스."""
+        h = make_handlers()
+        h._schedule_manager = MagicMock()
+
+        mock_plugin = MagicMock()
+        mock_plugin.name = "todo"
+        mock_plugin.get_scheduled_actions.return_value = [
+            ScheduledAction(name="daily_wrap", description="Daily wrap-up"),
+        ]
+
+        mock_loader = MagicMock()
+        mock_loader.plugins = [mock_plugin]
+        h.plugins = mock_loader
+
+        mock_sched = MagicMock()
+        mock_sched.name = "todo:Daily wrap-up"
+        mock_sched.time_str = "2026-03-08 22:20 KST"
+        mock_sched.trigger_summary = "Once at 2026-03-08 22:20 KST"
+        mock_sched.next_run_text = "2026-03-08 22:20 KST"
+        mock_sched.plugin_name = "todo"
+        mock_sched.action_name = "daily_wrap"
+        h._schedule_manager.add.return_value = mock_sched
+
+        q1 = make_query()
+        await h._handle_scheduler_callback(q1, 12345, "sched:add:plugin")
+        q2 = make_query()
+        await h._handle_scheduler_callback(q2, 12345, "sched:plugin:0")
+        q3 = make_query()
+        await h._handle_scheduler_callback(q3, 12345, "sched:pluginaction:0")
+        q4 = make_query()
+        await h._handle_scheduler_callback(q4, 12345, "sched:time:plugin:_:22")
+        q5 = make_query()
+        await h._handle_scheduler_callback(q5, 12345, "sched:minute:20")
+        q6 = make_query()
+        await h._handle_scheduler_callback(q6, 12345, "sched:trigger:once")
+
+        text = get_text(q6)
+        assert "Registered" in text
+        call_kwargs = h._schedule_manager.add.call_args[1]
+        assert call_kwargs["trigger_type"] == "once"
 
 
 # =============================================================================

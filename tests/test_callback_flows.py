@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 # =============================================================================
@@ -177,8 +178,8 @@ class TestWorkspaceCallbackFlows:
         assert any("sched_minute" in c for c in callbacks)
 
     @pytest.mark.asyncio
-    async def test_ws_sched_minute_shows_models(self, handlers):
-        """ws:sched_minute:{id}:{minute} - 모델 선택 화면."""
+    async def test_ws_sched_minute_shows_trigger_modes(self, handlers):
+        """ws:sched_minute:{id}:{minute} - 스케줄 모드 선택 화면."""
         handlers._ws_pending["12345"] = {"ws_id": "ws001", "hour": 14}
 
         query = make_query()
@@ -188,7 +189,7 @@ class TestWorkspaceCallbackFlows:
         assert "14:30" in text
 
         callbacks = get_callback_data(query)
-        assert any("sched_model" in c for c in callbacks)
+        assert any("sched_trigger" in c for c in callbacks)
 
     @pytest.mark.asyncio
     async def test_ws_sched_model_shows_force_reply(self, handlers):
@@ -245,7 +246,7 @@ class TestWorkspaceCallbackFlows:
 
     @pytest.mark.asyncio
     async def test_ws_full_schedule_flow(self, handlers):
-        """워크스페이스 스케줄 전체 플로우: schedule → time → minute → model."""
+        """워크스페이스 스케줄 전체 플로우: schedule → time → minute → trigger → model."""
         # Step 1: schedule
         q1 = make_query()
         await handlers._handle_workspace_callback(q1, 12345, "ws:schedule:ws001")
@@ -261,13 +262,19 @@ class TestWorkspaceCallbackFlows:
         q3 = make_query()
         await handlers._handle_workspace_callback(q3, 12345, "ws:sched_minute:ws001:30")
         assert "09:30" in get_text(q3)
+        assert any("sched_trigger" in c for c in get_callback_data(q3))
 
-        # Step 4: model
-        handlers._ws_pending["12345"]["minute"] = 30
+        # Step 4: trigger
         q4 = make_query()
-        await handlers._handle_workspace_callback(q4, 12345, "ws:sched_model:ws001:haiku")
-        assert "09:30" in get_text(q4)
-        assert "haiku" in get_text(q4)
+        await handlers._handle_workspace_callback(q4, 12345, "ws:sched_trigger:ws001:cron")
+        assert any("sched_model" in c for c in get_callback_data(q4))
+
+        # Step 5: model
+        handlers._ws_pending["12345"]["minute"] = 30
+        q5 = make_query()
+        await handlers._handle_workspace_callback(q5, 12345, "ws:sched_model:ws001:haiku")
+        assert "09:30" in get_text(q5)
+        assert "haiku" in get_text(q5)
 
 
 # =============================================================================
@@ -445,10 +452,27 @@ class TestSessionCallbackFlows:
     @pytest.fixture
     def handlers(self):
         h = make_handlers()
-        h.sessions.list_sessions.return_value = [
-            {"session_id": "abc12345", "full_session_id": "abc12345-full",
-             "name": "테스트", "model": "sonnet", "created_at": "2026-01-01",
-             "message_count": 5},
+        h.sessions.list_sessions_for_all_providers.return_value = [
+            {
+                "session_id": "abc12345",
+                "full_session_id": "abc12345-full",
+                "name": "테스트",
+                "model": "sonnet",
+                "ai_provider": "claude",
+                "created_at": "2026-01-01",
+                "history_count": 5,
+                "is_current": True,
+            },
+            {
+                "session_id": "def67890",
+                "full_session_id": "def67890-full",
+                "name": "코덱스",
+                "model": "gpt54_xhigh",
+                "ai_provider": "codex",
+                "created_at": "2026-01-02",
+                "history_count": 3,
+                "is_current": False,
+            },
         ]
         h.sessions.get_current_session_id.return_value = "abc12345-full"
         h.sessions.get_session_model.return_value = "sonnet"
@@ -470,7 +494,31 @@ class TestSessionCallbackFlows:
 
         assert query.edit_message_text.called
         text = get_text(query)
-        assert text  # 응답이 있어야 함
+        buttons = get_buttons(query)
+        assert "Current AI: <b>📚 Claude</b>" in text
+        assert "📚 🚀 <b>테스트</b> 📍" in text
+        assert "🤖 🧠 <b>코덱스</b>" in text
+        assert text.count("📍") == 1
+        assert "🆕 New Session" in buttons
+        assert "📚 🧠 Opus" not in buttons
+        assert "🤖 🧠 5.4 XHigh" not in buttons
+
+    @pytest.mark.asyncio
+    async def test_sess_new_opens_model_picker(self, handlers):
+        """sess:new - 새 세션 모델 선택 화면."""
+        query = make_query()
+        await handlers._handle_session_callback(query, 12345, "sess:new")
+
+        text = get_text(query)
+        buttons = get_buttons(query)
+        assert "New Session" in text
+        assert "Current AI: <b>📚 Claude</b>" in text
+        assert "📚 🧠 Opus" in buttons
+        assert "📚 🚀 Sonnet" in buttons
+        assert "📚 ⚡ Haiku" in buttons
+        assert "🤖 🧠 5.4 XHigh" in buttons
+        assert "🤖 🚀 5.4 High" in buttons
+        assert "🤖 ⚡ 5.3 Codex" in buttons
 
     @pytest.mark.asyncio
     async def test_sess_new_force_reply(self, handlers):
@@ -480,6 +528,17 @@ class TestSessionCallbackFlows:
 
         # ForceReply로 이름 입력 요청
         query.message.reply_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sess_new_codex_selection_switches_provider(self, handlers):
+        """Codex 모델 선택 시 current AI도 Codex로 동기화된다."""
+        query = make_query()
+        await handlers._handle_new_session_callback(query, 12345, "gpt54_high")
+
+        handlers.sessions.select_ai_provider.assert_called_once_with("12345", "codex")
+        text = get_text(query)
+        assert "🤖 Codex" in text
+        assert "5.4 High" in text
 
     @pytest.mark.asyncio
     async def test_sess_switch(self, handlers):
@@ -496,6 +555,172 @@ class TestSessionCallbackFlows:
         await handlers._handle_session_callback(query, 12345, "sess:history:abc12345")
 
         assert query.edit_message_text.called
+
+    @pytest.mark.asyncio
+    async def test_resp_switch_replies_without_editing_original(self, handlers):
+        """AI 응답 shortcut의 switch는 follow-up 메시지로 열린다."""
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:switch:abc12345")
+
+        query.message.reply_text.assert_called_once()
+        query.edit_message_text.assert_not_called()
+        reply_text = query.message.reply_text.call_args.kwargs["text"]
+        assert "Session switched" in reply_text
+
+    @pytest.mark.asyncio
+    async def test_resp_list_replies_without_editing_original(self, handlers):
+        """AI 응답 shortcut의 list는 원본 응답을 유지한다."""
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:list")
+
+        query.message.reply_text.assert_called_once()
+        query.edit_message_text.assert_not_called()
+        reply_text = query.message.reply_text.call_args.kwargs["text"]
+        assert "Session List" in reply_text
+
+    @pytest.mark.asyncio
+    async def test_menu_claude_usage_renders_usage_snapshot(self, handlers):
+        """`menu:claude_usage` should render the Claude usage card."""
+        query = make_query()
+        handlers.claude.get_usage_snapshot = AsyncMock(return_value={
+            "subscription_type": "max",
+            "five_hour_percent": "2",
+            "five_hour_reset": "3h58m",
+            "weekly_percent": "56",
+            "weekly_reset": "3d21h",
+        })
+
+        await handlers._handle_menu_callback(query, 12345, "menu:claude_usage")
+
+        text = get_text(query)
+        buttons = get_buttons(query)
+        assert "Claude Usage" in text
+        assert "5h:" in text
+        assert "wk:" in text
+        assert "🔄 Refresh" in buttons
+
+    @pytest.mark.asyncio
+    async def test_menu_claude_usage_renders_partial_status(self, handlers):
+        """Usage details may be unavailable while auth plan still renders."""
+        query = make_query()
+        handlers.claude.get_usage_snapshot = AsyncMock(return_value={
+            "subscription_type": "max",
+            "checked_at": "2026-03-09 22:38:50",
+            "unavailable_reason": "Usage endpoint temporarily unavailable",
+        })
+
+        await handlers._handle_menu_callback(query, 12345, "menu:claude_usage")
+
+        text = get_text(query)
+        assert "Claude Usage" in text
+        assert "Plan: <b>max</b>" in text
+        assert "5h / wk: unavailable right now" in text
+        assert "Reason: Usage endpoint temporarily unavailable" in text
+
+    @pytest.mark.asyncio
+    async def test_menu_sessions_adds_back_to_menu_actions(self, handlers):
+        """`menu:sessions` should keep the launcher context in its utility buttons."""
+        query = make_query()
+
+        await handlers._handle_menu_callback(query, 12345, "menu:sessions")
+
+        callbacks = get_callback_data(query)
+        assert "menu:new" in callbacks
+        assert "menu:sessions" in callbacks
+        assert "menu:tasks" in callbacks
+        assert "menu:ai" in callbacks
+        assert "menu:open" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_menu_ai_selection_keeps_back_button(self, handlers):
+        """AI selection opened from the launcher should return to menu."""
+        query = make_query()
+
+        await handlers._handle_menu_callback(query, 12345, "menu:ai")
+
+        callbacks = get_callback_data(query)
+        assert "ai:select:claude:menu" in callbacks
+        assert "ai:select:codex:menu" in callbacks
+        assert "menu:open" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_menu_plugins_renders_dynamic_buttons(self, handlers):
+        """`menu:plugins` should render compact text plus dynamic plugin buttons."""
+        memo = MagicMock()
+        memo.name = "memo"
+        memo.description = "Save memos"
+        todo = MagicMock()
+        todo.name = "todo"
+        todo.description = "Todo management"
+        hourly_ping = MagicMock()
+        hourly_ping.name = "hourly_ping"
+        hourly_ping.description = "Hourly scheduler health-check"
+
+        handlers.plugins = MagicMock()
+        handlers.plugins.plugins = [memo, todo, hourly_ping]
+        memo._source_group = "builtin"
+        todo._source_group = "builtin"
+        hourly_ping._source_group = "custom"
+
+        query = make_query()
+        await handlers._handle_menu_callback(query, 12345, "menu:plugins")
+
+        text = get_text(query)
+        callbacks = get_callback_data(query)
+        assert "<b>Plugins</b>" in text
+        assert "<b>Builtin</b>:" in text
+        assert "plug:open:memo:menu" in callbacks
+        assert "plug:open:hourly_ping:menu" in callbacks
+        assert "menu:open" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_plugin_hub_open_interactive_plugin_keeps_back(self, handlers):
+        """Launcher-opened plugin screens should keep a return button to the plugin hub."""
+        plugin = MagicMock()
+        plugin.name = "memo"
+        plugin.usage = "memo usage"
+        plugin.handle = AsyncMock(return_value=MagicMock(
+            handled=True,
+            response="📝 <b>Memo</b>",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("List", callback_data="memo:list"),
+            ]]),
+        ))
+
+        handlers.plugins = MagicMock()
+        handlers.plugins.get_plugin_by_name.return_value = plugin
+
+        query = make_query()
+        await handlers._handle_plugin_hub_callback(query, 12345, "plug:open:memo:menu")
+
+        text = get_text(query)
+        callbacks = get_callback_data(query)
+        assert "Memo" in text
+        assert "memo:list" in callbacks
+        assert "plug:list:menu" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_plugin_callback_preserves_launcher_back(self, handlers):
+        """Plugin-internal callbacks should preserve the plugin-hub back row."""
+        plugin = MagicMock()
+        plugin.handle_callback_async = AsyncMock(return_value={
+            "text": "updated",
+            "reply_markup": InlineKeyboardMarkup([[
+                InlineKeyboardButton("Refresh", callback_data="memo:list"),
+            ]]),
+            "edit": True,
+        })
+
+        query = make_query()
+        query.message.reply_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Back", callback_data="plug:list:menu"),
+        ]])
+
+        await handlers._handle_plugin_callback(query, 12345, "memo:list", plugin)
+
+        callbacks = get_callback_data(query)
+        assert "memo:list" in callbacks
+        assert "plug:list:menu" in callbacks
 
     @pytest.mark.asyncio
     async def test_sess_delete_confirm(self, handlers):
@@ -578,7 +803,7 @@ class TestTasksCallbackFlows:
 
         assert "<b>Processing</b> (1)" in text
         assert "2h 39m 55s elapsed" in text
-        assert "<code>코닥스</code>" in text
+        assert "<b>코닥스</b>" in text
         assert "hey ..." in text
         assert "[Claude" not in text
         assert "Detached workers" not in text
@@ -600,7 +825,7 @@ class TestTasksCallbackFlows:
 
         assert "<b>Queue</b> (1)" in text
         assert "<b>No active tasks</b>" not in text
-        assert "<code>review&lt;bot&gt;</code>" in text
+        assert "<b>review&lt;bot&gt;</b>" in text
         assert "first line &lt;script&gt;alert(1)&lt;/s..." in text
         assert "<script>" not in text
 
@@ -645,6 +870,8 @@ class TestSchedulerForceReplyFlows:
         assert call_kwargs["minute"] == 25
         assert call_kwargs["model"] == "sonnet"
         assert call_kwargs["message"] == "매일 할 일 정리해줘"
+        reply_text = update.message.reply_text.call_args[0][0]
+        assert "Model:" not in reply_text
 
     @pytest.mark.asyncio
     async def test_workspace_schedule_message(self, handlers):
@@ -665,3 +892,24 @@ class TestSchedulerForceReplyFlows:
         call_kwargs = handlers._schedule_manager.add.call_args[1]
         assert call_kwargs["schedule_type"] == "workspace"
         assert call_kwargs["workspace_path"] == "/Users/test/project"
+        reply_text = update.message.reply_text.call_args[0][0]
+        assert "Model:" not in reply_text
+
+    @pytest.mark.asyncio
+    async def test_one_time_schedule_message_sets_once_trigger(self, handlers):
+        """1회성 스케줄 메시지 입력."""
+        handlers._sched_pending["12345"] = {
+            "type": "chat",
+            "hour": 22,
+            "minute": 20,
+            "trigger_type": "once",
+        }
+
+        update = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        await handlers._handle_schedule_force_reply(update, 12345, "손흥민 다음 경기")
+
+        call_kwargs = handlers._schedule_manager.add.call_args[1]
+        assert call_kwargs["schedule_type"] == "chat"
+        assert call_kwargs["trigger_type"] == "once"

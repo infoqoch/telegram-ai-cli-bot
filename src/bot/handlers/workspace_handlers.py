@@ -6,9 +6,22 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import ContextTypes
 
-from src.ai import get_profile_label, get_provider_label
+from src.ai import get_profile_label
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
+from src.schedule_utils import next_occurrence, normalize_trigger_type
+from src.ui_emoji import (
+    BUTTON_ADD_NEW,
+    BUTTON_BACK,
+    BUTTON_CANCEL,
+    BUTTON_DELETE,
+    BUTTON_MANUAL_INPUT,
+    BUTTON_REFRESH,
+    BUTTON_SCHEDULES,
+    BUTTON_WORKSPACES,
+    BUTTON_WORKSPACE_SESSION,
+    BUTTON_WORKSPACE_SCHEDULE,
+)
 from ..constants import get_model_emoji
 from ..formatters import escape_html
 from ..middleware import authorized_only, authenticated_only
@@ -55,12 +68,12 @@ class WorkspaceHandlers(BaseHandler):
                         f"{ws.name[:15]}",
                         callback_data=f"ws:select:{ws.id}"
                     ),
-                    InlineKeyboardButton("Del", callback_data=f"ws:delete:{ws.id}"),
+                    InlineKeyboardButton(BUTTON_DELETE, callback_data=f"ws:delete:{ws.id}"),
                 ])
 
         buttons.append([
-            InlineKeyboardButton("+ Add New", callback_data="ws:add"),
-            InlineKeyboardButton("Refresh", callback_data="ws:refresh"),
+            InlineKeyboardButton(BUTTON_ADD_NEW, callback_data="ws:add"),
+            InlineKeyboardButton(BUTTON_REFRESH, callback_data="ws:refresh"),
         ])
 
         return buttons
@@ -96,10 +109,10 @@ class WorkspaceHandlers(BaseHandler):
 
             buttons = [
                 [
-                    InlineKeyboardButton("Session", callback_data=f"ws:session:{ws_id}"),
-                    InlineKeyboardButton("Schedule", callback_data=f"ws:schedule:{ws_id}"),
+                    InlineKeyboardButton(BUTTON_WORKSPACE_SESSION, callback_data=f"ws:session:{ws_id}"),
+                    InlineKeyboardButton(BUTTON_WORKSPACE_SCHEDULE, callback_data=f"ws:schedule:{ws_id}"),
                 ],
-                [InlineKeyboardButton("Back", callback_data="ws:refresh")],
+                [InlineKeyboardButton(BUTTON_BACK, callback_data="ws:refresh")],
             ]
 
             await query.edit_message_text(
@@ -125,13 +138,13 @@ class WorkspaceHandlers(BaseHandler):
 
             buttons = [
                 self._build_model_buttons(provider, f"ws:sess_model:{ws_id}:"),
-                [InlineKeyboardButton("Back", callback_data=f"ws:select:{ws_id}")],
+                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")],
             ]
 
             await query.edit_message_text(
                 f"<b>{escape_html(ws.name)}</b> - Start Session\n\n"
                 f"<code>{escape_html(ws.short_path)}</code>\n\n"
-                f"Current AI: <b>{get_provider_label(provider)}</b>\n"
+                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -178,7 +191,7 @@ class WorkspaceHandlers(BaseHandler):
                 f"<b>Workspace Session Created!</b>\n\n"
                 f"<b>{escape_html(ws.name)}</b>\n"
                 f"<code>{escape_html(ws.short_path)}</code>\n"
-                f"AI: <b>{get_provider_label(provider)}</b>\n"
+                f"AI: <b>{self._format_provider_display(provider)}</b>\n"
                 f"{model_emoji} Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n"
                 f"Session: <code>{session_id[:8]}</code>\n\n"
                 f"Messages will now use this workspace context.",
@@ -187,7 +200,6 @@ class WorkspaceHandlers(BaseHandler):
             await query.answer("Session created")
             return
 
-        # Schedule registration - time selection
         if action.startswith("schedule:"):
             ws_id = action[9:]
             ws = self._workspace_registry.get(ws_id)
@@ -198,33 +210,26 @@ class WorkspaceHandlers(BaseHandler):
             buttons = []
             row = []
             for hour in AVAILABLE_HOURS:
-                row.append(InlineKeyboardButton(
-                    f"{hour:02d}:00",
-                    callback_data=f"ws:sched_time:{ws_id}:{hour}"
-                ))
+                row.append(InlineKeyboardButton(f"{hour:02d}:00", callback_data=f"ws:sched_time:{ws_id}:{hour}"))
                 if len(row) == 4:
                     buttons.append(row)
                     row = []
             if row:
                 buttons.append(row)
-            buttons.append([
-                InlineKeyboardButton("Back", callback_data=f"ws:select:{ws_id}")
-            ])
+            buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")])
 
             await query.edit_message_text(
                 f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
                 f"<code>{escape_html(ws.short_path)}</code>\n\n"
-                f"Select time (daily repeat):",
+                f"Select hour:",
                 reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             await query.answer()
             return
 
-        # Schedule time (hour) selected - minute selection
         if action.startswith("sched_time:"):
-            parts = action.split(":")
-            ws_id, hour = parts[1], int(parts[2])
+            _, ws_id, hour_text = action.split(":")
             ws = self._workspace_registry.get(ws_id)
             if not ws:
                 await query.answer("Workspace not found")
@@ -232,73 +237,97 @@ class WorkspaceHandlers(BaseHandler):
 
             self._ws_pending[user_id] = {
                 "ws_id": ws_id,
-                "hour": hour,
+                "hour": int(hour_text),
+                "ai_provider": self._get_selected_ai_provider(user_id),
             }
 
-            # 분 선택 버튼 (00~55, 5분 단위)
             buttons = []
             row = []
             for minute in range(0, 60, 5):
-                row.append(InlineKeyboardButton(
-                    f":{minute:02d}",
-                    callback_data=f"ws:sched_minute:{ws_id}:{minute}"
-                ))
+                row.append(InlineKeyboardButton(f":{minute:02d}", callback_data=f"ws:sched_minute:{ws_id}:{minute}"))
                 if len(row) == 4:
                     buttons.append(row)
                     row = []
             if row:
                 buttons.append(row)
-            buttons.append([
-                InlineKeyboardButton("Back", callback_data=f"ws:schedule:{ws_id}")
-            ])
+            buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")])
 
             await query.edit_message_text(
                 f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Hour: <b>{hour:02d}:00</b>\n\n"
+                f"Hour: <b>{int(hour_text):02d}:00</b>\n\n"
                 f"Select minute:",
                 reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             await query.answer()
             return
 
-        # Schedule minute selected - model selection
         if action.startswith("sched_minute:"):
-            parts = action.split(":")
-            ws_id, minute = parts[1], int(parts[2])
+            _, ws_id, minute_text = action.split(":")
             ws = self._workspace_registry.get(ws_id)
             if not ws:
                 await query.answer("Workspace not found")
                 return
 
             pending = self._ws_pending.get(user_id, {})
-            pending["minute"] = minute
+            pending["minute"] = int(minute_text)
             pending["ai_provider"] = self._get_selected_ai_provider(user_id)
             self._ws_pending[user_id] = pending
 
-            hour = pending.get("hour", 9)
-            provider = pending["ai_provider"]
-
-            buttons = [
-                self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
-                [InlineKeyboardButton("Back", callback_data=f"ws:schedule:{ws_id}")],
-            ]
-
             await query.edit_message_text(
                 f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Time: <b>{hour:02d}:{minute:02d}</b>\n\n"
-                f"Current AI: <b>{get_provider_label(provider)}</b>\n"
-                f"Select model:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
+                f"Time: <b>{pending.get('hour', 0):02d}:{int(minute_text):02d}</b>\n\n"
+                f"Choose schedule mode:",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("Daily", callback_data=f"ws:sched_trigger:{ws_id}:cron"),
+                        InlineKeyboardButton("One-time", callback_data=f"ws:sched_trigger:{ws_id}:once"),
+                    ],
+                    [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")],
+                ]),
+                parse_mode="HTML",
             )
             await query.answer()
             return
 
-        # Schedule model selected - message input
+        if action.startswith("sched_trigger:"):
+            _, ws_id, trigger_type = action.split(":")
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("Workspace not found")
+                return
+
+            pending = self._ws_pending.get(user_id, {})
+            pending["trigger_type"] = normalize_trigger_type(trigger_type)
+            if pending["trigger_type"] == "once":
+                pending["run_at_local"] = next_occurrence(
+                    pending.get("hour", 0),
+                    pending.get("minute", 0),
+                ).isoformat()
+            else:
+                pending["run_at_local"] = None
+            self._ws_pending[user_id] = pending
+
+            provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
+            buttons = [
+                self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
+                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")],
+            ]
+
+            await query.edit_message_text(
+                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
+                f"Schedule: <b>{'One-time' if pending['trigger_type'] == 'once' else 'Daily'}</b>\n"
+                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+                f"Select model:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML",
+            )
+            await query.answer()
+            return
+
         if action.startswith("sched_model:"):
-            parts = action.split(":")
-            ws_id, model = parts[1], parts[2]
+            _, ws_id, model = action.split(":")
             ws = self._workspace_registry.get(ws_id)
             if not ws:
                 await query.answer("Workspace not found")
@@ -308,22 +337,19 @@ class WorkspaceHandlers(BaseHandler):
             pending["model"] = model
             self._ws_pending[user_id] = pending
 
-            hour = pending.get("hour", 9)
-            minute = pending.get("minute", 0)
             provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-
             await query.edit_message_text(
                 f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
-                f"AI: <b>{get_provider_label(provider)}</b>\n"
+                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
+                f"Schedule: <b>{'One-time' if pending.get('trigger_type') == 'once' else 'Daily'}</b>\n"
+                f"AI: <b>{self._format_provider_display(provider)}</b>\n"
                 f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n\n"
                 f"Enter scheduled message below:",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
-
             await query.message.reply_text(
                 "Enter scheduled message:",
-                reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Summarize today's tasks")
+                reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Summarize today's tasks"),
             )
             await query.answer()
             return
@@ -462,8 +488,8 @@ class WorkspaceHandlers(BaseHandler):
                 ])
 
             buttons.append([
-                InlineKeyboardButton("Manual Input", callback_data="ws:manual"),
-                InlineKeyboardButton("Cancel", callback_data="ws:refresh"),
+                InlineKeyboardButton(BUTTON_MANUAL_INPUT, callback_data="ws:manual"),
+                InlineKeyboardButton(BUTTON_CANCEL, callback_data="ws:refresh"),
             ])
 
             rec_text = "\n\n".join([
@@ -583,7 +609,6 @@ class WorkspaceHandlers(BaseHandler):
             )
             return
 
-        # Workspace schedule message input
         if "ws_id" in pending and "model" in pending:
             ws_id = pending.get("ws_id")
             ws = self._workspace_registry.get(ws_id)
@@ -593,7 +618,7 @@ class WorkspaceHandlers(BaseHandler):
                 return
 
             if not self._schedule_manager:
-                await update.message.reply_text("Schedule feature disabled.")
+                await update.message.reply_text("Schedule feature not initialized.")
                 del self._ws_pending[user_id]
                 return
 
@@ -605,34 +630,34 @@ class WorkspaceHandlers(BaseHandler):
                 minute=pending.get("minute", 0),
                 message=message,
                 schedule_type="workspace",
+                trigger_type=pending.get("trigger_type", "cron"),
                 ai_provider=pending.get("ai_provider", self._get_selected_ai_provider(user_id)),
                 model=pending["model"],
                 workspace_path=ws.path,
+                run_at_local=pending.get("run_at_local"),
             )
 
             self._workspace_registry.mark_used(ws_id)
-
             del self._ws_pending[user_id]
-
-            keyboard = [[
-                InlineKeyboardButton("Schedules", callback_data="sched:refresh"),
-                InlineKeyboardButton("Workspaces", callback_data="ws:refresh"),
-            ]]
 
             await update.message.reply_text(
                 f"<b>Workspace Schedule Registered!</b>\n\n"
                 f"<b>{escape_html(ws.name)}</b>\n"
                 f"<code>{escape_html(ws.short_path)}</code>\n"
-                f"AI: <b>{get_provider_label(schedule.ai_provider)}</b>\n"
-                f"Time: <b>{schedule.time_str}</b> (daily)\n"
-                f"Model: <b>{get_profile_label(schedule.ai_provider, pending['model'])}</b> "
-                f"(<code>{pending['model']}</code>)\n"
+                f"AI: <b>{self._format_provider_display(schedule.ai_provider)}</b>\n"
+                f"Time: <b>{escape_html(schedule.time_str)}</b>\n"
+                f"Schedule: <b>{escape_html('Once at ' + schedule.time_str if schedule.trigger_type == 'once' else f'Daily at {pending['hour']:02d}:{pending.get('minute', 0):02d}')}</b>\n"
+                f"Next run: <b>{escape_html(schedule.next_run_text)}</b>\n"
                 f"Message: <i>{escape_html(message[:50])}{'...' if len(message) > 50 else ''}</i>",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="HTML"
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(BUTTON_SCHEDULES, callback_data="sched:refresh"),
+                        InlineKeyboardButton(BUTTON_WORKSPACES, callback_data="ws:refresh"),
+                    ]
+                ]),
+                parse_mode="HTML",
             )
-
-            logger.info(f"Workspace schedule registered: {ws.name} @ {schedule.time_str}")
+            logger.info(f"Workspace schedule registered: {ws.name} ({schedule.trigger_type})")
             return
 
         await update.message.reply_text("Unknown input state. Please try again.")

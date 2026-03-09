@@ -73,7 +73,10 @@ CREATE TABLE IF NOT EXISTS schedules (
     minute INTEGER NOT NULL CHECK (minute >= 0 AND minute <= 59),
     message TEXT NOT NULL,
     name TEXT NOT NULL,
-    schedule_type TEXT NOT NULL DEFAULT 'claude',
+    schedule_type TEXT NOT NULL DEFAULT 'chat',
+    trigger_type TEXT NOT NULL DEFAULT 'cron',
+    cron_expr TEXT,
+    run_at_local TEXT,
     ai_provider TEXT NOT NULL DEFAULT 'claude',
     model TEXT NOT NULL DEFAULT 'sonnet',
     workspace_path TEXT,
@@ -91,6 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_schedules_user_id ON schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_chat_id ON schedules(chat_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
 CREATE INDEX IF NOT EXISTS idx_schedules_ai_provider ON schedules(ai_provider);
+CREATE INDEX IF NOT EXISTS idx_schedules_trigger_type ON schedules(trigger_type);
 
 -- Workspaces table: registered project directories
 CREATE TABLE IF NOT EXISTS workspaces (

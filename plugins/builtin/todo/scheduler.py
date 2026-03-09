@@ -9,12 +9,13 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from src.bot.formatters import escape_html
 from src.logging_config import logger
 from src.scheduler_manager import scheduler_manager
+from src.time_utils import app_today, get_app_timezone
 
 if TYPE_CHECKING:
     from telegram.ext import Application
     from src.repository import Repository
 
-KST = ZoneInfo("Asia/Seoul")
+KST = get_app_timezone()
 
 
 class TodoScheduler:
@@ -51,7 +52,7 @@ class TodoScheduler:
     async def _yesterday_report_callback(self, context) -> None:
         """09:00 - Yesterday's todo report."""
         logger.info("Yesterday todo report starting")
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (app_today() - timedelta(days=1)).isoformat()
 
         for chat_id in self.chat_ids:
             try:
@@ -94,7 +95,7 @@ class TodoScheduler:
     async def _daily_wrap_callback(self, context) -> None:
         """21:00 - Daily wrap-up."""
         logger.info("Daily wrap-up starting")
-        today = date.today().isoformat()
+        today = app_today().isoformat()
 
         for chat_id in self.chat_ids:
             try:

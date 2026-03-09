@@ -349,7 +349,7 @@ class TestSessionCallbackMultiStep:
     def handlers(self):
         """세션 콜백 테스트용 핸들러."""
         h = make_handlers()
-        h.sessions.list_sessions.return_value = [
+        h.sessions.list_sessions_for_all_providers.return_value = [
             {
                 "session_id": "abc12345",
                 "full_session_id": "abc12345-full",
@@ -358,6 +358,8 @@ class TestSessionCallbackMultiStep:
                 "ai_provider": "claude",
                 "created_at": "2026-01-01",
                 "message_count": 5,
+                "history_count": 5,
+                "is_current": True,
             },
         ]
         h.sessions.get_current_session_id.return_value = "abc12345-full"
@@ -491,7 +493,7 @@ class TestSchedulerCallbackMultiStep:
 
     @pytest.mark.asyncio
     async def test_add_claude_schedule_full_flow(self, handlers):
-        """AI 스케줄 추가 전체 플로우: add → hour → minute → model → message."""
+        """AI 스케줄 추가 전체 플로우: add → hour → minute → trigger → model → message."""
         # Step 1: Add AI
         q1 = make_query()
         await handlers._handle_scheduler_callback(q1, 12345, "sched:add:ai")
@@ -510,20 +512,57 @@ class TestSchedulerCallbackMultiStep:
         q3 = make_query()
         await handlers._handle_scheduler_callback(q3, 12345, "sched:minute:30")
         callbacks3 = get_callback_data(q3)
-        model_cbs = [c for c in callbacks3 if "sched:model:" in c]
+        trigger_cbs = [c for c in callbacks3 if "sched:trigger:" in c]
+        assert len(trigger_cbs) > 0
+
+        # Step 4: Select trigger mode
+        q4 = make_query()
+        await handlers._handle_scheduler_callback(q4, 12345, "sched:trigger:cron")
+        callbacks4 = get_callback_data(q4)
+        model_cbs = [c for c in callbacks4 if "sched:model:" in c]
         assert len(model_cbs) > 0
 
-        # Step 4: Select model
-        q4 = make_query()
-        await handlers._handle_scheduler_callback(q4, 12345, "sched:model:sonnet")
+        # Step 5: Select model
+        q5 = make_query()
+        await handlers._handle_scheduler_callback(q5, 12345, "sched:model:sonnet")
         # Should show ForceReply for message input
-        q4.message.reply_text.assert_called_once()
+        q5.message.reply_text.assert_called_once()
 
-        # Step 5: Message input (ForceReply)
+        # Step 6: Message input (ForceReply)
         update = MagicMock()
         update.message.reply_text = AsyncMock()
         await handlers._handle_schedule_force_reply(update, 12345, "Daily summary")
         handlers._schedule_manager.add.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_add_chat_one_time_schedule_full_flow(self, handlers):
+        """AI 1회성 스케줄 플로우: add → hour → minute → once → model → message."""
+        q1 = make_query()
+        await handlers._handle_scheduler_callback(q1, 12345, "sched:add:chat")
+
+        q2 = make_query()
+        await handlers._handle_scheduler_callback(q2, 12345, "sched:time:chat:_:22")
+        assert any("sched:minute:" in c for c in get_callback_data(q2))
+
+        q3 = make_query()
+        await handlers._handle_scheduler_callback(q3, 12345, "sched:minute:20")
+        assert any("sched:trigger:" in c for c in get_callback_data(q3))
+
+        q4 = make_query()
+        await handlers._handle_scheduler_callback(q4, 12345, "sched:trigger:once")
+        assert "One-time" in get_text(q4)
+        assert any("sched:model:" in c for c in get_callback_data(q4))
+
+        q5 = make_query()
+        await handlers._handle_scheduler_callback(q5, 12345, "sched:model:sonnet")
+        q5.message.reply_text.assert_called_once()
+
+        update = MagicMock()
+        update.message.reply_text = AsyncMock()
+        await handlers._handle_schedule_force_reply(update, 12345, "손흥민 다음 경기")
+
+        call_kwargs = handlers._schedule_manager.add.call_args[1]
+        assert call_kwargs["trigger_type"] == "once"
 
     @pytest.mark.asyncio
     async def test_detail_view(self, handlers):

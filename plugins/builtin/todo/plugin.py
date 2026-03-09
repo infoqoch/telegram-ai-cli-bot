@@ -5,8 +5,9 @@ from datetime import date, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
-from src.plugins.loader import Plugin, PluginResult, ScheduledAction
 from src.logging_config import logger
+from src.plugins.loader import Plugin, PluginResult, ScheduledAction
+from src.time_utils import app_today
 
 
 class TodoPlugin(Plugin):
@@ -140,7 +141,7 @@ END;
 
     def _generate_yesterday_report(self, chat_id: int) -> str:
         """Generate yesterday's todo report text."""
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (app_today() - timedelta(days=1)).isoformat()
         todos = self.repository.list_todos_by_date(chat_id, yesterday)
         if not todos:
             return ""
@@ -185,7 +186,7 @@ END;
         return "\n".join(lines)
 
     def _today(self) -> str:
-        return date.today().isoformat()
+        return app_today().isoformat()
 
     # ==================== List / Add ====================
 
@@ -221,8 +222,9 @@ END;
                 InlineKeyboardButton("📋 Multi-select", callback_data="td:multi"),
             ])
 
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        today = app_today()
+        yesterday = (today - timedelta(days=1)).isoformat()
+        tomorrow = (today + timedelta(days=1)).isoformat()
         buttons.append([
             InlineKeyboardButton("◀️ Prev", callback_data=f"td:date:{yesterday}"),
             InlineKeyboardButton("📅 Week", callback_data=f"td:week:{today}"),
@@ -287,7 +289,7 @@ END;
 
     def _handle_tomorrow(self, chat_id: int, todo_id: int) -> dict:
         """Move to tomorrow."""
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        tomorrow = (app_today() + timedelta(days=1)).isoformat()
         if self.repository.move_todos_to_date([todo_id], tomorrow):
             result = self._handle_list(chat_id)
             result["text"] = "📅 Moved to tomorrow!\n\n" + result["text"]
@@ -394,7 +396,7 @@ END;
     def _handle_multi_carry(self, chat_id: int) -> dict:
         """Move selected to tomorrow."""
         selections = self._multi_selections.get(chat_id, set())
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        tomorrow = (app_today() + timedelta(days=1)).isoformat()
         count = self.repository.move_todos_to_date(list(selections), tomorrow)
 
         self._multi_selections.pop(chat_id, None)
@@ -416,7 +418,7 @@ END;
 
     def _render_yesterday_view(self, chat_id: int) -> dict:
         """Yesterday incomplete items selection view."""
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (app_today() - timedelta(days=1)).isoformat()
         pending = self.repository.get_pending_todos(chat_id, yesterday)
         selections = self._yesterday_selections.get(chat_id, set())
 
@@ -494,7 +496,7 @@ END;
 
     def _handle_yesterday_all(self, chat_id: int) -> dict:
         """Carry all yesterday incomplete items to today."""
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (app_today() - timedelta(days=1)).isoformat()
         pending = self.repository.get_pending_todos(chat_id, yesterday)
         today = self._today()
         ids = [t.id for t in pending]
@@ -510,13 +512,13 @@ END;
     def _handle_date_view(self, chat_id: int, date_str: str | None) -> dict:
         """View specific date."""
         try:
-            target = date.fromisoformat(date_str) if date_str else date.today()
+            target = date.fromisoformat(date_str) if date_str else app_today()
         except ValueError:
-            target = date.today()
+            target = app_today()
 
         target_str = target.isoformat()
         todos = self.repository.list_todos_by_date(chat_id, target_str)
-        is_today = target == date.today()
+        is_today = target == app_today()
         date_label = "Today" if is_today else target.strftime("%m/%d")
 
         lines = [f"📋 <b>Todos for {target_str} ({date_label})</b>\n"]
@@ -555,13 +557,13 @@ END;
     def _handle_week_view(self, chat_id: int, date_str: str | None) -> dict:
         """Weekly view."""
         try:
-            center = date.fromisoformat(date_str) if date_str else date.today()
+            center = date.fromisoformat(date_str) if date_str else app_today()
         except ValueError:
-            center = date.today()
+            center = app_today()
 
         start = center - timedelta(days=3)
         end = center + timedelta(days=3)
-        today = date.today()
+        today = app_today()
 
         todos_by_date = self.repository.get_todos_by_date_range(
             chat_id, start.isoformat(), end.isoformat()

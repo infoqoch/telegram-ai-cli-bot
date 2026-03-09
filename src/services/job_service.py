@@ -6,7 +6,7 @@ import os
 import time
 from typing import Optional
 
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.ai import AIRegistry, get_profile_label, get_provider_label
 from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
@@ -278,17 +278,21 @@ class JobService:
         history_count: int,
         question_preview: str,
         response: str,
-        session_short_id: str,
     ) -> str:
         """Render the final Telegram response envelope."""
         return (
             f"<b>[{self._escape_html(provider_label)} · {self._escape_html(model_label)} · "
             f"{self._escape_html(session_info)}|#{history_count}]</b>\n"
             f"<code>{self._escape_html(question_preview)}</code>\n\n"
-            f"{response}\n\n"
-            f"/s_{session_short_id} switch\n"
-            f"/h_{session_short_id} history"
+            f"{response}"
         )
+
+    @staticmethod
+    def _build_session_action_markup(session_id: str) -> InlineKeyboardMarkup:
+        """Build non-destructive AI-response shortcuts."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("💬 Session", callback_data=f"resp:switch:{session_id}"),
+        ]])
 
     async def _send_completion_notice(
         self,
@@ -375,7 +379,6 @@ class JobService:
             session_info = self._sessions.get_session_info(session_id)
             history_count = self._sessions.get_history_count(session_id)
             question_preview = truncate_message(message, 30)
-            session_short_id = session_id[:8]
 
             full_response = self._build_full_response(
                 provider_label=provider_label,
@@ -384,7 +387,6 @@ class JobService:
                 history_count=history_count,
                 question_preview=question_preview,
                 response=response,
-                session_short_id=session_short_id,
             )
 
             if long_task_notified and not stored_error:
@@ -399,7 +401,12 @@ class JobService:
                 f"Detached provider sending Telegram response - job_id={job_id}, "
                 f"session={session_id[:8]}, history_count={history_count}, response_chars={len(full_response)}"
             )
-            await self._send_message_to_chat(bot, chat_id, full_response)
+            await self._send_message_to_chat(
+                bot,
+                chat_id,
+                full_response,
+                reply_markup=self._build_session_action_markup(session_id),
+            )
             self._repo.complete_message(job_id, response=response, error=stored_error)
             logger.info(
                 f"Detached provider persisted completion - job_id={job_id}, "
@@ -443,21 +450,34 @@ class JobService:
 
         return chunks
 
-    async def _send_message_to_chat(self, bot: Bot, chat_id: int, text: str) -> None:
+    async def _send_message_to_chat(
+        self,
+        bot: Bot,
+        chat_id: int,
+        text: str,
+        *,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
+    ) -> None:
         """Send a split-safe Telegram message with HTML fallback."""
         chunks = self._split_message(text)
         logger.info(f"Detached provider Telegram chunks - chat_id={chat_id}, chunks={len(chunks)}")
 
         for index, chunk in enumerate(chunks, start=1):
+            chunk_markup = reply_markup if index == len(chunks) else None
             try:
                 logger.info(
                     f"Detached provider Telegram send - chat_id={chat_id}, chunk={index}/{len(chunks)}, "
                     f"chars={len(chunk)}, parse_mode=HTML"
                 )
-                await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode="HTML",
+                    reply_markup=chunk_markup,
+                )
             except Exception:
                 logger.warning(
                     f"Detached provider Telegram HTML send failed, retrying plain text - "
                     f"chat_id={chat_id}, chunk={index}/{len(chunks)}"
                 )
-                await bot.send_message(chat_id=chat_id, text=chunk)
+                await bot.send_message(chat_id=chat_id, text=chunk, reply_markup=chunk_markup)

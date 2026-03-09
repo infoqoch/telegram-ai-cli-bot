@@ -4,9 +4,10 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import uuid4
 
-from src.ai import DEFAULT_PROVIDER, get_default_model, get_profile_badge, normalize_model
+from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, get_default_model, get_profile_badge, normalize_model
 from src.logging_config import logger
 from src.repository import Repository
+from src.ui_emoji import ENTITY_AI, ENTITY_SESSION_CURRENT, ENTITY_WORKSPACE, ENTITY_WORKSPACE_INACTIVE
 
 
 class SessionService:
@@ -192,6 +193,42 @@ class SessionService:
             for s, count in rows
         ]
 
+    def list_sessions_for_all_providers(
+        self,
+        user_id: str,
+        include_deleted: bool = False,
+        limit: Optional[int] = None,
+    ) -> list[dict]:
+        """List sessions across all providers ordered by recent activity."""
+        rows = self._repo.list_sessions_with_counts(
+            user_id,
+            ai_provider=None,
+            include_deleted=include_deleted,
+            limit=limit,
+        )
+        current_ids = {
+            provider: self._repo.get_current_session_id(user_id, provider)
+            for provider in SUPPORTED_PROVIDERS
+        }
+
+        return [
+            {
+                "id": s.id,
+                "full_session_id": s.id,
+                "session_id": s.id[:8],
+                "created_at": s.created_at,
+                "last_used": s.last_used,
+                "history_count": count,
+                "model": s.model,
+                "ai_provider": s.ai_provider,
+                "name": s.name,
+                "workspace_path": s.workspace_path,
+                "deleted": s.deleted,
+                "is_current": s.id == current_ids.get(s.ai_provider),
+            }
+            for s, count in rows
+        ]
+
     def get_session_info(self, session_id: str) -> str:
         """Get formatted session info."""
         if not session_id:
@@ -246,9 +283,9 @@ class SessionService:
 
         lines = []
         for s, msg_count in rows:
-            emoji = "📍" if s.id == current_id else "💬"
+            emoji = ENTITY_SESSION_CURRENT if s.id == current_id else ENTITY_AI
             if s.workspace_path:
-                emoji = "📂" if s.id == current_id else "🗂"
+                emoji = ENTITY_WORKSPACE if s.id == current_id else ENTITY_WORKSPACE_INACTIVE
 
             display_name = s.name or s.id[:8]
             model_badge = get_profile_badge(s.ai_provider, s.model)

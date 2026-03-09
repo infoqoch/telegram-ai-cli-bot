@@ -121,7 +121,7 @@ class TestScheduleTimeChange:
 
         # unregister + register 호출 확인
         mock_scheduler.unregister.assert_called_once()
-        mock_scheduler.register_daily.assert_called_once()
+        mock_scheduler.register_cron.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_detail_callback_shows_actions(self):
@@ -293,10 +293,7 @@ class TestSchedulerMinuteSelection:
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 
-        handlers._sched_pending["12345"] = {
-            "type": "claude",
-            "hour": 10,
-        }
+        handlers._sched_pending["12345"] = {"type": "chat", "hour": 10}
 
         # simulate sched:minute:35 callback
         await handlers._handle_scheduler_callback(query, 12345, "sched:minute:35")
@@ -307,8 +304,7 @@ class TestSchedulerMinuteSelection:
 
         # 시간:분 표시 확인
         assert "10:35" in text
-        # 모델 선택 텍스트
-        assert "model" in text.lower() or "Select model" in text
+        assert "Choose schedule mode" in text
 
         # pending에 minute 저장 확인
         pending = handlers._sched_pending["12345"]
@@ -623,18 +619,18 @@ class TestSchedulerInteractionFlow:
 
     @pytest.mark.asyncio
     async def test_flow_add_claude_full(self, handlers):
-        """새 Claude 스케줄: 시간 → 분 → 모델 → 메시지 (4단계)."""
+        """새 Chat 스케줄: 시간 → 분 → 모드 → 모델 → 메시지."""
         # Step 1: add:claude → hour selection
         q1 = self._make_query()
         await handlers._handle_scheduler_callback(q1, 12345, "sched:add:claude")
 
         callbacks1 = self._get_callback_data(q1)
-        time_callbacks = [c for c in callbacks1 if "sched:time:claude" in c]
+        time_callbacks = [c for c in callbacks1 if "sched:time:chat" in c]
         assert len(time_callbacks) > 0
 
         # Step 2: hour 10 → minute selection
         q2 = self._make_query()
-        await handlers._handle_scheduler_callback(q2, 12345, "sched:time:claude:_:10")
+        await handlers._handle_scheduler_callback(q2, 12345, "sched:time:chat:_:10")
 
         text2 = self._get_text(q2)
         assert "10" in text2
@@ -644,7 +640,7 @@ class TestSchedulerInteractionFlow:
         min_callbacks = [c for c in callbacks2 if "sched:minute:" in c]
         assert len(min_callbacks) == 12  # 00~55, 5분 단위
 
-        # Step 3: minute 25 → model selection
+        # Step 3: minute 25 → trigger selection
         q3 = self._make_query()
         await handlers._handle_scheduler_callback(q3, 12345, "sched:minute:25")
 
@@ -653,22 +649,30 @@ class TestSchedulerInteractionFlow:
         assert handlers._sched_pending["12345"]["minute"] == 25
 
         callbacks3 = self._get_callback_data(q3)
-        model_callbacks = [c for c in callbacks3 if "sched:model:" in c]
-        assert len(model_callbacks) == 3  # opus, sonnet, haiku
+        trigger_callbacks = [c for c in callbacks3 if "sched:trigger:" in c]
+        assert len(trigger_callbacks) == 2
 
-        # Step 4: model sonnet → ForceReply (message input)
+        # Step 4: trigger cron → model selection
         q4 = self._make_query()
-        q4.message = MagicMock()
-        q4.message.reply_text = AsyncMock()
-        await handlers._handle_scheduler_callback(q4, 12345, "sched:model:sonnet")
+        await handlers._handle_scheduler_callback(q4, 12345, "sched:trigger:cron")
 
         text4 = self._get_text(q4)
         assert "10:25" in text4
-        assert "sonnet" in text4
+        model_callbacks = [c for c in self._get_callback_data(q4) if "sched:model:" in c]
+        assert len(model_callbacks) == 3
+
+        # Step 5: model sonnet → ForceReply (message input)
+        q5 = self._make_query()
+        q5.message = MagicMock()
+        q5.message.reply_text = AsyncMock()
+        await handlers._handle_scheduler_callback(q5, 12345, "sched:model:sonnet")
+
+        text5 = self._get_text(q5)
+        assert "10:25" in text5
+        assert "sonnet" in text5
         assert handlers._sched_pending["12345"]["model"] == "sonnet"
 
-        # ForceReply 전송 확인
-        q4.message.reply_text.assert_called_once()
+        q5.message.reply_text.assert_called_once()
 
     # --- Flow 5: 상세 뷰 - 비활성 스케줄 표시 ---
 
@@ -707,7 +711,7 @@ class TestSchedulerInteractionFlow:
         keyboard = handlers._build_scheduler_keyboard("12345")
 
         all_callbacks = [btn.callback_data for row in keyboard for btn in row if hasattr(btn, 'callback_data')]
-        assert "sched:add:claude" in all_callbacks
+        assert "sched:add:chat" in all_callbacks
         assert "sched:add:workspace" in all_callbacks
         assert "sched:refresh" in all_callbacks
 

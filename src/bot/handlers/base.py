@@ -2,9 +2,10 @@
 
 import asyncio
 from collections import defaultdict
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from telegram import Update, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.ai import (
@@ -13,12 +14,29 @@ from src.ai import (
     get_default_model,
     get_profile_label,
     get_provider_button,
+    get_provider_icon,
     get_provider_label,
     get_provider_profiles,
     is_supported_provider,
     normalize_model,
 )
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
+from src.ui_emoji import (
+    BUTTON_BACK,
+    BUTTON_CANCEL,
+    BUTTON_DELETE,
+    BUTTON_HISTORY,
+    BUTTON_NEW_SESSION,
+    BUTTON_REFRESH,
+    BUTTON_SESSION,
+    BUTTON_SWITCH_AI,
+    BUTTON_TASKS,
+    ENTITY_BOT,
+    ENTITY_SESSION_CURRENT,
+)
+from ..command_catalog import build_menu_specs
+from ..constants import get_model_badge
+from ..formatters import escape_html
 from ..runtime import DetachedJobManager, PendingRequestStore
 
 if TYPE_CHECKING:
@@ -114,14 +132,212 @@ class BaseHandler:
         """Return display label for a provider."""
         return get_provider_label(provider)
 
-    def _build_model_buttons(self, provider: str, callback_prefix: str) -> list[InlineKeyboardButton]:
+    def _get_provider_icon(self, provider: str) -> str:
+        """Return icon for a provider."""
+        return get_provider_icon(provider)
+
+    def _format_provider_display(self, provider: str) -> str:
+        """Return provider label with icon for chat-facing UI."""
+        return f"{self._get_provider_icon(provider)} {get_provider_label(provider)}"
+
+    def _format_model_button_label(self, provider: str, profile, include_provider_icon: bool = False) -> str:
+        """Return one compact model button label."""
+        parts: list[str] = []
+        if include_provider_icon:
+            parts.append(self._get_provider_icon(provider))
+        if profile.badge:
+            parts.append(profile.badge)
+        parts.append(profile.button_label)
+        return " ".join(parts)
+
+    def _build_model_buttons(
+        self,
+        provider: str,
+        callback_prefix: str,
+        *,
+        include_provider_icon: bool = False,
+        callback_suffix: str = "",
+    ) -> list[InlineKeyboardButton]:
         """Build one row of model/profile buttons for a provider."""
         return [
-            InlineKeyboardButton(profile.button_label, callback_data=f"{callback_prefix}{profile.key}")
+            InlineKeyboardButton(
+                self._format_model_button_label(
+                    provider,
+                    profile,
+                    include_provider_icon=include_provider_icon,
+                ),
+                callback_data=f"{callback_prefix}{profile.key}{callback_suffix}",
+            )
             for profile in get_provider_profiles(provider)
         ]
 
-    def _build_ai_selector_keyboard(self, current_provider: str) -> list[list[InlineKeyboardButton]]:
+    def _build_session_list_view(
+        self,
+        user_id: str,
+        *,
+        prefix: str = "",
+        include_timestamp: bool = False,
+        launcher_context: Optional[str] = None,
+    ) -> tuple[str, list[list[InlineKeyboardButton]]]:
+        """Build the mixed-provider `/sl` view."""
+        provider = self._get_selected_ai_provider(user_id)
+        sessions = self.sessions.list_sessions_for_all_providers(user_id, limit=10)
+        selected_current_id = self.sessions.get_current_session_id(user_id, provider)
+
+        header = f"{prefix}<b>Session List</b>"
+        if include_timestamp:
+            header += f" <i>({datetime.now().strftime('%H:%M:%S')})</i>"
+
+        lines = [
+            header,
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>",
+            "",
+        ]
+        buttons: list[list[InlineKeyboardButton]] = []
+
+        if not sessions:
+            lines.append("No sessions.")
+        else:
+            for session in sessions:
+                sid = session["full_session_id"]
+                short_id = session["session_id"]
+                name = session.get("name") or f"Session {short_id}"
+                session_provider = session.get("ai_provider", provider)
+                model = session.get("model", get_default_model(session_provider))
+                provider_icon = self._get_provider_icon(session_provider)
+                model_badge = get_model_badge(model)
+                lock_indicator = " 🔒" if self._is_session_locked(sid) else ""
+                pin_indicator = f" {ENTITY_SESSION_CURRENT}" if sid == selected_current_id else ""
+
+                lines.append(
+                    f"{provider_icon} {model_badge} "
+                    f"<b>{escape_html(name)}</b>{lock_indicator}{pin_indicator}"
+                )
+
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"{provider_icon} {name[:10]}",
+                        callback_data=f"sess:switch:{sid}",
+                    ),
+                    InlineKeyboardButton(BUTTON_HISTORY, callback_data=f"sess:history:{sid}"),
+                    InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sess:delete:{sid}"),
+                ])
+
+        if launcher_context == "menu":
+            buttons.append([
+                InlineKeyboardButton(BUTTON_NEW_SESSION, callback_data="menu:new"),
+                InlineKeyboardButton(BUTTON_REFRESH, callback_data="menu:sessions"),
+                InlineKeyboardButton(BUTTON_TASKS, callback_data="menu:tasks"),
+            ])
+            buttons.append([
+                InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="menu:ai"),
+            ])
+            buttons.append([
+                InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open"),
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton(BUTTON_NEW_SESSION, callback_data="sess:new"),
+                InlineKeyboardButton(BUTTON_REFRESH, callback_data="sess:list"),
+                InlineKeyboardButton(BUTTON_TASKS, callback_data="tasks:refresh"),
+            ])
+            buttons.append([
+                InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="ai:open"),
+            ])
+
+        return "\n".join(lines), buttons
+
+    def _build_new_session_picker_keyboard(self) -> list[list[InlineKeyboardButton]]:
+        """Build the unified 3x2 provider/model picker used by `/new`."""
+        return [
+            self._build_model_buttons("claude", "sess:new:", include_provider_icon=True),
+            self._build_model_buttons("codex", "sess:new:", include_provider_icon=True),
+        ]
+
+    def _build_new_session_picker_text(self, user_id: str) -> str:
+        """Build the shared `/new` picker body."""
+        provider = self._get_selected_ai_provider(user_id)
+        return (
+            f"🆕 <b>New Session</b>\n\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
+            f"Select a model. Choosing one also switches the current AI:"
+        )
+
+    def _build_session_action_keyboard(self, session_id: str) -> list[list[InlineKeyboardButton]]:
+        """Build compact session actions used after AI responses."""
+        return [[InlineKeyboardButton(BUTTON_SESSION, callback_data=f"sess:switch:{session_id}")]]
+
+    def _build_auth_status_text(self, user_id: str) -> str:
+        """Return a compact auth status line for launcher screens."""
+        if not self.require_auth:
+            return "Auth: <b>Open</b>"
+
+        if self.auth.is_authenticated(user_id):
+            remaining = self.auth.get_remaining_minutes(user_id)
+            return f"Auth: <b>✅ Authenticated</b> ({remaining}m left)"
+        return "Auth: <b>🔒 Authentication required</b>"
+
+    def _build_menu_text(self, chat_id: int) -> str:
+        """Render the `/menu` launcher body."""
+        user_id = str(chat_id)
+        provider = self._get_selected_ai_provider(user_id)
+        has_plugins = bool(self.plugins and self.plugins.plugins)
+
+        lines = [
+            "<b>Main Menu</b>",
+            self._build_auth_status_text(user_id),
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>",
+            "",
+            "Choose a service:",
+            "• Sessions and AI controls",
+            "• Workspace and scheduler hubs",
+        ]
+        if has_plugins:
+            lines.append("• Plugin catalog")
+        return "\n".join(lines)
+
+    def _find_menu_spec(self, name: str, *, chat_id: int):
+        """Return one launcher spec by name."""
+        specs = build_menu_specs(
+            has_plugins=bool(self.plugins and self.plugins.plugins),
+            is_admin=self._is_admin_chat(chat_id),
+        )
+        return next((spec for spec in specs if spec.name == name), None)
+
+    def _build_menu_keyboard(self, chat_id: int) -> InlineKeyboardMarkup:
+        """Build the `/menu` launcher keyboard."""
+        buttons: list[list[InlineKeyboardButton]] = []
+
+        def add_row(*names: str) -> None:
+            row: list[InlineKeyboardButton] = []
+            for name in names:
+                spec = self._find_menu_spec(name, chat_id=chat_id)
+                if spec and spec.menu_label and spec.callback_data:
+                    row.append(InlineKeyboardButton(spec.menu_label, callback_data=spec.callback_data))
+            if row:
+                buttons.append(row)
+
+        add_row("new", "sl")
+        add_row("workspace", "scheduler")
+        add_row("plugins", "tasks")
+        add_row("select_ai")
+        buttons.append([InlineKeyboardButton("❓ Help", callback_data="menu:help")])
+
+        return InlineKeyboardMarkup(buttons)
+
+    @staticmethod
+    def _build_menu_back_markup() -> InlineKeyboardMarkup:
+        """Return a simple back-to-menu keyboard."""
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")]]
+        )
+
+    def _build_ai_selector_keyboard(
+        self,
+        current_provider: str,
+        *,
+        launcher_context: Optional[str] = None,
+    ) -> list[list[InlineKeyboardButton]]:
         """Build provider switch buttons."""
         buttons = []
         row = []
@@ -129,9 +345,15 @@ class BaseHandler:
             label = get_provider_button(provider)
             if provider == current_provider:
                 label = f"• {label}"
-            row.append(InlineKeyboardButton(label, callback_data=f"ai:select:{provider}"))
+            callback_data = f"ai:select:{provider}"
+            if launcher_context == "menu":
+                callback_data += ":menu"
+            row.append(InlineKeyboardButton(label, callback_data=callback_data))
         buttons.append(row)
-        buttons.append([InlineKeyboardButton("Cancel", callback_data="ai:cancel")])
+        if launcher_context == "menu":
+            buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")])
+        else:
+            buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="ai:cancel")])
         return buttons
 
     def _save_temp_pending(self, key: str, data: dict) -> None:
@@ -290,6 +512,201 @@ class BaseHandler:
                     logger.trace(f"HTML send failed, retrying as plain text: {e}")
                 await bot.send_message(chat_id=chat_id, text=chunk)
 
+    def _get_plugin_source_group(self, plugin) -> str:
+        """Return plugin origin group for UI grouping."""
+        group = getattr(plugin, "_source_group", "")
+        return group if group in {"builtin", "custom"} else "custom"
+
+    def _build_help_auth_section(self) -> str:
+        """Return auth-related help lines."""
+        if self.require_auth:
+            return (
+                "Authentication\n"
+                f"/auth &lt;key&gt; - Authenticate ({self.auth.timeout_minutes}min valid)\n"
+                "/status - Check auth status\n\n"
+            )
+        return "<b>No authentication required</b>\n\n"
+
+    def _build_main_help_text(self) -> str:
+        """Return the concise main help screen."""
+        lines = [
+            "<b>Commands</b>\n",
+            self._build_help_auth_section().rstrip(),
+            "Core",
+            "/menu - Main service launcher",
+            "/select_ai - Choose Claude or Codex",
+            "/new [model] [name] - New session",
+            "/session - Current session info",
+            "/sl - Session list",
+            "/workspace - Workspace hub",
+            "/scheduler - Scheduler hub",
+        ]
+
+        if self.plugins and self.plugins.plugins:
+            lines.append("/plugins - Plugin list")
+
+        lines.extend([
+            "",
+            "Utility",
+            "/tasks - Active tasks/queue",
+            "/chatid - My chat ID",
+        ])
+
+        if self.plugins and self.plugins.plugins:
+            lines.append("/ai &lt;question&gt; - Ask current AI directly")
+
+        lines.extend([
+            "",
+            "More",
+            "/help_extend - Extended guides",
+        ])
+
+        return "\n".join(lines)
+
+    def _is_admin_chat(self, chat_id: int) -> bool:
+        """Return True when the current chat is the configured admin chat."""
+        try:
+            from src.config import get_settings
+
+            admin_chat_id = get_settings().admin_chat_id
+            return bool(admin_chat_id) and chat_id == admin_chat_id
+        except Exception:
+            return False
+
+    def _build_extended_help_text(self, *, is_admin: bool = False) -> str:
+        """Return the extended help index."""
+        lines = [
+            "<b>Extended Help</b>\n",
+            "Guides",
+            "/help_session - Session workflow",
+            "/help_workspace - Workspace workflow",
+            "/help_plugins - Plugin usage",
+        ]
+
+        if is_admin:
+            lines.append("/help_admin - Admin operations")
+
+        if self.plugins and self.plugins.plugins:
+            lines.append("")
+            lines.append("Plugin Topics")
+            for plugin in sorted(self.plugins.plugins, key=lambda item: (self._get_plugin_source_group(item), item.name)):
+                lines.append(f"/help_{plugin.name}")
+
+        return "\n".join(lines)
+
+    def _build_session_help_text(self) -> str:
+        """Return session guide text."""
+        return (
+            "<b>Session Guide</b>\n\n"
+            "/new [model] [name] - Create a session\n"
+            "/session - View the current session\n"
+            "/sl - Browse, switch, rename, or delete sessions\n\n"
+            "Rename, delete, and model changes should be done from the session UI."
+        )
+
+    def _build_workspace_help_text(self) -> str:
+        """Return workspace guide text."""
+        return (
+            "<b>Workspace Guide</b>\n\n"
+            "/workspace - Open the workspace hub\n\n"
+            "Recommended flow\n"
+            "1. Add or select a workspace\n"
+            "2. Choose Chat or Schedule from that workspace\n\n"
+            "Use the workspace UI as the primary path instead of raw shortcut commands."
+        )
+
+    def _build_scheduler_help_text(self) -> str:
+        """Return scheduler guide text."""
+        return (
+            "<b>Scheduler Guide</b>\n\n"
+            "/scheduler - Open the scheduler hub\n\n"
+            "Types\n"
+            "• 💬 Chat - Uses the current AI/provider\n"
+            "• 📂 Workspace - Runs with workspace context\n"
+            "• 🔌 Plugin - Runs a plugin action\n\n"
+            "Flow\n"
+            "• Pick a time, then choose Daily or One-time\n"
+            "• Complex cron changes can be handled later through AI/admin updates"
+        )
+
+    def _build_plugins_help_text(self) -> str:
+        """Return plugin guide text."""
+        lines = [
+            "<b>Plugin Guide</b>\n",
+            "/plugins - Open the plugin launcher",
+            "Use plugin buttons for normal interaction",
+            "/help_memo, /help_todo ... - Show detailed plugin usage",
+        ]
+
+        if self.plugins and self.plugins.plugins:
+            lines.append("")
+            lines.append("Available")
+            for plugin in sorted(self.plugins.plugins, key=lambda item: (self._get_plugin_source_group(item), item.name)):
+                lines.append(f"• /help_{plugin.name}")
+
+        return "\n".join(lines)
+
+    def _build_admin_help_text(self) -> str:
+        """Return admin-only operations help."""
+        return (
+            "<b>Admin Guide</b>\n\n"
+            "/reload [name] - Reload all plugins or one plugin\n\n"
+            "This command is intentionally hidden from the main help."
+        )
+
+    async def help_topic_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help_* topic commands."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        is_admin = self._is_admin_chat(chat_id)
+
+        text = update.message.text.strip() if update.message and update.message.text else ""
+        if not text.startswith("/help_"):
+            await update.message.reply_text(self._build_extended_help_text(is_admin=is_admin), parse_mode="HTML")
+            clear_context()
+            return
+
+        topic = text[6:].split()[0].lower()
+        logger.info(f"/help topic request: {topic}")
+
+        topic_builders = {
+            "extend": self._build_extended_help_text,
+            "session": self._build_session_help_text,
+            "workspace": self._build_workspace_help_text,
+            "scheduler": self._build_scheduler_help_text,
+            "plugins": self._build_plugins_help_text,
+        }
+
+        if topic == "admin" and is_admin:
+            await update.message.reply_text(self._build_admin_help_text(), parse_mode="HTML")
+            clear_context()
+            return
+
+        if topic in topic_builders:
+            if topic == "extend":
+                await update.message.reply_text(self._build_extended_help_text(is_admin=is_admin), parse_mode="HTML")
+            else:
+                await update.message.reply_text(topic_builders[topic](), parse_mode="HTML")
+            clear_context()
+            return
+
+        if self.plugins:
+            plugin = self.plugins.get_plugin_by_name(topic)
+            if plugin:
+                await update.message.reply_text(
+                    f"{plugin.usage}\n\nOpen: <code>/{plugin.name}</code>",
+                    parse_mode="HTML",
+                )
+                clear_context()
+                return
+
+        await update.message.reply_text(
+            f"Unknown help topic: <code>/help_{escape_html(topic)}</code>\n\n"
+            "Use /help_extend to see available guides.",
+            parse_mode="HTML",
+        )
+        clear_context()
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         chat_id = update.effective_chat.id
@@ -322,14 +739,38 @@ class BaseHandler:
 
         logger.trace("Sending response")
         await update.message.reply_text(
-            f"🤖 <b>CLI AI Bot</b>\n\n"
+            f"{ENTITY_BOT} <b>CLI AI Bot</b>\n\n"
             f"{auth_line}"
-            f"Current AI: <b>{get_provider_label(provider)}</b>\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
             f"Session: [{session_info}] ({history_count} messages)\n\n"
-            f"/help for commands",
-            parse_mode="HTML"
+            f"/menu or /help",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📋 Menu", callback_data="menu:open"),
+                InlineKeyboardButton("❓ Help", callback_data="menu:help"),
+            ]]),
         )
         logger.trace("/start complete")
+        clear_context()
+
+    async def menu_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /menu command."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        logger.info("/menu command received")
+
+        if not self._is_authorized(chat_id):
+            logger.debug("/menu denied - unauthorized")
+            await update.message.reply_text("⛔ Access denied.")
+            clear_context()
+            return
+
+        await update.message.reply_text(
+            self._build_menu_text(chat_id),
+            reply_markup=self._build_menu_keyboard(chat_id),
+            parse_mode="HTML",
+        )
+        logger.trace("/menu complete")
         clear_context()
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -338,50 +779,11 @@ class BaseHandler:
         self._setup_request_context(chat_id)
         logger.info("/help command received")
 
-        if self.require_auth:
-            auth_section = (
-                "Authentication\n"
-                f"/auth &lt;key&gt; - Authenticate ({self.auth.timeout_minutes}min valid)\n"
-                "/status - Check auth status\n\n"
-            )
-        else:
-            auth_section = "<b>No authentication required</b>\n\n"
-
-        plugin_section = ""
-        if self.plugins and self.plugins.plugins:
-            plugin_section = (
-                "\nPlugins\n"
-                "/plugins - Plugin list\n"
-                "/ai &lt;question&gt; - Ask current AI directly (bypass plugins)\n"
-            )
-            logger.trace(f"Plugin count: {len(self.plugins.plugins)}")
-
         logger.trace("Sending response")
         await update.message.reply_text(
-            "<b>Commands</b>\n\n"
-            f"{auth_section}"
-            "Sessions\n"
-            "/select_ai - Choose Claude or Codex\n"
-            "/new [model] [name] - New session\n"
-            "/nw path [model] [name] - Workspace session\n"
-            "/new_haiku_speedy - Claude shortcut\n"
-            "/new_opus_smarty - Claude shortcut\n"
-            "/rename_MyName - Rename session\n"
-            "/session - Current session info\n"
-            "/sl - Session list\n"
-            "/back - Return to previous session\n"
-            "/delete_&lt;id&gt; - Delete session\n\n"
-            f"{plugin_section}\n"
-            "Workspace\n"
-            "/workspace - Workspace management\n\n"
-            "Schedule\n"
-            "/scheduler - Schedule management\n\n"
-            "Other\n"
-            "/tasks - Active tasks/queue\n"
-            "/chatid - My chat ID\n"
-            "/reload [name] - Reload plugins\n"
-            "/help - This help",
-            parse_mode="HTML"
+            self._build_main_help_text(),
+            parse_mode="HTML",
+            reply_markup=self._build_menu_back_markup(),
         )
         logger.trace("/help complete")
         clear_context()
@@ -398,7 +800,7 @@ class BaseHandler:
         from ..formatters import escape_html as _esc
         await update.message.reply_text(
             f"Unknown command: <code>{_esc(command)}</code>\n\n"
-            f"/help for command list",
+            f"/menu or /help",
             parse_mode="HTML"
         )
         clear_context()

@@ -3,12 +3,14 @@
 import html
 import re
 from datetime import datetime, timezone
+from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.ai import get_provider_label
 from src.logging_config import logger, clear_context
+from src.ui_emoji import BUTTON_BACK, BUTTON_REFRESH, BUTTON_SESSION_LIST
 from ..constants import MAX_LOCK_STATUS_PREVIEW
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
@@ -140,14 +142,11 @@ class AdminHandlers(BaseHandler):
             clear_context()
             return
 
-        logger.trace(f"Building plugin list - {len(self.plugins.plugins)}")
-        lines = ["<b>Plugin List</b>\n"]
-        for plugin in self.plugins.plugins:
-            lines.append(f"- <b>/{plugin.name}</b> - {plugin.description}")
-            logger.trace(f"Plugin: {plugin.name} - {plugin.description}")
-        lines.append("\nUse <code>/plugin_name</code> for usage details")
-
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        await update.message.reply_text(
+            self._build_plugins_text(),
+            reply_markup=self._build_plugins_markup(),
+            parse_mode="HTML",
+        )
         logger.trace("/plugins complete")
         clear_context()
 
@@ -195,7 +194,7 @@ class AdminHandlers(BaseHandler):
     @authorized_only
     @authenticated_only
     async def plugin_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /plugin_name command - show specific plugin usage."""
+        """Handle /plugin_name command - redirect to the canonical help topic."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
 
@@ -214,7 +213,11 @@ class AdminHandlers(BaseHandler):
         plugin = self.plugins.get_plugin_by_name(plugin_name)
         if plugin:
             logger.trace(f"Plugin found: {plugin.name}")
-            await update.message.reply_text(plugin.usage, parse_mode="HTML")
+            await update.message.reply_text(
+                f"Use <code>/help_{plugin.name}</code> for docs.\n"
+                f"Open <code>/plugins</code> or <code>/menu</code> for the interactive UI.",
+                parse_mode="HTML",
+            )
         else:
             logger.trace(f"Plugin not found: {plugin_name}")
 
@@ -266,6 +269,69 @@ class AdminHandlers(BaseHandler):
 
         clear_context()
 
+    def _group_plugins(self) -> dict[str, list]:
+        """Return plugins grouped by builtin/custom for launcher UIs."""
+        grouped_plugins = {"builtin": [], "custom": []}
+        if not self.plugins or not self.plugins.plugins:
+            return grouped_plugins
+
+        for plugin in sorted(
+            self.plugins.plugins,
+            key=lambda item: (self._get_plugin_source_group(item), item.name),
+        ):
+            grouped_plugins[self._get_plugin_source_group(plugin)].append(plugin)
+            logger.trace(f"Plugin: {plugin.name} - {plugin.description}")
+        return grouped_plugins
+
+    def _build_plugins_text(self) -> str:
+        """Render a compact plugin hub summary."""
+        if not self.plugins or not self.plugins.plugins:
+            return "No plugins loaded."
+
+        logger.trace(f"Building plugin list - {len(self.plugins.plugins)}")
+        grouped_plugins = self._group_plugins()
+
+        lines = ["<b>Plugins</b>\n"]
+        for group_key, title in (("builtin", "Builtin"), ("custom", "Custom")):
+            plugins = grouped_plugins[group_key]
+            if plugins:
+                command_list = " ".join(f"<code>/{plugin.name}</code>" for plugin in plugins)
+            else:
+                command_list = "-"
+            lines.append(f"<b>{title}</b>: {command_list}")
+
+        lines.extend([
+            "",
+            "Tap a plugin button below.",
+            "Docs: /help_extend",
+        ])
+        return "\n".join(lines)
+
+    def _build_plugins_markup(self, *, launcher_context: Optional[str] = None) -> InlineKeyboardMarkup:
+        """Return dynamic plugin buttons for `/plugins` and `/menu`."""
+        buttons: list[list[InlineKeyboardButton]] = []
+        grouped_plugins = self._group_plugins()
+
+        for group_key in ("builtin", "custom"):
+            row: list[InlineKeyboardButton] = []
+            for plugin in grouped_plugins[group_key]:
+                row.append(
+                    InlineKeyboardButton(
+                        f"/{plugin.name}",
+                        callback_data=f"plug:open:{plugin.name}:{launcher_context or 'standalone'}",
+                    )
+                )
+                if len(row) == 2:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+
+        if launcher_context == "menu":
+            buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")])
+
+        return InlineKeyboardMarkup(buttons)
+
     def _build_tasks_status(self, user_id: str) -> tuple[str, list]:
         """Build lock status text and buttons (including queue)."""
         lines = []
@@ -295,30 +361,32 @@ class AdminHandlers(BaseHandler):
                 session_name = html.escape(session_name)
 
                 lines.append(
-                    f"\n<b>{i}.</b> <code>{session_name}</code>\n"
-                    f"   {elapsed_str} elapsed\n"
-                    f"   {msg_preview}"
+                    f"\n\n<b>{i}.</b> <b>{session_name}</b>\n"
+                    f"<i>{elapsed_str} elapsed</i>\n"
+                    f"{msg_preview}"
                 )
 
         waiting_details = []
 
-        for queued in waiting_rows[:8]:
+        for i, queued in enumerate(waiting_rows[:8], 1):
             session_name = queued.get("session_name") or queued["session_id"][:8]
             msg_preview = self._summarize_task_preview(queued.get("message", ""), 30)
             session_name = html.escape(session_name)
-            waiting_details.append(f"- <code>{session_name}</code>: {msg_preview}")
+            waiting_details.append(
+                f"\n\n<b>{i}.</b> <b>{session_name}</b>\n"
+                f"{msg_preview}"
+            )
 
         if total_waiting > 0:
             lines.append(f"\n\n<b>Queue</b> ({total_waiting})")
-            lines.extend([f"\n{d}" for d in waiting_details])
+            lines.extend(waiting_details)
             if total_waiting > len(waiting_details):
                 lines.append(f"\n  ... and {total_waiting - len(waiting_details)} more")
         text = "".join(lines) if lines else "No status info"
 
         keyboard = [[
-            InlineKeyboardButton("Refresh", callback_data="tasks:refresh"),
-            InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
+            InlineKeyboardButton(BUTTON_REFRESH, callback_data="tasks:refresh"),
+            InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
         ]]
 
         return text, keyboard
-

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from telegram import Update
+from telegram import BotCommandScopeChat
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -28,35 +29,55 @@ from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.runtime_exit_codes import RuntimeExitCode
 from src.bootstrap import build_bot_runtime
+from src.bot.command_catalog import build_bot_commands
 from src.scheduler_manager import scheduler_manager
 from src.repository import shutdown_repository
+from src.time_utils import configure_app_timezone
 from src.services.schedule_execution_service import ScheduleExecutionService
 
-# 예약 스케줄러 (경로 기반)
+
 _schedule_manager = None
 
 
+async def _sync_bot_commands(bot, settings, runtime) -> None:
+    """Publish a compact slash-command list to Telegram."""
+    has_plugins = bool(runtime.plugin_loader and runtime.plugin_loader.plugins)
+    default_commands = build_bot_commands(has_plugins=has_plugins)
+    await bot.set_my_commands(default_commands)
+    logger.info(f"Telegram commands synced: {[cmd.command for cmd in default_commands]}")
+
+    if settings.admin_chat_id:
+        admin_commands = build_bot_commands(has_plugins=has_plugins, is_admin=True)
+        await bot.set_my_commands(
+            admin_commands,
+            scope=BotCommandScopeChat(chat_id=settings.admin_chat_id),
+        )
+        logger.info(f"Telegram admin commands synced for chat_id={settings.admin_chat_id}")
+
+
 def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
-    """HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)."""
+    """Wire optional HourlyPing plugin jobs into the shared job queue."""
     try:
         hourly_ping_plugin = plugin_loader.get_plugin_by_name("hourly_ping")
         if hourly_ping_plugin and hasattr(hourly_ping_plugin, "setup_scheduler"):
             hourly_ping_plugin.setup_scheduler(app, settings.admin_chat_id)
             logger.info("HourlyPing 스케줄러 활성화 (08:00~19:00 매 정시)")
-    except Exception as e:
-        logger.debug(f"HourlyPing 스케줄러 비활성화: {e}")
-
+    except Exception as exc:
+        logger.debug(f"HourlyPing 스케줄러 비활성화: {exc}")
 
 
 def create_app(settings) -> Application:
     """Create and configure the Telegram application."""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    app_timezone = getattr(settings, "app_timezone", "Asia/Seoul")
+    configure_app_timezone(app_timezone)
 
     logger.info("=" * 60)
     logger.info("Telegram CLI AI Bot 초기화 시작")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info(f"  base_dir: {settings.base_dir}")
     logger.info(f"  working_dir: {settings.effective_working_dir}")
+    logger.info(f"  app_timezone: {app_timezone}")
     logger.info(f"  require_auth: {settings.require_auth}")
     logger.info(f"  allowed_chat_ids: {settings.allowed_chat_ids or '(모두 허용)'}")
     logger.info("=" * 60)
@@ -69,6 +90,10 @@ def create_app(settings) -> Application:
         count = await handlers.cleanup_detached_jobs(application.bot)
         if count:
             logger.info(f"Detached job cleanup count: {count}")
+        try:
+            await _sync_bot_commands(application.bot, settings, runtime)
+        except Exception as exc:
+            logger.warning(f"Telegram command sync skipped: {exc}")
 
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
     logger.trace("Application 빌드 시작")
@@ -81,14 +106,11 @@ def create_app(settings) -> Application:
     )
     logger.trace("Application 빌드 완료 - concurrent_updates=True")
 
-    # SchedulerManager 초기화 (단일 job_queue 관리)
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager 초기화 완료")
 
-    # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
     _setup_hourly_ping_scheduler(app, settings, runtime.plugin_loader)
 
-    # 예약 스케줄러 설정 (Repository 어댑터 사용)
     global _schedule_manager
     _schedule_manager = runtime.schedule_manager
 
@@ -104,14 +126,15 @@ def create_app(settings) -> Application:
     _schedule_manager.register_all_to_scheduler()
     logger.info("예약 스케줄러 executor 설정 완료")
 
-    # BotHandlers에 schedule_manager, workspace_registry 설정
     handlers.set_schedule_manager(_schedule_manager)
     handlers.set_workspace_registry(runtime.workspace_registry)
 
     # Register handlers
     logger.trace("핸들러 등록 시작")
     app.add_handler(CommandHandler("start", handlers.start))
+    app.add_handler(CommandHandler("menu", handlers.menu_command))
     app.add_handler(CommandHandler("help", handlers.help_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/help_'), handlers.help_topic_command))
     app.add_handler(CommandHandler("auth", handlers.auth_command))
     app.add_handler(CommandHandler("status", handlers.status_command))
     app.add_handler(CommandHandler("select_ai", handlers.select_ai_command))
@@ -119,10 +142,7 @@ def create_app(settings) -> Application:
     app.add_handler(CommandHandler("new_opus", handlers.new_session_opus))
     app.add_handler(CommandHandler("new_sonnet", handlers.new_session_sonnet))
     app.add_handler(CommandHandler("new_haiku", handlers.new_session_haiku))
-    app.add_handler(CommandHandler("new_haiku_speedy", handlers.new_session_haiku_speedy))
-    app.add_handler(CommandHandler("new_opus_smarty", handlers.new_session_opus_smarty))
     app.add_handler(CommandHandler("new_workspace", handlers.new_workspace_session))
-    app.add_handler(CommandHandler("nw", handlers.new_workspace_session))  # 단축 명령어
     app.add_handler(CommandHandler("model", handlers.model_command))
     app.add_handler(CommandHandler("model_opus", handlers.model_opus_command))
     app.add_handler(CommandHandler("model_sonnet", handlers.model_sonnet_command))

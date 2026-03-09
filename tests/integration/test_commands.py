@@ -40,6 +40,23 @@ class TestHelpCommand:
         reply = await get_reply_text(update)
         # 주요 명령어들이 포함되어야 함
         assert "/new" in reply or "/session" in reply or "/help" in reply
+        assert "/menu" in reply
+        assert "/help_extend" in reply
+        assert "/new_haiku_speedy" not in reply
+        assert "/reload" not in reply
+
+    @pytest.mark.asyncio
+    async def test_help_extend_lists_topics(self, handlers):
+        """확장 도움말은 상세 가이드를 안내한다."""
+        update, context = create_command_update("help_extend")
+        update.message.text = "/help_extend"
+
+        await handlers.help_topic_command(update, context)
+
+        reply = await get_reply_text(update)
+        assert "/help_workspace" in reply
+        assert "/help_plugins" in reply
+        assert "/help_admin" not in reply
 
 
 class TestStatusCommand:
@@ -55,6 +72,26 @@ class TestStatusCommand:
         reply = await get_reply_text(update)
         # 상태 정보가 포함되어야 함
         assert reply  # 빈 응답이 아니어야 함
+
+
+class TestMenuCommand:
+    """메인 메뉴 명령어 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_menu_shows_launcher_buttons(self, handlers):
+        """`/menu` should expose the main service launcher."""
+        update, context = create_command_update("menu")
+
+        await handlers.menu_command(update, context)
+
+        reply = await get_reply_text(update)
+        markup = update.message.reply_text.call_args[1]["reply_markup"]
+        button_texts = [button.text for row in markup.inline_keyboard for button in row]
+
+        assert "Main Menu" in reply
+        assert "❓ Help" in button_texts
+        assert "🆕 New Session" in button_texts
+        assert "Claude usage check" not in reply
 
 
 class TestChatIdCommand:
@@ -82,8 +119,13 @@ class TestPluginsCommand:
         await handlers.plugins_command(update, context)
 
         reply = await get_reply_text(update)
+        markup = update.message.reply_text.call_args[1]["reply_markup"]
+        button_texts = [button.text for row in markup.inline_keyboard for button in row]
         # builtin 플러그인들이 로드되어야 함
-        assert "memo" in reply.lower() or "todo" in reply.lower() or "플러그인" in reply
+        assert "Plugins" in reply
+        assert "<b>Builtin</b>:" in reply
+        assert "<b>Custom</b>:" in reply
+        assert "/memo" in button_texts
 
 
 class TestNewSessionCommands:
@@ -98,6 +140,34 @@ class TestNewSessionCommands:
 
         # Claude의 create_session이 호출되어야 함
         assert mock_claude.create_session.called or update.message.reply_text.called
+
+    @pytest.mark.asyncio
+    async def test_new_session_picker_shows_both_providers(self, handlers):
+        """`/new` without args should show the unified 3x2 provider/model picker."""
+        update, context = create_command_update("new")
+
+        await handlers.new_session(update, context)
+
+        markup = update.message.reply_text.call_args[1]["reply_markup"]
+        button_texts = [button.text for row in markup.inline_keyboard for button in row]
+
+        assert "📚 🧠 Opus" in button_texts
+        assert "📚 🚀 Sonnet" in button_texts
+        assert "📚 ⚡ Haiku" in button_texts
+        assert "🤖 🧠 5.4 XHigh" in button_texts
+        assert "🤖 🚀 5.4 High" in button_texts
+        assert "🤖 ⚡ 5.3 Codex" in button_texts
+
+    @pytest.mark.asyncio
+    async def test_new_codex_profile_switches_selected_provider(self, handlers, session_store):
+        """`/new gpt54_high` should create a Codex session and persist Codex as current AI."""
+        update, context = create_command_update("new", args=["gpt54_high"])
+
+        await handlers.new_session(update, context)
+
+        assert session_store.get_selected_ai_provider("12345") == "codex"
+        reply = await get_reply_text(update)
+        assert "Codex" in reply
 
     @pytest.mark.asyncio
     async def test_new_opus_session(self, handlers, mock_claude):
@@ -194,10 +264,10 @@ class TestSessionManagement:
         assert reply
 
     @pytest.mark.asyncio
-    async def test_session_list_filters_by_selected_provider(self, handlers, session_store):
-        """`/sl` should show only sessions for the selected provider."""
+    async def test_session_list_shows_both_providers_with_one_current_pin(self, handlers, session_store):
+        """`/sl` should mix Claude/Codex sessions and keep a single pin for the selected AI."""
         session_store.create_session("12345", "claude-session", ai_provider="claude", model="sonnet", name="Claude 세션")
-        session_store.create_session("12345", "codex-session", ai_provider="codex", model="gpt54_high", name="Codex 세션")
+        session_store.create_session("12345", "codex-session", ai_provider="codex", model="gpt54_xhigh", name="Codex 세션")
         session_store.select_ai_provider("12345", "codex")
 
         update, context = create_command_update("sl")
@@ -205,9 +275,17 @@ class TestSessionManagement:
         await handlers.session_list_command(update, context)
 
         reply = await get_reply_text(update)
-        assert "Current AI: <b>Codex</b>" in reply
+        markup = update.message.reply_text.call_args[1]["reply_markup"]
+        button_texts = [button.text for row in markup.inline_keyboard for button in row]
+
+        assert "Current AI: <b>🤖 Codex</b>" in reply
         assert "Codex 세션" in reply
-        assert "Claude 세션" not in reply
+        assert "Claude 세션" in reply
+        assert "📚 🚀 <b>Claude 세션</b>" in reply
+        assert "🤖 🧠 <b>Codex 세션</b> 📍" in reply
+        assert reply.count("📍") == 1
+        assert "🆕 New Session" in button_texts
+        assert "🤖 🧠 5.4 XHigh" not in button_texts
 
     @pytest.mark.asyncio
     async def test_switch_session(self, handlers, session_store):
