@@ -246,7 +246,7 @@ class TestWorkspaceCallbackFlows:
 
     @pytest.mark.asyncio
     async def test_ws_full_schedule_flow(self, handlers):
-        """워크스페이스 스케줄 전체 플로우: schedule → time → minute → trigger → model."""
+        """워크스페이스 스케줄 전체 플로우: schedule → time → minute → trigger → provider → model."""
         # Step 1: schedule
         q1 = make_query()
         await handlers._handle_workspace_callback(q1, 12345, "ws:schedule:ws001")
@@ -267,14 +267,19 @@ class TestWorkspaceCallbackFlows:
         # Step 4: trigger
         q4 = make_query()
         await handlers._handle_workspace_callback(q4, 12345, "ws:sched_trigger:ws001:cron")
-        assert any("sched_model" in c for c in get_callback_data(q4))
+        assert any("sched_provider" in c for c in get_callback_data(q4))
 
-        # Step 5: model
-        handlers._ws_pending["12345"]["minute"] = 30
+        # Step 5: provider
         q5 = make_query()
-        await handlers._handle_workspace_callback(q5, 12345, "ws:sched_model:ws001:haiku")
-        assert "09:30" in get_text(q5)
-        assert "haiku" in get_text(q5)
+        await handlers._handle_workspace_callback(q5, 12345, "ws:sched_provider:ws001:claude")
+        assert any("sched_model" in c for c in get_callback_data(q5))
+
+        # Step 6: model
+        handlers._ws_pending["12345"]["minute"] = 30
+        q6 = make_query()
+        await handlers._handle_workspace_callback(q6, 12345, "ws:sched_model:ws001:haiku")
+        assert "09:30" in get_text(q6)
+        assert "haiku" in get_text(q6)
 
 
 # =============================================================================
@@ -452,7 +457,7 @@ class TestSessionCallbackFlows:
     @pytest.fixture
     def handlers(self):
         h = make_handlers()
-        h.sessions.list_sessions_for_all_providers.return_value = [
+        session_rows = [
             {
                 "session_id": "abc12345",
                 "full_session_id": "abc12345-full",
@@ -474,14 +479,35 @@ class TestSessionCallbackFlows:
                 "is_current": False,
             },
         ]
-        h.sessions.get_current_session_id.return_value = "abc12345-full"
+        session_map = {row["full_session_id"]: row for row in session_rows}
+        h.sessions.list_sessions_for_all_providers.return_value = session_rows
+
+        def current_session_id(user_id, provider=None):
+            if provider in (None, "claude"):
+                return "abc12345-full"
+            return None
+
+        def get_session_by_prefix(user_id, prefix):
+            for row in session_rows:
+                if row["session_id"].startswith(prefix[:8]):
+                    return row
+            return None
+
+        h.sessions.get_current_session_id.side_effect = current_session_id
         h.sessions.get_session_model.return_value = "sonnet"
         h.sessions.get_session_name.return_value = "테스트"
         h.sessions.switch_session.return_value = True
         h.sessions.delete_session.return_value = True
+        h.sessions.get_session_by_prefix.side_effect = get_session_by_prefix
+        h.sessions.get_session.side_effect = lambda session_id: session_map.get(session_id)
+        h.sessions.get_session_ai_provider.side_effect = lambda session_id: session_map.get(session_id, {}).get("ai_provider", "claude")
+        h.sessions.get_session_history_entries.return_value = []
+        h.sessions.get_session_by_provider_session_id.return_value = None
+        h.sessions.create_session.return_value = "imported-session-full"
         h.sessions.get_history.return_value = [
             {"message": "안녕", "timestamp": "2026-01-01T00:00:00"},
         ]
+        h._local_sessions = MagicMock()
         h.claude = MagicMock()
         h.claude.create_session = AsyncMock(return_value="new-uuid")
         return h
@@ -500,6 +526,8 @@ class TestSessionCallbackFlows:
         assert "🤖 🧠 <b>코덱스</b>" in text
         assert text.count("📍") == 1
         assert "🆕 New Session" in buttons
+        assert "📥 Import Local" in buttons
+        assert "☑️ Multi Delete" in buttons
         assert "📚 🧠 Opus" not in buttons
         assert "🤖 🧠 5.4 XHigh" not in buttons
 
@@ -747,7 +775,7 @@ class TestSessionCallbackFlows:
     async def test_sess_delete_confirm(self, handlers):
         """sess:delete:{id} - 삭제 확인."""
         query = make_query()
-        await handlers._handle_session_callback(query, 12345, "sess:delete:abc12345")
+        await handlers._handle_session_callback(query, 12345, "sess:delete:def67890")
 
         text = get_text(query)
         callbacks = get_callback_data(query)
@@ -764,6 +792,86 @@ class TestSessionCallbackFlows:
         assert query.edit_message_text.called or handlers.sessions.delete_session.called
 
     @pytest.mark.asyncio
+    async def test_sess_delete_blocks_current_session_for_its_provider(self, handlers):
+        """selected AI가 달라도 해당 provider의 current session은 삭제 금지."""
+        handlers.sessions.get_current_session_id.side_effect = (
+            lambda user_id, provider=None: "def67890-full" if provider == "codex" else "abc12345-full"
+        )
+
+        query = make_query()
+        await handlers._handle_session_callback(query, 12345, "sess:delete:def67890")
+
+        assert "Cannot Delete" in get_text(query)
+
+    @pytest.mark.asyncio
+    async def test_sess_import_lists_recent_local_sessions(self, handlers):
+        """sess:import - 최근 로컬 세션 picker."""
+        local_session = MagicMock()
+        local_session.provider_session_id = "550e8400-e29b-41d4-a716-446655440000"
+        local_session.short_id = "550e8400"
+        local_session.title = "Imported Claude"
+        local_session.updated_at = "2026-03-10T10:00:00Z"
+        local_session.workspace_path = "/Users/test/project"
+        local_session.preview = "existing prompt"
+        handlers._local_sessions.list_recent.return_value = [local_session]
+
+        query = make_query()
+        await handlers._handle_session_callback(query, 12345, "sess:import")
+
+        text = get_text(query)
+        callbacks = get_callback_data(query)
+        assert "Import Local Session" in text
+        assert "Imported Claude" in text
+        assert "sess:import_pick:claude:550e8400-e29b-41d4-a716-446655440000" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_sess_import_pick_switches_existing_attached_session(self, handlers):
+        """같은 external session을 다시 import하면 기존 bot session으로 전환."""
+        local_session = MagicMock()
+        local_session.short_id = "550e8400"
+        local_session.title = "Imported Claude"
+        local_session.workspace_path = "/Users/test/project"
+        handlers._local_sessions.get.return_value = local_session
+        handlers.sessions.get_session_by_provider_session_id.return_value = {
+            "session_id": "ghi99999",
+            "full_session_id": "ghi99999-full",
+            "name": "Imported Claude",
+            "model": "sonnet",
+            "ai_provider": "claude",
+            "workspace_path": "/Users/test/project",
+        }
+
+        query = make_query()
+        await handlers._handle_session_callback(
+            query,
+            12345,
+            "sess:import_pick:claude:550e8400-e29b-41d4-a716-446655440000",
+        )
+
+        handlers.sessions.switch_session.assert_called_with("12345", "ghi99999-full")
+        assert "already attached" in get_text(query)
+
+    @pytest.mark.asyncio
+    async def test_sess_multi_delete_blocks_current_session_selection(self, handlers):
+        """current session은 멀티 삭제 대상에 넣을 수 없다."""
+        query = make_query()
+        await handlers._handle_session_callback(query, 12345, "sess:multi_toggle:abc12345-full")
+
+        query.answer.assert_called()
+        assert "Current session cannot be deleted" in query.answer.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_sess_multi_delete_executes_for_selected_sessions(self, handlers):
+        """멀티 삭제 확인 후 선택 세션 삭제."""
+        handlers._session_multi_selected["12345"] = {"def67890-full"}
+
+        query = make_query()
+        await handlers._handle_session_callback(query, 12345, "sess:multi_execute")
+
+        handlers.sessions.delete_session.assert_called_with("12345", "def67890-full")
+        assert "deleted" in get_text(query)
+
+    @pytest.mark.asyncio
     async def test_sess_model_change(self, handlers):
         """sess:model:{model}:{id} - 모델 변경."""
         query = make_query()
@@ -776,14 +884,14 @@ class TestSessionCallbackFlows:
         """세션 삭제 2단계: delete → confirm_del."""
         # Step 1: delete 확인
         q1 = make_query()
-        await handlers._handle_session_callback(q1, 12345, "sess:delete:abc12345")
+        await handlers._handle_session_callback(q1, 12345, "sess:delete:def67890")
         callbacks = get_callback_data(q1)
         confirm_cb = [c for c in callbacks if "confirm_del" in c]
         assert len(confirm_cb) > 0
 
         # Step 2: confirm
         q2 = make_query()
-        await handlers._handle_session_callback(q2, 12345, confirm_cb[0].replace("sess:", ""))
+        await handlers._handle_session_callback(q2, 12345, confirm_cb[0])
 
 
 # =============================================================================

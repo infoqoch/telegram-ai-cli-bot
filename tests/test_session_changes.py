@@ -619,7 +619,7 @@ class TestSchedulerInteractionFlow:
 
     @pytest.mark.asyncio
     async def test_flow_add_claude_full(self, handlers):
-        """새 Chat 스케줄: 시간 → 분 → 모드 → 모델 → 메시지."""
+        """새 Chat 스케줄: 시간 → 분 → 모드 → AI → 모델 → 메시지."""
         # Step 1: add:claude → hour selection
         q1 = self._make_query()
         await handlers._handle_scheduler_callback(q1, 12345, "sched:add:claude")
@@ -652,27 +652,68 @@ class TestSchedulerInteractionFlow:
         trigger_callbacks = [c for c in callbacks3 if "sched:trigger:" in c]
         assert len(trigger_callbacks) == 2
 
-        # Step 4: trigger cron → model selection
+        # Step 4: trigger cron → provider selection
         q4 = self._make_query()
         await handlers._handle_scheduler_callback(q4, 12345, "sched:trigger:cron")
 
         text4 = self._get_text(q4)
         assert "10:25" in text4
-        model_callbacks = [c for c in self._get_callback_data(q4) if "sched:model:" in c]
-        assert len(model_callbacks) == 3
+        provider_callbacks = [c for c in self._get_callback_data(q4) if "sched:provider:" in c]
+        assert len(provider_callbacks) == 2
 
-        # Step 5: model sonnet → ForceReply (message input)
+        # Step 5: provider claude → model selection
         q5 = self._make_query()
-        q5.message = MagicMock()
-        q5.message.reply_text = AsyncMock()
-        await handlers._handle_scheduler_callback(q5, 12345, "sched:model:sonnet")
+        await handlers._handle_scheduler_callback(q5, 12345, "sched:provider:claude")
 
         text5 = self._get_text(q5)
         assert "10:25" in text5
-        assert "sonnet" in text5
+        model_callbacks = [c for c in self._get_callback_data(q5) if "sched:model:" in c]
+        assert len(model_callbacks) == 3
+
+        # Step 6: model sonnet → ForceReply (message input)
+        q6 = self._make_query()
+        q6.message = MagicMock()
+        q6.message.reply_text = AsyncMock()
+        await handlers._handle_scheduler_callback(q6, 12345, "sched:model:sonnet")
+
+        text6 = self._get_text(q6)
+        assert "10:25" in text6
+        assert "sonnet" in text6
         assert handlers._sched_pending["12345"]["model"] == "sonnet"
 
-        q5.message.reply_text.assert_called_once()
+        q6.message.reply_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_trigger_selection_shows_provider_buttons(self, handlers):
+        """trigger 선택 후 AI 선택 단계 표시."""
+        query = self._make_query()
+        handlers._sched_pending["12345"] = {"type": "chat", "hour": 14, "minute": 20}
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:trigger:cron")
+
+        text = self._get_text(query)
+        callbacks = self._get_callback_data(query)
+        assert "Select AI" in text
+        assert "sched:provider:claude" in callbacks
+        assert "sched:provider:codex" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_provider_selection_shows_model_buttons(self, handlers):
+        """AI 선택 후 해당 provider 모델 버튼 표시."""
+        query = self._make_query()
+        handlers._sched_pending["12345"] = {
+            "type": "chat",
+            "hour": 14,
+            "minute": 20,
+            "trigger_type": "cron",
+        }
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:provider:codex")
+
+        text = self._get_text(query)
+        callbacks = self._get_callback_data(query)
+        assert "AI: <b>🤖 Codex</b>" in text
+        assert any(callback.startswith("sched:model:") for callback in callbacks)
 
     # --- Flow 5: 상세 뷰 - 비활성 스케줄 표시 ---
 

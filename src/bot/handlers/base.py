@@ -26,6 +26,8 @@ from src.ui_emoji import (
     BUTTON_CANCEL,
     BUTTON_DELETE,
     BUTTON_HISTORY,
+    BUTTON_IMPORT_LOCAL,
+    BUTTON_MULTI_DELETE,
     BUTTON_NEW_SESSION,
     BUTTON_REFRESH,
     BUTTON_SESSION,
@@ -39,6 +41,7 @@ from ..constants import get_model_badge
 from ..formatters import escape_html
 from ..runtime import DetachedJobManager, PendingRequestStore
 from src.plugins.loader import PluginInteraction
+from src.services.local_session_discovery import LocalSessionDiscoveryService
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
@@ -78,6 +81,8 @@ class BaseHandler:
         self._workspace_registry = None
         self._ws_pending: dict[str, dict] = {}
         self._plugin_interactions: dict[int, PluginInteraction] = {}
+        self._session_multi_selected: dict[str, set[str]] = {}
+        self._local_sessions = LocalSessionDiscoveryService()
         self._pending_requests = PendingRequestStore(self._repository)
         self._detached_jobs = DetachedJobManager(self._repository)
 
@@ -125,6 +130,11 @@ class BaseHandler:
     def _normalize_model(self, provider: str, model: Optional[str]) -> str:
         """Normalize one provider model/profile key."""
         return normalize_model(provider, model or get_default_model(provider))
+
+    def _is_current_provider_session(self, user_id: str, session_id: str, provider: Optional[str] = None) -> bool:
+        """Return whether one session is the current session for its own provider."""
+        resolved_provider = provider or self._get_session_provider(session_id)
+        return self.sessions.get_current_session_id(user_id, resolved_provider) == session_id
 
     def _get_model_label(self, provider: str, model: Optional[str]) -> str:
         """Return display label for one provider model/profile."""
@@ -224,6 +234,16 @@ class BaseHandler:
                     InlineKeyboardButton(BUTTON_HISTORY, callback_data=f"sess:history:{sid}"),
                     InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sess:delete:{sid}"),
                 ])
+
+        if len(sessions) >= 2:
+            buttons.append([
+                InlineKeyboardButton(BUTTON_IMPORT_LOCAL, callback_data="sess:import"),
+                InlineKeyboardButton(BUTTON_MULTI_DELETE, callback_data="sess:multi"),
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton(BUTTON_IMPORT_LOCAL, callback_data="sess:import"),
+            ])
 
         if launcher_context == "menu":
             buttons.append([
@@ -357,6 +377,25 @@ class BaseHandler:
         else:
             buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="ai:cancel")])
         return buttons
+
+    def _build_provider_choice_keyboard(
+        self,
+        current_provider: str,
+        callback_prefix: str,
+        *,
+        back_callback: str,
+    ) -> list[list[InlineKeyboardButton]]:
+        """Build provider chooser buttons for multi-step flows."""
+        row: list[InlineKeyboardButton] = []
+        for provider in ("claude", "codex"):
+            label = get_provider_button(provider)
+            if provider == current_provider:
+                label = f"• {label}"
+            row.append(InlineKeyboardButton(label, callback_data=f"{callback_prefix}{provider}"))
+        return [
+            row,
+            [InlineKeyboardButton(BUTTON_BACK, callback_data=back_callback)],
+        ]
 
     def _save_temp_pending(self, key: str, data: dict) -> None:
         """Save pending data to memory and DB."""

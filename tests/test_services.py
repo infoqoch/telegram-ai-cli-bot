@@ -119,3 +119,26 @@ class TestSessionService:
         assert len(result) == 1
         assert result[0]["id"] == "session123"
         assert result[0]["history_count"] == 0
+
+    def test_get_session_by_provider_session_id(self, service, mock_repo):
+        """기존 external session 연결 조회."""
+        mock_repo.get_session_by_provider_session_id.return_value = (
+            MagicMock(
+                id="session123",
+                created_at="2024-01-01T00:00:00",
+                last_used="2024-01-01T00:00:00",
+                model="sonnet",
+                ai_provider="claude",
+                name="Imported",
+                workspace_path="/tmp/project",
+                provider_session_id="external-1",
+            ),
+            2,
+        )
+
+        result = service.get_session_by_provider_session_id("user1", "claude", "external-1")
+
+        assert result is not None
+        assert result["full_session_id"] == "session123"
+        assert result["provider_session_id"] == "external-1"
+        assert result["history_count"] == 2

@@ -262,6 +262,31 @@ class SessionService:
             "workspace_path": s.workspace_path or "",
         }
 
+    def get_session_by_provider_session_id(
+        self,
+        user_id: str,
+        ai_provider: str,
+        provider_session_id: str,
+    ) -> Optional[dict]:
+        """Find a bot session already attached to one provider-native session."""
+        result = self._repo.get_session_by_provider_session_id(user_id, ai_provider, provider_session_id)
+        if not result:
+            return None
+        s, count = result
+        return {
+            "id": s.id,
+            "full_session_id": s.id,
+            "session_id": s.id[:8],
+            "created_at": s.created_at[:19] if s.created_at else "",
+            "last_used": s.last_used[:19] if s.last_used else "",
+            "history_count": count,
+            "name": s.name or "",
+            "model": s.model or get_default_model(ai_provider),
+            "ai_provider": s.ai_provider,
+            "workspace_path": s.workspace_path or "",
+            "provider_session_id": s.provider_session_id or "",
+        }
+
     def get_history_count(self, session_id: str) -> int:
         """Get message count in session history."""
         if not session_id:

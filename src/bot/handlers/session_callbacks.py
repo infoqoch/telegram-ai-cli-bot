@@ -1,5 +1,7 @@
 """Session-related callback handlers."""
 
+from pathlib import Path
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.error import BadRequest
 
@@ -10,6 +12,7 @@ from src.ai import (
     is_supported_model,
 )
 from src.logging_config import logger
+from src.time_utils import format_local_datetime
 from src.ui_emoji import (
     BUTTON_BACK,
     BUTTON_CANCEL,
@@ -175,6 +178,14 @@ class SessionCallbackHandlers(BaseHandler):
             elif action == "list":
                 await self._handle_session_list_callback(query, chat_id)
 
+            elif action == "import":
+                await self._handle_import_local_list_callback(query, chat_id)
+
+            elif action == "import_pick":
+                provider = parts[2] if len(parts) > 2 else selected_provider
+                provider_session_id = parts[3] if len(parts) > 3 else ""
+                await self._handle_import_local_pick_callback(query, chat_id, provider, provider_session_id)
+
             elif action == "rename":
                 session_id = parts[2] if len(parts) > 2 else ""
                 await self._handle_rename_prompt_callback(query, chat_id, session_id)
@@ -183,6 +194,23 @@ class SessionCallbackHandlers(BaseHandler):
                 model = parts[2] if len(parts) > 2 else "sonnet"
                 session_id = parts[3] if len(parts) > 3 else ""
                 await self._handle_model_change_callback(query, chat_id, model, session_id)
+
+            elif action == "multi":
+                await self._handle_multi_delete_list_callback(query, chat_id)
+
+            elif action == "multi_toggle":
+                session_id = parts[2] if len(parts) > 2 else ""
+                await self._handle_multi_delete_toggle_callback(query, chat_id, session_id)
+
+            elif action == "multi_confirm":
+                await self._handle_multi_delete_confirm_callback(query, chat_id)
+
+            elif action == "multi_execute":
+                await self._handle_multi_delete_execute_callback(query, chat_id)
+
+            elif action == "multi_cancel":
+                self._clear_multi_delete_selection(user_id)
+                await self._handle_session_list_callback(query, chat_id)
 
             elif action == "cancel":
                 await self._handle_session_list_callback(query, chat_id)
@@ -396,9 +424,9 @@ class SessionCallbackHandlers(BaseHandler):
         full_session_id = session.get("full_session_id", session_id)
         short_id = full_session_id[:8]
         name = session.get("name") or f"Session {short_id}"
+        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
 
-        current_session_id = self.sessions.get_current_session_id(user_id)
-        if current_session_id == full_session_id:
+        if self._is_current_provider_session(user_id, full_session_id, provider):
             keyboard = [[InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")]]
             await query.edit_message_text(
                 text=f"<b>Cannot Delete</b>\n\n"
@@ -436,9 +464,9 @@ class SessionCallbackHandlers(BaseHandler):
         full_session_id = session.get("full_session_id", session_id)
         short_id = full_session_id[:8]
         name = session.get("name") or f"Session {short_id}"
+        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
 
-        current_session_id = self.sessions.get_current_session_id(user_id)
-        if current_session_id == full_session_id:
+        if self._is_current_provider_session(user_id, full_session_id, provider):
             keyboard = [[InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")]]
             await query.edit_message_text(
                 text=f"<b>Cannot Delete</b>\n\n"
@@ -483,6 +511,285 @@ class SessionCallbackHandlers(BaseHandler):
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
+
+    def _get_multi_delete_selection(self, user_id: str) -> set[str]:
+        """Return mutable selected session ids for multi-delete mode."""
+        return self._session_multi_selected.setdefault(user_id, set())
+
+    def _clear_multi_delete_selection(self, user_id: str) -> None:
+        """Drop multi-delete state for one user."""
+        self._session_multi_selected.pop(user_id, None)
+
+    @staticmethod
+    def _shorten_local_path(path: str) -> str:
+        """Return one compact local path for UI display."""
+        home = str(Path.home())
+        if path.startswith(home):
+            return "~" + path[len(home):]
+        return path
+
+    async def _handle_import_local_list_callback(self, query, chat_id: int) -> None:
+        """Show recent provider-native sessions discovered on the local machine."""
+        user_id = str(chat_id)
+        provider = self._get_selected_ai_provider(user_id)
+        discovered = self._local_sessions.list_recent(provider, limit=10)
+
+        lines = [
+            "<b>Import Local Session</b>",
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>",
+            "",
+        ]
+        buttons: list[list[InlineKeyboardButton]] = []
+
+        if not discovered:
+            lines.append("No recent local sessions found for this AI.")
+        else:
+            lines.append("Choose a recent local session to attach:")
+            lines.append("")
+            for index, session in enumerate(discovered, start=1):
+                updated = format_local_datetime(session.updated_at) if session.updated_at else "-"
+                lines.append(
+                    f"{index}. <b>{escape_html(session.title or session.short_id)}</b>\n"
+                    f"<code>{session.short_id}</code> • {escape_html(updated)}"
+                )
+                if session.workspace_path:
+                    lines.append(f"<code>{escape_html(self._shorten_local_path(session.workspace_path))}</code>")
+                if session.preview and session.preview != session.title:
+                    lines.append(escape_html(session.preview))
+                lines.append("")
+
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"{session.short_id} {session.title[:18]}",
+                        callback_data=f"sess:import_pick:{provider}:{session.provider_session_id}",
+                    )
+                ])
+
+        buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")])
+
+        await query.edit_message_text(
+            text="\n".join(lines).rstrip(),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+
+    async def _handle_import_local_pick_callback(
+        self,
+        query,
+        chat_id: int,
+        provider: str,
+        provider_session_id: str,
+    ) -> None:
+        """Attach one discovered provider-native session to a bot-managed session."""
+        user_id = str(chat_id)
+        discovered = self._local_sessions.get(provider, provider_session_id)
+        if not discovered:
+            await query.edit_message_text(
+                "❌ Local session not found.\n\nIt may have been removed or rotated.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(BUTTON_BACK, callback_data="sess:import")]
+                ]),
+            )
+            return
+
+        existing = self.sessions.get_session_by_provider_session_id(user_id, provider, provider_session_id)
+        if existing:
+            full_session_id = existing["full_session_id"]
+            self.sessions.switch_session(user_id, full_session_id)
+            text, reply_markup = self._build_session_detail_message(user_id, existing, full_session_id)
+            imported_prefix = (
+                "<b>Local session already attached</b>\n\n"
+                f"External ID: <code>{escape_html(discovered.short_id)}</code>\n\n"
+            )
+            await query.edit_message_text(
+                text=imported_prefix + text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+            return
+
+        workspace_path = discovered.workspace_path
+        if workspace_path and not Path(workspace_path).exists():
+            workspace_path = None
+
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=provider,
+            provider_session_id=provider_session_id,
+            model=get_default_model(provider),
+            name=discovered.title or f"Imported {provider_session_id[:8]}",
+            workspace_path=workspace_path,
+        )
+        session = self.sessions.get_session(session_id)
+        if not session:
+            await query.edit_message_text("❌ Imported session could not be loaded.")
+            return
+
+        text, reply_markup = self._build_session_detail_message(user_id, session, session_id)
+        prefix_lines = [
+            "<b>Local session imported</b>",
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>",
+            f"External ID: <code>{escape_html(discovered.short_id)}</code>",
+        ]
+        if workspace_path:
+            prefix_lines.append(f"Workspace: <code>{escape_html(self._shorten_local_path(workspace_path))}</code>")
+        prefix_lines.extend([
+            "",
+            "Provider context is reused. Bot-side history starts from this import.",
+            "",
+        ])
+
+        await query.edit_message_text(
+            text="\n".join(prefix_lines) + text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+
+    async def _handle_multi_delete_list_callback(self, query, chat_id: int) -> None:
+        """Show session multi-select delete UI."""
+        user_id = str(chat_id)
+        sessions = self.sessions.list_sessions_for_all_providers(user_id, limit=10)
+        selected = self._get_multi_delete_selection(user_id)
+
+        if not sessions:
+            self._clear_multi_delete_selection(user_id)
+            await self._handle_session_list_callback(query, chat_id)
+            return
+
+        lines = [
+            "<b>Select Sessions to Delete</b>",
+            "Current sessions cannot be selected.",
+            "",
+            f"Selected: <b>{len(selected)}</b>",
+            "",
+        ]
+        buttons: list[list[InlineKeyboardButton]] = []
+
+        for session in sessions:
+            full_session_id = session["full_session_id"]
+            provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
+            provider_icon = self._get_provider_icon(provider)
+            name = session.get("name") or f"Session {session['session_id']}"
+            is_current = self._is_current_provider_session(user_id, full_session_id, provider)
+            marker = "📍" if is_current else ("✅" if full_session_id in selected else "⬜")
+            lines.append(f"{marker} {provider_icon} <b>{escape_html(name)}</b>")
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{marker} {provider_icon} {name[:18]}",
+                    callback_data=f"sess:multi_toggle:{full_session_id}",
+                )
+            ])
+
+        if selected:
+            buttons.append([
+                InlineKeyboardButton(BUTTON_DELETE, callback_data="sess:multi_confirm"),
+            ])
+        buttons.append([
+            InlineKeyboardButton(BUTTON_CANCEL, callback_data="sess:multi_cancel"),
+        ])
+
+        await query.edit_message_text(
+            text="\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+
+    async def _handle_multi_delete_toggle_callback(self, query, chat_id: int, session_id: str) -> None:
+        """Toggle one session in the multi-delete selection set."""
+        user_id = str(chat_id)
+        session, full_session_id = self._resolve_user_session(user_id, session_id)
+        if not session:
+            await query.answer("Session not found")
+            return
+
+        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
+        if self._is_current_provider_session(user_id, full_session_id, provider):
+            await query.answer("Current session cannot be deleted")
+            await self._handle_multi_delete_list_callback(query, chat_id)
+            return
+
+        selected = self._get_multi_delete_selection(user_id)
+        if full_session_id in selected:
+            selected.discard(full_session_id)
+        else:
+            selected.add(full_session_id)
+
+        await query.answer(f"{len(selected)} selected")
+        await self._handle_multi_delete_list_callback(query, chat_id)
+
+    async def _handle_multi_delete_confirm_callback(self, query, chat_id: int) -> None:
+        """Show one confirmation screen for the selected sessions."""
+        user_id = str(chat_id)
+        selected = sorted(self._get_multi_delete_selection(user_id))
+        if not selected:
+            await query.answer("Select sessions first")
+            await self._handle_multi_delete_list_callback(query, chat_id)
+            return
+
+        deletable: list[tuple[str, str, str]] = []
+        skipped = 0
+        for full_session_id in selected:
+            session = self.sessions.get_session(full_session_id)
+            if not session:
+                continue
+            provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
+            if self._is_current_provider_session(user_id, full_session_id, provider):
+                skipped += 1
+                continue
+            name = session.get("name") or f"Session {full_session_id[:8]}"
+            deletable.append((full_session_id, provider, name))
+
+        if not deletable:
+            self._clear_multi_delete_selection(user_id)
+            await query.edit_message_text(
+                "❌ No deletable sessions selected.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")]
+                ]),
+            )
+            return
+
+        lines = [f"<b>Delete {len(deletable)} Sessions?</b>", ""]
+        for _, provider, name in deletable:
+            lines.append(f"• {self._get_provider_icon(provider)} {escape_html(name)}")
+        if skipped:
+            lines.extend(["", f"{skipped} current session(s) will be skipped."])
+
+        await query.edit_message_text(
+            text="\n".join(lines),
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(BUTTON_DELETE, callback_data="sess:multi_execute"),
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data="sess:multi_cancel"),
+                ]
+            ]),
+            parse_mode="HTML",
+        )
+
+    async def _handle_multi_delete_execute_callback(self, query, chat_id: int) -> None:
+        """Delete every selected non-current session."""
+        user_id = str(chat_id)
+        selected = list(self._get_multi_delete_selection(user_id))
+        deleted = 0
+        skipped = 0
+
+        for full_session_id in selected:
+            session = self.sessions.get_session(full_session_id)
+            if not session:
+                continue
+            provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
+            if self._is_current_provider_session(user_id, full_session_id, provider):
+                skipped += 1
+                continue
+            if self.sessions.delete_session(user_id, full_session_id):
+                deleted += 1
+
+        self._clear_multi_delete_selection(user_id)
+
+        prefix = f"{deleted} session(s) deleted.\n\n"
+        if skipped:
+            prefix = f"{deleted} session(s) deleted, {skipped} skipped.\n\n"
+        await self._handle_session_list_callback(query, chat_id, prefix)
 
     async def _handle_model_change_callback(self, query, chat_id: int, model: str, session_id: str) -> None:
         """Handle model change callback."""

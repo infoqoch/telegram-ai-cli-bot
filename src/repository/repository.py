@@ -788,6 +788,49 @@ class Repository:
             )
         return None  # ambiguous or not found
 
+    def get_session_by_provider_session_id(
+        self,
+        user_id: str,
+        ai_provider: str,
+        provider_session_id: str,
+    ) -> Optional[tuple[SessionData, int]]:
+        """Find one session bound to a provider-native session id."""
+        row = self._conn.execute(
+            """
+            SELECT s.*, COALESCE(h.cnt, 0) AS history_count
+            FROM sessions s
+            LEFT JOIN (
+                SELECT session_id, COUNT(*) AS cnt
+                FROM session_history
+                GROUP BY session_id
+            ) h ON s.id = h.session_id
+            WHERE s.user_id = ?
+              AND s.ai_provider = ?
+              AND s.provider_session_id = ?
+              AND s.deleted = 0
+            ORDER BY s.last_used DESC
+            LIMIT 1
+            """,
+            (user_id, ai_provider, provider_session_id),
+        ).fetchone()
+        if not row:
+            return None
+        return (
+            SessionData(
+                id=row["id"],
+                user_id=row["user_id"],
+                ai_provider=row["ai_provider"],
+                provider_session_id=row["provider_session_id"],
+                model=row["model"],
+                name=row["name"],
+                workspace_path=row["workspace_path"],
+                created_at=row["created_at"],
+                last_used=row["last_used"],
+                deleted=bool(row["deleted"]),
+            ),
+            row["history_count"],
+        )
+
     def clear_session_history(self, session_id: str) -> int:
         """Clear all history for session."""
         cursor = self._conn.execute(

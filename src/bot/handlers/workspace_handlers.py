@@ -6,7 +6,7 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import ContextTypes
 
-from src.ai import get_profile_label
+from src.ai import get_profile_label, is_supported_provider
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from src.schedule_utils import next_occurrence, normalize_trigger_type
@@ -309,16 +309,49 @@ class WorkspaceHandlers(BaseHandler):
             self._ws_pending[user_id] = pending
 
             provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-            buttons = [
-                self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
-                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")],
-            ]
-
             await query.edit_message_text(
                 f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
                 f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
                 f"Schedule: <b>{'One-time' if pending['trigger_type'] == 'once' else 'Daily'}</b>\n"
                 f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+                f"Select AI:",
+                reply_markup=InlineKeyboardMarkup(
+                    self._build_provider_choice_keyboard(
+                        provider,
+                        f"ws:sched_provider:{ws_id}:",
+                        back_callback=f"ws:sched_minute:{ws_id}:{pending.get('minute', 0)}",
+                    )
+                ),
+                parse_mode="HTML",
+            )
+            await query.answer()
+            return
+
+        if action.startswith("sched_provider:"):
+            _, ws_id, provider = action.split(":")
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("Workspace not found")
+                return
+            if not is_supported_provider(provider):
+                await query.answer("Unsupported AI")
+                return
+
+            pending = self._ws_pending.get(user_id, {})
+            pending["ai_provider"] = provider
+            self._ws_pending[user_id] = pending
+            trigger_type = pending.get("trigger_type", "cron")
+
+            buttons = [
+                self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
+                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:sched_trigger:{ws_id}:{trigger_type}")],
+            ]
+
+            await query.edit_message_text(
+                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
+                f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
+                f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML",

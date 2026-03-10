@@ -186,6 +186,25 @@ class TestSessionOperations:
         assert repo.is_workspace_session("sess1") is True
         assert repo.get_session_workspace_path("sess1") == "/path/to/project"
 
+    def test_get_session_by_provider_session_id(self, repo):
+        """provider-native session id로 기존 bot session 조회."""
+        repo.create_session(
+            "user1",
+            "sess1",
+            ai_provider="claude",
+            provider_session_id="external-claude-1",
+            name="Imported Claude",
+        )
+        repo.add_message("sess1", "hello", processed=True, processor="claude")
+
+        result = repo.get_session_by_provider_session_id("user1", "claude", "external-claude-1")
+
+        assert result is not None
+        session, history_count = result
+        assert session.id == "sess1"
+        assert session.provider_session_id == "external-claude-1"
+        assert history_count == 1
+
 
 class TestHistoryOperations:
     """히스토리 관련 테스트."""

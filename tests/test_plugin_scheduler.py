@@ -314,8 +314,8 @@ class TestPluginScheduleCallbackFlow:
         assert "No schedulable plugins" in text
 
     @pytest.mark.asyncio
-    async def test_chat_schedule_shows_trigger_then_model(self, handlers):
-        """chat 타입은 minute 뒤 trigger 선택, 그 다음 모델 선택."""
+    async def test_chat_schedule_shows_trigger_then_provider_then_model(self, handlers):
+        """chat 타입은 minute 뒤 trigger 선택, 그 다음 AI 선택, 그 다음 모델 선택."""
         user_id = str(12345)
         handlers._sched_pending[user_id] = {
             "type": "chat",
@@ -332,6 +332,12 @@ class TestPluginScheduleCallbackFlow:
         await handlers._handle_scheduler_callback(query2, 12345, "sched:trigger:cron")
 
         callbacks = get_callback_data(query2)
+        assert any("sched:provider:" in c for c in callbacks)
+
+        query3 = make_query()
+        await handlers._handle_scheduler_callback(query3, 12345, "sched:provider:claude")
+
+        callbacks = get_callback_data(query3)
         assert any("sched:model:" in c for c in callbacks)
 
 

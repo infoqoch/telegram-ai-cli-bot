@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.ai import get_profile_label, is_supported_model
+from src.ai import get_profile_label, is_supported_model, is_supported_provider
 from src.constants import AVAILABLE_HOURS
 from src.logging_config import logger
 from src.schedule_utils import build_daily_cron, next_occurrence, normalize_schedule_type, normalize_trigger_type
@@ -508,10 +508,43 @@ class SchedulerCallbackHandlers(BaseHandler):
                 f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>{self._format_workspace_path_line(pending)}\n"
                 f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
                 f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+                f"Select AI:",
+                reply_markup=InlineKeyboardMarkup(
+                    self._build_provider_choice_keyboard(
+                        provider,
+                        "sched:provider:",
+                        back_callback=f"sched:minute:{pending.get('minute', 0)}",
+                    )
+                ),
+                parse_mode="HTML",
+            )
+            await query.answer()
+            return
+
+        if action.startswith("provider:"):
+            provider = action[9:]
+            pending = self._sched_pending.get(user_id, {})
+            if not pending:
+                await query.answer("Schedule flow expired")
+                return
+            if not is_supported_provider(provider):
+                await query.answer("Unsupported AI")
+                return
+
+            pending["ai_provider"] = provider
+            self._sched_pending[user_id] = pending
+            schedule_type = normalize_schedule_type(pending.get("type"))
+            trigger_type = normalize_trigger_type(pending.get("trigger_type"))
+
+            await query.edit_message_text(
+                f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
+                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>{self._format_workspace_path_line(pending)}\n"
+                f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
+                f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup([
                     self._build_model_buttons(provider, "sched:model:"),
-                    [InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")],
+                    [InlineKeyboardButton(BUTTON_BACK, callback_data=f"sched:trigger:{trigger_type}")],
                 ]),
                 parse_mode="HTML",
             )
