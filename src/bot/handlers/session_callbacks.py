@@ -33,6 +33,8 @@ from .base import BaseHandler
 class SessionCallbackHandlers(BaseHandler):
     """Session callback handlers (sess: prefix)."""
 
+    _LOCAL_IMPORT_PAGE_SIZE = 10
+
     def _resolve_user_session(self, user_id: str, session_id: str):
         """Resolve a user-visible session id/prefix to the stored session payload."""
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
@@ -179,7 +181,11 @@ class SessionCallbackHandlers(BaseHandler):
                 await self._handle_session_list_callback(query, chat_id)
 
             elif action == "import":
-                await self._handle_import_local_list_callback(query, chat_id)
+                try:
+                    offset = int(parts[2]) if len(parts) > 2 else 0
+                except ValueError:
+                    offset = 0
+                await self._handle_import_local_list_callback(query, chat_id, offset=offset)
 
             elif action == "import_pick":
                 provider = parts[2] if len(parts) > 2 else selected_provider
@@ -528,29 +534,34 @@ class SessionCallbackHandlers(BaseHandler):
             return "~" + path[len(home):]
         return path
 
-    async def _handle_import_local_list_callback(self, query, chat_id: int) -> None:
+    async def _handle_import_local_list_callback(self, query, chat_id: int, offset: int = 0) -> None:
         """Show recent provider-native sessions discovered on the local machine."""
-        user_id = str(chat_id)
-        provider = self._get_selected_ai_provider(user_id)
-        discovered = self._local_sessions.list_recent(provider, limit=10)
+        page_offset = max(offset, 0)
+        page_size = self._LOCAL_IMPORT_PAGE_SIZE
+        discovered = self._local_sessions.list_recent(limit=page_size + 1, offset=page_offset)
+        visible = discovered[:page_size]
+        has_more = len(discovered) > page_size
 
         lines = [
             "<b>Import Local Session</b>",
-            f"Current AI: <b>{self._format_provider_display(provider)}</b>",
+            "Recent local sessions across <b>📚 Claude</b> and <b>🤖 Codex</b>.",
             "",
         ]
         buttons: list[list[InlineKeyboardButton]] = []
 
-        if not discovered:
-            lines.append("No recent local sessions found for this AI.")
+        if not visible:
+            lines.append("No recent local sessions found.")
         else:
-            lines.append("Choose a recent local session to attach:")
+            start_index = page_offset + 1
+            end_index = page_offset + len(visible)
+            lines.append(f"Showing <b>{start_index}-{end_index}</b> recent sessions.")
             lines.append("")
-            for index, session in enumerate(discovered, start=1):
+            for index, session in enumerate(visible, start=start_index):
                 updated = format_local_datetime(session.updated_at) if session.updated_at else "-"
+                provider_display = self._format_provider_display(session.provider)
                 lines.append(
                     f"{index}. <b>{escape_html(session.title or session.short_id)}</b>\n"
-                    f"<code>{session.short_id}</code> • {escape_html(updated)}"
+                    f"{provider_display} • <code>{escape_html(session.short_id)}</code> • {escape_html(updated)}"
                 )
                 if session.workspace_path:
                     lines.append(f"<code>{escape_html(self._shorten_local_path(session.workspace_path))}</code>")
@@ -560,11 +571,31 @@ class SessionCallbackHandlers(BaseHandler):
 
                 buttons.append([
                     InlineKeyboardButton(
-                        f"{session.short_id} {session.title[:18]}",
-                        callback_data=f"sess:import_pick:{provider}:{session.provider_session_id}",
+                        (
+                            f"{self._get_provider_icon(session.provider)} "
+                            f"{session.short_id} {(session.title or session.short_id)[:16]}"
+                        ),
+                        callback_data=f"sess:import_pick:{session.provider}:{session.provider_session_id}",
                     )
                 ])
 
+        nav_buttons: list[InlineKeyboardButton] = []
+        if page_offset > 0:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    "← Newer",
+                    callback_data=f"sess:import:{max(0, page_offset - page_size)}",
+                )
+            )
+        if has_more:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    "Older →",
+                    callback_data=f"sess:import:{page_offset + page_size}",
+                )
+            )
+        if nav_buttons:
+            buttons.append(nav_buttons)
         buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")])
 
         await query.edit_message_text(

@@ -805,15 +805,26 @@ class TestSessionCallbackFlows:
 
     @pytest.mark.asyncio
     async def test_sess_import_lists_recent_local_sessions(self, handlers):
-        """sess:import - 최근 로컬 세션 picker."""
-        local_session = MagicMock()
-        local_session.provider_session_id = "550e8400-e29b-41d4-a716-446655440000"
-        local_session.short_id = "550e8400"
-        local_session.title = "Imported Claude"
-        local_session.updated_at = "2026-03-10T10:00:00Z"
-        local_session.workspace_path = "/Users/test/project"
-        local_session.preview = "existing prompt"
-        handlers._local_sessions.list_recent.return_value = [local_session]
+        """sess:import - 최근 로컬 세션 picker는 모든 provider를 함께 보여준다."""
+        claude_session = MagicMock()
+        claude_session.provider = "claude"
+        claude_session.provider_session_id = "550e8400-e29b-41d4-a716-446655440000"
+        claude_session.short_id = "550e8400"
+        claude_session.title = "Imported Claude"
+        claude_session.updated_at = "2026-03-10T10:00:00Z"
+        claude_session.workspace_path = "/Users/test/project"
+        claude_session.preview = "existing prompt"
+
+        codex_session = MagicMock()
+        codex_session.provider = "codex"
+        codex_session.provider_session_id = "660e8400-e29b-41d4-a716-446655440111"
+        codex_session.short_id = "660e8400"
+        codex_session.title = "Imported Codex"
+        codex_session.updated_at = "2026-03-10T09:30:00Z"
+        codex_session.workspace_path = "/Users/test/other"
+        codex_session.preview = ""
+
+        handlers._local_sessions.list_recent.return_value = [claude_session, codex_session]
 
         query = make_query()
         await handlers._handle_session_callback(query, 12345, "sess:import")
@@ -822,7 +833,36 @@ class TestSessionCallbackFlows:
         callbacks = get_callback_data(query)
         assert "Import Local Session" in text
         assert "Imported Claude" in text
+        assert "Imported Codex" in text
+        assert "📚 Claude" in text
+        assert "🤖 Codex" in text
         assert "sess:import_pick:claude:550e8400-e29b-41d4-a716-446655440000" in callbacks
+        assert "sess:import_pick:codex:660e8400-e29b-41d4-a716-446655440111" in callbacks
+        handlers._local_sessions.list_recent.assert_called_once_with(limit=11, offset=0)
+
+    @pytest.mark.asyncio
+    async def test_sess_import_uses_offset_and_shows_older_navigation(self, handlers):
+        """sess:import:{offset} - older page navigation uses the requested offset."""
+        sessions = []
+        for index in range(11):
+            local_session = MagicMock()
+            local_session.provider = "claude" if index % 2 == 0 else "codex"
+            local_session.provider_session_id = f"session-{index}"
+            local_session.short_id = f"session{index}"
+            local_session.title = f"Imported {index}"
+            local_session.updated_at = "2026-03-10T10:00:00Z"
+            local_session.workspace_path = None
+            local_session.preview = ""
+            sessions.append(local_session)
+        handlers._local_sessions.list_recent.return_value = sessions
+
+        query = make_query()
+        await handlers._handle_session_callback(query, 12345, "sess:import:10")
+
+        callbacks = get_callback_data(query)
+        assert "sess:import:0" in callbacks
+        assert "sess:import:20" in callbacks
+        handlers._local_sessions.list_recent.assert_called_once_with(limit=11, offset=10)
 
     @pytest.mark.asyncio
     async def test_sess_import_pick_switches_existing_attached_session(self, handlers):

@@ -96,3 +96,76 @@ class TestLocalSessionDiscoveryService:
         assert sessions[0].provider_session_id == "019c18c5-8616-78e3-9730-49e989dc3f35"
         assert sessions[0].title == "Codex import target"
         assert sessions[0].workspace_path == "/tmp/codex-project"
+
+    def test_list_recent_merges_all_providers_and_supports_offset(self, tmp_path):
+        """Merged listing returns all providers ordered by recency and paged by offset."""
+        claude_index_dir = tmp_path / ".claude" / "projects" / "demo-project"
+        claude_index_dir.mkdir(parents=True)
+        (claude_index_dir / "sessions-index.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "entries": [
+                        {
+                            "sessionId": "claude-newer",
+                            "summary": "Claude newer",
+                            "modified": "2026-03-10T11:00:00Z",
+                        },
+                        {
+                            "sessionId": "claude-older",
+                            "summary": "Claude older",
+                            "modified": "2026-03-10T08:00:00Z",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        codex_dir = tmp_path / ".codex"
+        codex_sessions_root = codex_dir / "sessions" / "2026" / "03" / "10"
+        codex_sessions_root.mkdir(parents=True)
+        (codex_dir / "session_index.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "codex-newest",
+                            "thread_name": "Codex newest",
+                            "updated_at": "2026-03-10T12:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "id": "codex-middle",
+                            "thread_name": "Codex middle",
+                            "updated_at": "2026-03-10T09:00:00Z",
+                        }
+                    ),
+                ]
+            ) + "\n",
+            encoding="utf-8",
+        )
+        (codex_sessions_root / "codex-newest.jsonl").write_text(
+            json.dumps({"type": "message", "role": "assistant"}),
+            encoding="utf-8",
+        )
+        (codex_sessions_root / "codex-middle.jsonl").write_text(
+            json.dumps({"type": "message", "role": "assistant"}),
+            encoding="utf-8",
+        )
+
+        service = LocalSessionDiscoveryService(home=tmp_path)
+
+        merged = service.list_recent(limit=3)
+        paged = service.list_recent(limit=2, offset=1)
+
+        assert [(session.provider, session.provider_session_id) for session in merged] == [
+            ("codex", "codex-newest"),
+            ("claude", "claude-newer"),
+            ("codex", "codex-middle"),
+        ]
+        assert [(session.provider, session.provider_session_id) for session in paged] == [
+            ("claude", "claude-newer"),
+            ("codex", "codex-middle"),
+        ]

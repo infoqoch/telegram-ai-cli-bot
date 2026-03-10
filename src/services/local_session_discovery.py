@@ -40,15 +40,23 @@ class LocalSessionDiscoveryService:
         self._codex_index_path = self._home / ".codex" / "session_index.jsonl"
         self._codex_sessions_root = self._home / ".codex" / "sessions"
 
-    def list_recent(self, provider: str, limit: int = 10) -> list[DiscoveredSession]:
+    def list_recent(
+        self,
+        provider: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[DiscoveredSession]:
         """Return recent provider-native sessions ordered by last update."""
-        sessions = self._load_provider_sessions(provider)
+        sessions = self._load_sessions(provider)
         ordered = sorted(
             sessions,
             key=lambda item: self._parse_sort_key(item.updated_at),
             reverse=True,
         )
-        return ordered[:limit]
+        safe_offset = max(offset, 0)
+        if limit <= 0:
+            return []
+        return ordered[safe_offset:safe_offset + limit]
 
     def get(self, provider: str, provider_session_id: str) -> Optional[DiscoveredSession]:
         """Return one discovered session by provider-native id."""
@@ -56,6 +64,15 @@ class LocalSessionDiscoveryService:
             if session.provider_session_id == provider_session_id:
                 return session
         return None
+
+    def _load_sessions(self, provider: Optional[str]) -> list[DiscoveredSession]:
+        if provider:
+            return self._load_provider_sessions(provider)
+
+        sessions: list[DiscoveredSession] = []
+        for provider_name in ("claude", "codex"):
+            sessions.extend(self._load_provider_sessions(provider_name))
+        return sessions
 
     def _load_provider_sessions(self, provider: str) -> list[DiscoveredSession]:
         if provider == "claude":
