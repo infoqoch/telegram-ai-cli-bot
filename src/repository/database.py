@@ -100,6 +100,12 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
         _ensure_column(conn, "schedules", "cron_expr", "TEXT")
         _ensure_column(conn, "schedules", "run_at_local", "TEXT")
+    if _table_exists(conn, "message_log"):
+        _ensure_column(conn, "message_log", "delivery_text", "TEXT")
+        _ensure_column(conn, "message_log", "delivery_status", "TEXT NOT NULL DEFAULT 'not_ready'")
+        _ensure_column(conn, "message_log", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "message_log", "delivery_error", "TEXT")
+        _ensure_column(conn, "message_log", "delivered_at", "TEXT")
 
 
 def _migrate_schema(conn: sqlite3.Connection) -> None:
@@ -111,6 +117,11 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
     _ensure_column(conn, "schedules", "cron_expr", "TEXT")
     _ensure_column(conn, "schedules", "run_at_local", "TEXT")
+    _ensure_column(conn, "message_log", "delivery_text", "TEXT")
+    _ensure_column(conn, "message_log", "delivery_status", "TEXT NOT NULL DEFAULT 'not_ready'")
+    _ensure_column(conn, "message_log", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "message_log", "delivery_error", "TEXT")
+    _ensure_column(conn, "message_log", "delivered_at", "TEXT")
 
     # Workspace uniqueness must be provider-aware.
     conn.execute("DROP INDEX IF EXISTS idx_sessions_workspace_unique")
@@ -134,6 +145,18 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_user_provider_state_provider ON user_provider_state(ai_provider)"
     )
     conn.execute("DROP INDEX IF EXISTS idx_queued_messages_expires_at")
+
+    # Historical rows that already have a stored response were necessarily sent successfully
+    # in the previous implementation, because persistence happened after Telegram delivery.
+    conn.execute(
+        """UPDATE message_log
+           SET delivery_status = 'sent',
+               delivery_attempts = CASE WHEN delivery_attempts < 1 THEN 1 ELSE delivery_attempts END,
+               delivered_at = COALESCE(delivered_at, processed_at)
+           WHERE processed = 2
+             AND response IS NOT NULL
+             AND (delivery_status IS NULL OR delivery_status = '' OR delivery_status = 'not_ready')"""
+    )
 
     _backfill_session_provider_data(conn)
     _cleanup_unsupported_provider_rows(conn)

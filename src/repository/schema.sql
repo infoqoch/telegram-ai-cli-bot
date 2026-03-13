@@ -137,6 +137,13 @@ CREATE TABLE IF NOT EXISTS message_log (
     response TEXT,
     error TEXT,
 
+    -- delivery
+    delivery_text TEXT,
+    delivery_status TEXT NOT NULL DEFAULT 'not_ready',
+    delivery_attempts INTEGER NOT NULL DEFAULT 0,
+    delivery_error TEXT,
+    delivered_at TEXT,
+
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 

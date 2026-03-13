@@ -169,6 +169,11 @@ class JobService:
         """Escape one user-controlled string for Telegram HTML."""
         return html.escape(text or "")
 
+    @staticmethod
+    def _format_exception(exc: Exception) -> str:
+        """Return a compact one-line exception summary."""
+        return f"{type(exc).__name__}: {exc}"
+
     async def _call_provider(
         self,
         *,
@@ -334,6 +339,7 @@ class JobService:
         set_session_id(session_id)
 
         short_message = truncate_message(message, 30)
+        delivery_text: Optional[str] = None
 
         logger.info(
             f"Detached provider job start - job_id={job_id}, session={session_id[:8]}, "
@@ -388,14 +394,32 @@ class JobService:
                 question_preview=question_preview,
                 response=response,
             )
+            delivery_text = full_response
+
+            self._repo.store_generated_message(
+                job_id,
+                response=response,
+                error=stored_error,
+                delivery_text=full_response,
+            )
+            logger.info(
+                f"Detached provider persisted generated response - job_id={job_id}, "
+                f"session={session_id[:8]}, stored_response_chars={len(response or '')}"
+            )
 
             if long_task_notified and not stored_error:
-                await self._send_completion_notice(
-                    bot=bot,
-                    chat_id=chat_id,
-                    short_message=short_message,
-                    elapsed=elapsed,
-                )
+                try:
+                    await self._send_completion_notice(
+                        bot=bot,
+                        chat_id=chat_id,
+                        short_message=short_message,
+                        elapsed=elapsed,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"Detached completion notice failed - job_id={job_id}, "
+                        f"session={session_id[:8]}, error={self._format_exception(exc)}"
+                    )
 
             logger.info(
                 f"Detached provider sending Telegram response - job_id={job_id}, "
@@ -405,16 +429,25 @@ class JobService:
                 bot,
                 chat_id,
                 full_response,
+                job_id=job_id,
                 reply_markup=self._build_session_action_markup(session_id),
             )
-            self._repo.complete_message(job_id, response=response, error=stored_error)
+            self._repo.mark_message_delivered(job_id)
             logger.info(
-                f"Detached provider persisted completion - job_id={job_id}, "
-                f"session={session_id[:8]}, stored_response_chars={len(response or '')}"
+                f"Detached provider delivery confirmed - job_id={job_id}, "
+                f"session={session_id[:8]}"
             )
 
         except Exception as e:
             logger.exception(f"Detached provider job failed: job_id={job_id}, trace={trace_id}, error={e}")
+            if delivery_text is not None:
+                self._repo.mark_message_delivery_failed(job_id, self._format_exception(e))
+                logger.warning(
+                    f"Detached provider response preserved for retry - job_id={job_id}, "
+                    f"session={session_id[:8]}"
+                )
+                return
+
             self._repo.complete_message(job_id, error=str(e))
             try:
                 await bot.send_message(
@@ -456,6 +489,7 @@ class JobService:
         chat_id: int,
         text: str,
         *,
+        job_id: Optional[int] = None,
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
         """Send a split-safe Telegram message with HTML fallback."""
@@ -465,6 +499,8 @@ class JobService:
         for index, chunk in enumerate(chunks, start=1):
             chunk_markup = reply_markup if index == len(chunks) else None
             try:
+                if job_id is not None:
+                    self._repo.increment_delivery_attempts(job_id)
                 logger.info(
                     f"Detached provider Telegram send - chat_id={chat_id}, chunk={index}/{len(chunks)}, "
                     f"chars={len(chunk)}, parse_mode=HTML"
@@ -475,9 +511,20 @@ class JobService:
                     parse_mode="HTML",
                     reply_markup=chunk_markup,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.warning(
                     f"Detached provider Telegram HTML send failed, retrying plain text - "
-                    f"chat_id={chat_id}, chunk={index}/{len(chunks)}"
+                    f"chat_id={chat_id}, chunk={index}/{len(chunks)}, "
+                    f"error={self._format_exception(exc)}"
                 )
-                await bot.send_message(chat_id=chat_id, text=chunk, reply_markup=chunk_markup)
+                if job_id is not None:
+                    self._repo.increment_delivery_attempts(job_id)
+                try:
+                    await bot.send_message(chat_id=chat_id, text=chunk, reply_markup=chunk_markup)
+                except Exception as fallback_exc:
+                    logger.error(
+                        f"Detached provider Telegram plain text send failed - "
+                        f"chat_id={chat_id}, chunk={index}/{len(chunks)}, "
+                        f"error={self._format_exception(fallback_exc)}"
+                    )
+                    raise

@@ -1417,6 +1417,68 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def store_generated_message(
+        self,
+        queue_id: int,
+        *,
+        response: str,
+        error: Optional[str],
+        delivery_text: str,
+    ) -> bool:
+        """Persist a generated response before attempting Telegram delivery."""
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET processed = 2,
+                   processed_at = ?,
+                   response = ?,
+                   error = ?,
+                   delivery_text = ?,
+                   delivery_status = 'pending',
+                   delivery_error = NULL,
+                   delivered_at = NULL
+               WHERE id = ?""",
+            (self._now(), response, error, delivery_text, queue_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def increment_delivery_attempts(self, queue_id: int) -> bool:
+        """Count one Telegram delivery attempt for a generated message."""
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET delivery_attempts = delivery_attempts + 1
+               WHERE id = ?""",
+            (queue_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def mark_message_delivered(self, queue_id: int) -> bool:
+        """Mark a generated response as delivered to Telegram."""
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET delivery_status = 'sent',
+                   delivery_error = NULL,
+                   delivered_at = ?
+               WHERE id = ?""",
+            (self._now(), queue_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def mark_message_delivery_failed(self, queue_id: int, delivery_error: str) -> bool:
+        """Mark a generated response as failed during Telegram delivery."""
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET delivery_status = 'failed',
+                   delivery_error = ?,
+                   delivered_at = NULL
+               WHERE id = ?""",
+            (delivery_error, queue_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def list_processing_messages_by_user(self, user_id: str) -> list[dict[str, Any]]:
         """List active processing message_log rows for a user."""
         rows = self._conn.execute(

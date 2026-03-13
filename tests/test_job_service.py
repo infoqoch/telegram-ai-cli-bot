@@ -66,6 +66,11 @@ async def test_run_job_completes_message_and_releases_lock(repo, session_service
     saved = repo.get_message_log(job_id)
     assert saved["processed"] == 2
     assert saved["response"] == "응답"
+    assert saved["delivery_text"] is not None
+    assert saved["delivery_status"] == "sent"
+    assert saved["delivery_attempts"] == 1
+    assert saved["delivery_error"] is None
+    assert saved["delivered_at"] is not None
     assert repo.get_session_lock("sess1") is None
     assert fake_bot.send_message.called
     sent_call = fake_bot.send_message.await_args_list[-1]
@@ -127,12 +132,14 @@ async def test_run_job_drains_persistent_queue(repo, session_service):
     assert repo.get_queued_messages_by_session("sess1") == []
 
     rows = repo._conn.execute(
-        "SELECT processed, response FROM message_log WHERE session_id = ? ORDER BY id ASC",
+        "SELECT processed, response, delivery_status FROM message_log WHERE session_id = ? ORDER BY id ASC",
         ("sess1",),
     ).fetchall()
     assert len(rows) == 2
     assert rows[0]["processed"] == 2
     assert rows[1]["processed"] == 2
+    assert rows[0]["delivery_status"] == "sent"
+    assert rows[1]["delivery_status"] == "sent"
 
 
 @pytest.mark.asyncio
@@ -174,6 +181,7 @@ async def test_run_job_marks_watchdog_timeout_without_completion_notice(repo, se
     assert saved["processed"] == 2
     assert saved["error"] == "watchdog_timeout"
     assert "Task exceeded 1 second and was stopped" in saved["response"]
+    assert saved["delivery_status"] == "sent"
     assert repo.get_session_lock("sess1") is None
 
     sent_texts = [call.kwargs["text"] for call in fake_bot.send_message.await_args_list]
@@ -215,3 +223,43 @@ async def test_run_job_escapes_session_and_message_metadata(repo, session_servic
     assert "&lt;/code&gt;&lt;i&gt;x&lt;/i&gt;" in sent_text
     assert "unsafe <tag>" not in sent_text
     assert "</code><i>x</i>" not in sent_text
+
+
+@pytest.mark.asyncio
+async def test_run_job_preserves_response_when_delivery_fails(repo, session_service):
+    """Generated responses survive Telegram delivery failures for later recovery."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="질문",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(text="응답", error=None, session_id="sess1"))
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock(side_effect=[RuntimeError("bad html"), RuntimeError("Timed out")])
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    saved = repo.get_message_log(job_id)
+    assert saved["processed"] == 2
+    assert saved["response"] == "응답"
+    assert saved["delivery_text"] is not None
+    assert saved["delivery_status"] == "failed"
+    assert saved["delivery_attempts"] == 2
+    assert saved["delivery_error"] == "RuntimeError: Timed out"
+    assert saved["delivered_at"] is None
+    assert repo.get_session_lock("sess1") is None
