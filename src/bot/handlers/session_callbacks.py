@@ -236,8 +236,8 @@ class SessionCallbackHandlers(BaseHandler):
                     text=f"Error occurred.\n\n<code>{escape_html(str(e))}</code>",
                     parse_mode="HTML"
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Error display fallback also failed: {e}")
 
     async def _handle_response_session_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle AI-response shortcut callbacks without overwriting the original answer."""

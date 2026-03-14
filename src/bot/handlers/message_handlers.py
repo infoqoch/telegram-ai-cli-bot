@@ -1,6 +1,7 @@
 """Message processing handlers."""
 
-import hashlib
+import re
+import secrets
 import time
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -106,7 +107,6 @@ class MessageHandlers(BaseHandler):
                 return
 
             reply_text = reply_to_message.text or ""
-            import re
 
             if "sess_name:" in reply_text:
                 sess_match = re.search(r"sess_name:(\w+)", reply_text)
@@ -319,9 +319,7 @@ class MessageHandlers(BaseHandler):
         buttons = []
 
         # Generate unique key for this pending request
-        pending_key = hashlib.md5(
-            f"{current_session_id}:{message}:{time.time()}".encode()
-        ).hexdigest()[:8]
+        pending_key = secrets.token_hex(4)
 
         # Expire entries older than 5 minutes
         now = time.time()

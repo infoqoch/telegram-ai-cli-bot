@@ -38,7 +38,7 @@ from src.ui_emoji import (
 )
 from ..command_catalog import build_menu_specs
 from ..constants import get_model_badge
-from ..formatters import escape_html
+from ..formatters import escape_html, split_message
 from ..runtime import DetachedJobManager, PendingRequestStore
 from src.plugins.loader import PluginInteraction
 from src.services.local_session_discovery import LocalSessionDiscoveryService
@@ -575,37 +575,6 @@ class BaseHandler:
         logger.trace(f"Authentication check result: {result}")
         return result
 
-    @staticmethod
-    def _split_message(text: str, max_length: int = 4000) -> list[str]:
-        """Split text into chunks no longer than max_length.
-
-        Splits preferably at the last newline within the max_length window.
-        Falls back to hard character split if no newline is found.
-        Empty chunks are never returned.
-        """
-        if len(text) <= max_length:
-            return [text]
-
-        chunks: list[str] = []
-        remaining = text
-
-        while len(remaining) > max_length:
-            window = remaining[:max_length]
-            split_pos = window.rfind("\n")
-            if split_pos > 0:
-                chunk = remaining[:split_pos]
-                remaining = remaining[split_pos + 1:]
-            else:
-                chunk = window
-                remaining = remaining[max_length:]
-            if chunk:
-                chunks.append(chunk)
-
-        if remaining:
-            chunks.append(remaining)
-
-        return chunks
-
     async def _send_message_to_chat(
         self,
         bot,
@@ -616,7 +585,7 @@ class BaseHandler:
         """Send message directly to chat_id (split if too long)."""
         logger.trace(f"_send_message_to_chat - length={len(text)}, max={max_length}")
 
-        chunks = self._split_message(text, max_length)
+        chunks = split_message(text, max_length)
         logger.trace(f"Message split: {len(chunks)} chunks")
 
         for i, chunk in enumerate(chunks):
@@ -915,9 +884,8 @@ class BaseHandler:
         command = text.split()[0] if text else ""
         logger.info(f"Unknown command: {command}")
 
-        from ..formatters import escape_html as _esc
         await update.message.reply_text(
-            f"Unknown command: <code>{_esc(command)}</code>\n\n"
+            f"Unknown command: <code>{escape_html(command)}</code>\n\n"
             f"/menu or /help",
             parse_mode="HTML"
         )

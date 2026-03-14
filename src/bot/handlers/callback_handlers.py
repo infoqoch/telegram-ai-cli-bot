@@ -1,5 +1,5 @@
 """Callback query handlers - router and small utility callbacks."""
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -29,74 +29,75 @@ class CallbackHandlers(BaseHandler):
         if not chat_id:
             return
 
-        self._setup_request_context(chat_id)
-        callback_data = query.data or ""
-        logger.info(f"Callback query: {callback_data} (chat_id={chat_id})")
+        try:
+            self._setup_request_context(chat_id)
+            callback_data = query.data or ""
+            logger.info(f"Callback query: {callback_data} (chat_id={chat_id})")
 
-        if not self._is_authorized(chat_id):
-            logger.debug("Callback denied - unauthorized")
-            await query.answer("⛔ Access denied.", show_alert=True)
-            clear_context()
-            return
-
-        allow_unauthenticated_menu = callback_data in {"menu:open", "menu:help"}
-        if not allow_unauthenticated_menu and not self._is_authenticated(str(chat_id)):
-            logger.debug("Callback denied - auth required")
-            await query.answer("🔒 Authentication required.\n/auth <key>", show_alert=True)
-            clear_context()
-            return
-
-        await query.answer()
-
-        if callback_data.startswith("menu:"):
-            await self._handle_menu_callback(query, chat_id, callback_data)
-            return
-
-        if callback_data.startswith("plug:"):
-            await self._handle_plugin_hub_callback(query, chat_id, callback_data)
-            return
-
-        # Plugin auto-routing (CALLBACK_PREFIX 기반)
-        if self.plugins:
-            plugin = self.plugins.get_plugin_for_callback(callback_data)
-            if plugin:
-                await self._handle_plugin_callback(query, chat_id, callback_data, plugin)
+            if not self._is_authorized(chat_id):
+                logger.debug("Callback denied - unauthorized")
+                await query.answer("⛔ Access denied.", show_alert=True)
                 return
 
-        if callback_data.startswith("ai:"):
-            await self._handle_ai_callback(query, chat_id, callback_data)
-            return
+            allow_unauthenticated_menu = callback_data in {"menu:open", "menu:help"}
+            if not allow_unauthenticated_menu and not self._is_authenticated(str(chat_id)):
+                logger.debug("Callback denied - auth required")
+                await query.answer("🔒 Authentication required.\n/auth <key>", show_alert=True)
+                return
 
-        if callback_data.startswith("resp:"):
-            await self._handle_response_session_callback(query, chat_id, callback_data)
-            return
+            await query.answer()
 
-        # Session callback
-        if callback_data.startswith("sess:"):
-            await self._handle_session_callback(query, chat_id, callback_data)
-            return
+            if callback_data.startswith("menu:"):
+                await self._handle_menu_callback(query, chat_id, callback_data)
+                return
 
-        # Tasks callback
-        if callback_data.startswith("tasks:"):
-            await self._handle_tasks_callback(query, chat_id)
-            return
+            if callback_data.startswith("plug:"):
+                await self._handle_plugin_hub_callback(query, chat_id, callback_data)
+                return
 
-        # Scheduler callback
-        if callback_data.startswith("sched:"):
-            await self._handle_scheduler_callback(query, chat_id, callback_data)
-            return
+            # Plugin auto-routing (CALLBACK_PREFIX 기반)
+            if self.plugins:
+                plugin = self.plugins.get_plugin_for_callback(callback_data)
+                if plugin:
+                    await self._handle_plugin_callback(query, chat_id, callback_data, plugin)
+                    return
 
-        # Workspace callback
-        if callback_data.startswith("ws:"):
-            await self._handle_workspace_callback(query, chat_id, callback_data)
-            return
+            if callback_data.startswith("ai:"):
+                await self._handle_ai_callback(query, chat_id, callback_data)
+                return
 
-        # Session queue callback (new method)
-        if callback_data.startswith("sq:"):
-            await self._handle_session_queue_callback(query, chat_id, callback_data)
-            return
+            if callback_data.startswith("resp:"):
+                await self._handle_response_session_callback(query, chat_id, callback_data)
+                return
 
-        logger.warning(f"Unknown callback: {callback_data}")
+            # Session callback
+            if callback_data.startswith("sess:"):
+                await self._handle_session_callback(query, chat_id, callback_data)
+                return
+
+            # Tasks callback
+            if callback_data.startswith("tasks:"):
+                await self._handle_tasks_callback(query, chat_id)
+                return
+
+            # Scheduler callback
+            if callback_data.startswith("sched:"):
+                await self._handle_scheduler_callback(query, chat_id, callback_data)
+                return
+
+            # Workspace callback
+            if callback_data.startswith("ws:"):
+                await self._handle_workspace_callback(query, chat_id, callback_data)
+                return
+
+            # Session queue callback (new method)
+            if callback_data.startswith("sq:"):
+                await self._handle_session_queue_callback(query, chat_id, callback_data)
+                return
+
+            logger.warning(f"Unknown callback: {callback_data}")
+        finally:
+            clear_context()
 
     async def _handle_menu_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle `/menu` launcher callbacks."""
@@ -494,8 +495,8 @@ class CallbackHandlers(BaseHandler):
                     text=f"Error occurred.\n\n<code>{escape_html(str(e))}</code>",
                     parse_mode="HTML"
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Error display fallback also failed: {e}")
 
     async def _handle_ai_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle provider selection callbacks."""

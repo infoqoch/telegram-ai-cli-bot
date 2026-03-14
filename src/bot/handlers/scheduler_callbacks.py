@@ -7,7 +7,7 @@ from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 from src.ai import get_profile_label, is_supported_model, is_supported_provider
 from src.constants import AVAILABLE_HOURS
 from src.logging_config import logger
-from src.schedule_utils import build_daily_cron, next_occurrence, normalize_schedule_type, normalize_trigger_type
+from src.schedule_utils import build_daily_cron, next_occurrence, normalize_schedule_type, normalize_trigger_type, resolve_provider, resolve_schedule_type
 from src.time_utils import format_local_datetime
 from src.ui_emoji import (
     BUTTON_ADD_CHAT,
@@ -689,8 +689,8 @@ class SchedulerCallbackHandlers(BaseHandler):
 
     def _build_schedule_detail_text(self, schedule) -> str:
         """Build the detail card for one schedule."""
-        schedule_type = self._resolve_schedule_type(schedule)
-        provider = self._resolve_provider(schedule)
+        schedule_type = resolve_schedule_type(schedule)
+        provider = resolve_provider(schedule)
         time_str = self._string_attr(schedule, "time_str")
         next_run_text = self._string_attr(schedule, "next_run_text", fallback=time_str or "No upcoming run")
         lines = [
@@ -730,8 +730,8 @@ class SchedulerCallbackHandlers(BaseHandler):
         fallback_workspace_path: str | None = None,
     ) -> str:
         """Build the success card for chat/workspace schedules."""
-        schedule_type = self._resolve_schedule_type(schedule, fallback=fallback_type)
-        provider = self._resolve_provider(schedule, fallback=fallback_provider)
+        schedule_type = resolve_schedule_type(schedule, fallback=fallback_type)
+        provider = resolve_provider(schedule, fallback=fallback_provider)
         workspace_path = getattr(schedule, "workspace_path", None) or fallback_workspace_path
         time_str = self._string_attr(schedule, "time_str")
         next_run_text = self._string_attr(schedule, "next_run_text", fallback=time_str)
@@ -782,24 +782,6 @@ class SchedulerCallbackHandlers(BaseHandler):
             return f"Daily at {hour:02d}:{minute:02d}"
         trigger_summary = getattr(schedule, "trigger_summary", None)
         return trigger_summary if isinstance(trigger_summary, str) and trigger_summary else "Daily"
-
-    @staticmethod
-    def _resolve_schedule_type(schedule, *, fallback: str | None = None) -> str:
-        """Resolve schedule type while tolerating MagicMock attributes in tests."""
-        schedule_type = getattr(schedule, "schedule_type", None)
-        if not isinstance(schedule_type, str) or not schedule_type:
-            schedule_type = getattr(schedule, "type", None)
-        if not isinstance(schedule_type, str) or not schedule_type:
-            schedule_type = fallback or "chat"
-        return normalize_schedule_type(schedule_type)
-
-    @staticmethod
-    def _resolve_provider(schedule, *, fallback: str = "claude") -> str:
-        """Resolve provider while tolerating MagicMock attributes in tests."""
-        provider = getattr(schedule, "ai_provider", None)
-        if not isinstance(provider, str) or provider not in {"claude", "codex"}:
-            return fallback
-        return provider
 
     @staticmethod
     def _string_attr(schedule, attr: str, *, fallback: str = "") -> str:

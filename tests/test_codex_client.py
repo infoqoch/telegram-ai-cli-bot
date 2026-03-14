@@ -34,7 +34,7 @@ class TestCodexClient:
             mock_process.kill = MagicMock()
             mock_exec.return_value = mock_process
 
-            with patch("src.codex.client.os.killpg") as mock_killpg:
+            with patch("src.ai.base_client.os.killpg") as mock_killpg:
                 with pytest.raises(asyncio.TimeoutError):
                     await client._run_command(["codex", "exec"], timeout=1)
 

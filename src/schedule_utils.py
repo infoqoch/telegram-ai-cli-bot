@@ -110,3 +110,19 @@ def schedule_time_label(
     if normalized == "once" and run_at_local:
         return format_local_datetime(run_at_local)
     return f"{hour:02d}:{minute:02d} {get_app_timezone_label()}"
+
+
+def resolve_schedule_type(schedule, *, fallback: str = "chat") -> str:
+    schedule_type = getattr(schedule, "schedule_type", None)
+    if not isinstance(schedule_type, str) or not schedule_type:
+        schedule_type = getattr(schedule, "type", None)
+    if not isinstance(schedule_type, str) or not schedule_type:
+        schedule_type = fallback
+    return normalize_schedule_type(schedule_type)
+
+
+def resolve_provider(schedule, *, fallback: str = "claude") -> str:
+    provider = getattr(schedule, "ai_provider", None)
+    if not isinstance(provider, str) or provider not in {"claude", "codex"}:
+        return fallback
+    return provider

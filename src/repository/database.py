@@ -1,5 +1,6 @@
 """SQLite database connection singleton."""
 
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -10,6 +11,7 @@ from src.schedule_utils import build_daily_cron
 
 _connection: Optional[sqlite3.Connection] = None
 _lock = threading.Lock()
+_SAFE_SQL_IDENTIFIER = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
 def get_connection(db_path: Optional[Path | str] = None) -> sqlite3.Connection:
@@ -165,6 +167,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
     """Add one column if it does not exist."""
+    if not _SAFE_SQL_IDENTIFIER.match(table) or not _SAFE_SQL_IDENTIFIER.match(column):
+        raise ValueError(f"Unsafe SQL identifier: {table}.{column}")
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     existing = {row[1] for row in rows}
     if column not in existing:

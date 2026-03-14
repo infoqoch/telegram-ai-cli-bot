@@ -9,7 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
-from src.schedule_utils import normalize_schedule_type
+from src.schedule_utils import normalize_schedule_type, resolve_provider, resolve_schedule_type
 
 if TYPE_CHECKING:
     from src.ai import AIRegistry
@@ -89,7 +89,7 @@ class ScheduleExecutionService:
 
         Returns str for plugin schedules, tuple(response, provider_session_id) for AI schedules.
         """
-        schedule_type = self._resolve_schedule_type(schedule)
+        schedule_type = resolve_schedule_type(schedule)
 
         if schedule_type == "plugin" and schedule.plugin_name and schedule.action_name:
             plugin = self._plugin_loader.get_plugin_by_name(schedule.plugin_name)
@@ -98,7 +98,7 @@ class ScheduleExecutionService:
             return await plugin.execute_scheduled_action(schedule.action_name, schedule.chat_id)
 
         workspace_path = schedule.workspace_path if schedule_type == "workspace" and schedule.workspace_path else None
-        provider = self._resolve_provider(schedule)
+        provider = resolve_provider(schedule)
         client = self._ai_registry.get_client(provider)
         text, error, provider_session_id = await client.chat(
             message=schedule.message,
@@ -145,24 +145,6 @@ class ScheduleExecutionService:
         return InlineKeyboardMarkup([[
             InlineKeyboardButton("💬 Session", callback_data=f"resp:sched:{log_id}"),
         ]])
-
-    @staticmethod
-    def _resolve_schedule_type(schedule) -> str:
-        """Resolve schedule type while tolerating MagicMock attributes in tests."""
-        schedule_type = getattr(schedule, "schedule_type", None)
-        if not isinstance(schedule_type, str) or not schedule_type:
-            schedule_type = getattr(schedule, "type", None)
-        if not isinstance(schedule_type, str) or not schedule_type:
-            schedule_type = "chat"
-        return normalize_schedule_type(schedule_type)
-
-    @staticmethod
-    def _resolve_provider(schedule) -> str:
-        """Resolve provider while tolerating MagicMock attributes in tests."""
-        provider = getattr(schedule, "ai_provider", None)
-        if not isinstance(provider, str) or provider not in {"claude", "codex"}:
-            return "claude"
-        return provider
 
     def _format_timeout_error(self) -> str:
         """Return a stable timeout error string."""

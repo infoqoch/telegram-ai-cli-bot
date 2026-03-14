@@ -161,7 +161,7 @@ def setup_logging(
         level=level,
         colorize=True,
         backtrace=True,
-        diagnose=True,
+        diagnose=False,
     )
 
     # 항상 파일에도 출력 (nohup stderr 리다이렉트가 자식 프로세스에서 동작하지 않는 문제 우회)
@@ -171,7 +171,7 @@ def setup_logging(
         level=level,
         colorize=False,
         backtrace=True,
-        diagnose=True,
+        diagnose=False,
         rotation="00:00",
         retention="14 days",
     )
@@ -186,7 +186,7 @@ def setup_logging(
             retention="14 days",
             compression="gz",
             backtrace=True,
-            diagnose=True,
+            diagnose=False,
         )
 
     # 표준 logging 통합

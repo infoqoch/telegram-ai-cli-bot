@@ -10,7 +10,7 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.ai import AIRegistry, get_profile_label, get_provider_label
 from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
-from src.bot.formatters import truncate_message
+from src.bot.formatters import split_message, truncate_message
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
 from src.repository import Repository
 from src.services.session_service import SessionService
@@ -457,32 +457,6 @@ class JobService:
             except Exception:
                 logger.exception(f"Detached Claude job error delivery failed: job_id={job_id}")
 
-    @staticmethod
-    def _split_message(text: str, max_length: int = 4000) -> list[str]:
-        """Split long Telegram messages on newline boundaries when possible."""
-        if len(text) <= max_length:
-            return [text]
-
-        chunks: list[str] = []
-        remaining = text
-
-        while len(remaining) > max_length:
-            window = remaining[:max_length]
-            split_pos = window.rfind("\n")
-            if split_pos > 0:
-                chunk = remaining[:split_pos]
-                remaining = remaining[split_pos + 1:]
-            else:
-                chunk = window
-                remaining = remaining[max_length:]
-            if chunk:
-                chunks.append(chunk)
-
-        if remaining:
-            chunks.append(remaining)
-
-        return chunks
-
     async def _send_message_to_chat(
         self,
         bot: Bot,
@@ -493,7 +467,7 @@ class JobService:
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
         """Send a split-safe Telegram message with HTML fallback."""
-        chunks = self._split_message(text)
+        chunks = split_message(text)
         logger.info(f"Detached provider Telegram chunks - chat_id={chat_id}, chunks={len(chunks)}")
 
         for index, chunk in enumerate(chunks, start=1):

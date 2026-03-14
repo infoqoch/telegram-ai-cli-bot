@@ -217,7 +217,7 @@ class TestRunCommand:
             mock_process.kill = MagicMock()
             mock_exec.return_value = mock_process
 
-            with patch("src.claude.client.os.killpg") as mock_killpg:
+            with patch("src.ai.base_client.os.killpg") as mock_killpg:
                 with pytest.raises(asyncio.TimeoutError):
                     await client._run_command(["claude", "--print"], timeout=1)
 

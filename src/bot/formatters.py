@@ -58,6 +58,31 @@ def markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+def split_message(text: str, max_length: int = 4000) -> list[str]:
+    if len(text) <= max_length:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+
+    while len(remaining) > max_length:
+        window = remaining[:max_length]
+        split_pos = window.rfind("\n")
+        if split_pos > 0:
+            chunk = remaining[:split_pos]
+            remaining = remaining[split_pos + 1:]
+        else:
+            chunk = window
+            remaining = remaining[max_length:]
+        if chunk:
+            chunks.append(chunk)
+
+    if remaining:
+        chunks.append(remaining)
+
+    return chunks
+
+
 def truncate_message(text: str, max_length: int = 40) -> str:
     """Truncate message with ellipsis."""
     if len(text) <= max_length:

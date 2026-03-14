@@ -129,12 +129,17 @@ class DetachedJobManager:
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("PYTHONPYCACHEPREFIX", ".build")
 
+        log_dir = Path(os.getenv("BOT_LOG_DIR", "/tmp/telegram-bot-logs"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stderr_path = log_dir / f"worker-{job_id}.err"
+        stderr_file = open(stderr_path, "w")
+
         process = subprocess.Popen(
             [self._python_executable, "-u", "-m", "src.worker_job", "--job-id", str(job_id)],
             cwd=str(self._base_dir),
             env=env,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_file,
             start_new_session=True,
         )
         logger.info(f"Detached worker spawned: job_id={job_id}, pid={process.pid}")
