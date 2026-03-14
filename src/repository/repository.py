@@ -347,6 +347,7 @@ class Repository:
             ).fetchone()
             previous_session_id = row["previous_session_id"] if row else None
 
+        now = self._now()
         self._conn.execute(
             """INSERT INTO user_provider_state
                (user_id, ai_provider, current_session_id, previous_session_id, updated_at)
@@ -355,8 +356,16 @@ class Repository:
                    current_session_id = excluded.current_session_id,
                    previous_session_id = excluded.previous_session_id,
                    updated_at = excluded.updated_at""",
-            (user_id, provider, session_id, previous_session_id, self._now()),
+            (user_id, provider, session_id, previous_session_id, now),
         )
+        # Clear current from other providers — only one current session globally
+        if session_id is not None:
+            self._conn.execute(
+                """UPDATE user_provider_state
+                   SET current_session_id = NULL, updated_at = ?
+                   WHERE user_id = ? AND ai_provider != ?""",
+                (now, user_id, provider),
+            )
         self._conn.execute(
             "UPDATE users SET current_session_id = ?, previous_session_id = ? WHERE id = ?",
             (session_id, previous_session_id, user_id),

@@ -90,7 +90,7 @@ class SessionService:
             model=model,
             name=name,
             workspace_path=workspace_path,
-            switch_to=True
+            switch_to=True,
         )
         if first_message:
             self._repo.add_message(session_id, first_message, processed=True, processor=provider)
