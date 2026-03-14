@@ -122,7 +122,7 @@ class SchedulerCallbackHandlers(BaseHandler):
         logger.info(f"Schedule registered: {name} ({schedule_type}, {trigger_type})")
 
     async def _handle_scheduler_callback(self, query, chat_id: int, callback_data: str) -> None:
-        """Handle scheduler callbacks."""
+        """Handle scheduler callbacks — routes to individual _sched_* methods."""
         user_id = str(chat_id)
         action = callback_data[6:]
 
@@ -131,479 +131,513 @@ class SchedulerCallbackHandlers(BaseHandler):
             return
 
         if action == "refresh":
+            return await self._sched_refresh(query, user_id)
+        if action.startswith("detail:"):
+            return await self._sched_detail(query, user_id, action[7:])
+        if action.startswith("toggle:"):
+            return await self._sched_toggle(query, chat_id, action[7:])
+        if action.startswith("delete:"):
+            return await self._sched_delete(query, user_id, action[7:])
+        if action.startswith("chtime:") and not action.startswith("chtime_"):
+            return await self._sched_chtime(query, action[7:])
+        if action.startswith("chtime_hour:"):
+            return await self._sched_chtime_hour(query, action[12:])
+        if action.startswith("chtime_min:"):
+            return await self._sched_chtime_min(query, action[11:])
+        if action.startswith("chtime_trigger:"):
+            return await self._sched_chtime_trigger(query, chat_id, action[15:])
+        if action in ("add:ai", "add:claude", "add:chat"):
+            return await self._sched_add_chat(query, user_id)
+        if action == "add:workspace":
+            return await self._sched_add_workspace(query, user_id)
+        if action == "add:plugin":
+            return await self._sched_add_plugin(query, user_id)
+        if action.startswith("plugin:") and not action.startswith("pluginaction:"):
+            return await self._sched_select_plugin(query, user_id, int(action[7:]))
+        if action.startswith("pluginaction:"):
+            return await self._sched_select_plugin_action(query, user_id, int(action[13:]))
+        if action.startswith("wspath:"):
+            return await self._sched_select_wspath(query, user_id, int(action[7:]))
+        if action.startswith("time:"):
+            return await self._sched_select_time(query, user_id, action[5:])
+        if action.startswith("minute:"):
+            return await self._sched_select_minute(query, user_id, int(action[7:]))
+        if action.startswith("trigger:"):
+            return await self._sched_select_trigger(query, chat_id, action[8:])
+        if action.startswith("provider:"):
+            return await self._sched_select_provider(query, user_id, action[9:])
+        if action.startswith("model:"):
+            return await self._sched_select_model(query, user_id, action[6:])
+
+        await query.answer("Unknown action")
+
+    # ------------------------------------------------------------------
+    # Individual _sched_* handler methods
+    # ------------------------------------------------------------------
+
+    async def _sched_refresh(self, query, user_id: str) -> None:
+        """Render the main scheduler list screen."""
+        await query.edit_message_text(
+            self._build_scheduler_screen_text(user_id),
+            reply_markup=InlineKeyboardMarkup(self._build_scheduler_keyboard(user_id)),
+            parse_mode="HTML",
+        )
+        await query.answer("Refreshed")
+
+    async def _sched_detail(self, query, user_id: str, schedule_id: str) -> None:
+        """Show detail screen for a single schedule."""
+        schedule = self._schedule_manager.get(schedule_id)
+        if not schedule:
+            await query.answer("Schedule not found")
+            return
+
+        toggle_label = "⏸ OFF" if schedule.enabled else "✅ ON"
+        buttons = [
+            [InlineKeyboardButton(toggle_label, callback_data=f"sched:toggle:{schedule_id}")],
+            [InlineKeyboardButton(f"⏰ Change Time ({schedule.time_str})", callback_data=f"sched:chtime:{schedule_id}")],
+            [InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sched:delete:{schedule_id}")],
+            [InlineKeyboardButton(BUTTON_BACK, callback_data="sched:refresh")],
+        ]
+
+        await query.edit_message_text(
+            self._build_schedule_detail_text(schedule),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_toggle(self, query, chat_id: int, schedule_id: str) -> None:
+        """Toggle a schedule on/off then show its detail screen."""
+        new_state = self._schedule_manager.toggle(schedule_id)
+        if new_state is None:
+            await query.answer("Schedule not found")
+            return
+        await query.answer("ON" if new_state else "OFF")
+        await self._handle_scheduler_callback(query, chat_id, f"sched:detail:{schedule_id}")
+
+    async def _sched_delete(self, query, user_id: str, schedule_id: str) -> None:
+        """Delete a schedule and return to the list screen."""
+        if self._schedule_manager.remove(schedule_id):
             await query.edit_message_text(
                 self._build_scheduler_screen_text(user_id),
                 reply_markup=InlineKeyboardMarkup(self._build_scheduler_keyboard(user_id)),
                 parse_mode="HTML",
             )
-            await query.answer("Refreshed")
+            await query.answer("Deleted")
+        else:
+            await query.answer("Delete failed")
+
+    async def _sched_chtime(self, query, schedule_id: str) -> None:
+        """Show hour picker for changing a schedule's time."""
+        schedule = self._schedule_manager.get(schedule_id)
+        if not schedule:
+            await query.answer("Schedule not found")
+            return
+        await query.edit_message_text(
+            f"<b>Change Time</b>\n\n"
+            f"{schedule.type_emoji} <b>{escape_html(schedule.name)}</b>\n"
+            f"Current: <b>{escape_html(schedule.time_str)}</b>\n\n"
+            f"Select new hour:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_hour_keyboard(f"sched:chtime_hour:{schedule_id}:") + [[
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")
+                ]]
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_chtime_hour(self, query, data: str) -> None:
+        """Show minute picker after an hour is chosen during time change. data = 'schedule_id:hour'"""
+        schedule_id, hour = data.split(":")
+        await query.edit_message_text(
+            f"<b>Change Time</b>\n\n"
+            f"New hour: <b>{int(hour):02d}:00</b>\n\n"
+            f"Select minute:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_minute_keyboard("sched:chtime_min", schedule_id, int(hour)) + [[
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")
+                ]]
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_chtime_min(self, query, data: str) -> None:
+        """Show trigger-mode picker after minute chosen during time change. data = 'schedule_id:hour:minute'"""
+        schedule_id, hour, minute = data.split(":")
+        schedule = self._schedule_manager.get(schedule_id)
+        current_trigger = normalize_trigger_type(schedule.trigger_type) if schedule else "cron"
+        current_label = "Daily" if current_trigger == "cron" else "One-time"
+        await query.edit_message_text(
+            f"<b>Change Time</b>\n\n"
+            f"New time: <b>{int(hour):02d}:{int(minute):02d}</b>\n"
+            f"Current mode: <b>{current_label}</b>\n\n"
+            f"Choose schedule mode:",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Daily", callback_data=f"sched:chtime_trigger:{schedule_id}:{hour}:{minute}:cron"),
+                    InlineKeyboardButton("One-time", callback_data=f"sched:chtime_trigger:{schedule_id}:{hour}:{minute}:once"),
+                ],
+                [InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")],
+            ]),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_chtime_trigger(self, query, chat_id: int, data: str) -> None:
+        """Persist the new time+trigger for an existing schedule. data = 'schedule_id:hour:minute:trigger'"""
+        schedule_id, hour, minute, trigger = data.split(":")
+        result = self._schedule_manager.update_time(schedule_id, int(hour), int(minute), trigger_type=trigger)
+        if result:
+            trigger_label = "Daily" if trigger == "cron" else "One-time"
+            await query.answer(f"{int(hour):02d}:{int(minute):02d} ({trigger_label})")
+        else:
+            await query.answer("Update failed")
+        await self._handle_scheduler_callback(query, chat_id, f"sched:detail:{schedule_id}")
+
+    async def _sched_add_chat(self, query, user_id: str) -> None:
+        """Start the add-chat-schedule flow (hour picker)."""
+        provider = self._get_selected_ai_provider(user_id)
+        self._sched_pending[user_id] = {
+            "type": "chat",
+            "ai_provider": provider,
+        }
+        await query.edit_message_text(
+            f"<b>Add Chat Schedule</b>\n\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+            f"Select hour:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_hour_keyboard("sched:time:chat:_:") + [[
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
+                ]]
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_add_workspace(self, query, user_id: str) -> None:
+        """Start the add-workspace-schedule flow (workspace picker)."""
+        if not self._workspace_registry:
+            await query.answer("Workspace feature not initialized.")
             return
 
-        if action.startswith("detail:"):
-            schedule_id = action[7:]
-            schedule = self._schedule_manager.get(schedule_id)
-            if not schedule:
-                await query.answer("Schedule not found")
-                return
-
-            toggle_label = "⏸ OFF" if schedule.enabled else "✅ ON"
-            buttons = [
-                [InlineKeyboardButton(toggle_label, callback_data=f"sched:toggle:{schedule_id}")],
-                [InlineKeyboardButton(f"⏰ Change Time ({schedule.time_str})", callback_data=f"sched:chtime:{schedule_id}")],
-                [InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sched:delete:{schedule_id}")],
-                [InlineKeyboardButton(BUTTON_BACK, callback_data="sched:refresh")],
-            ]
-
+        workspaces = self._workspace_registry.list_by_user(user_id)
+        if not workspaces:
             await query.edit_message_text(
-                self._build_schedule_detail_text(schedule),
-                reply_markup=InlineKeyboardMarkup(buttons),
+                "<b>No workspaces registered.</b>\n\nRegister one first at /workspace.",
                 parse_mode="HTML",
             )
             await query.answer()
             return
 
-        if action.startswith("toggle:"):
-            schedule_id = action[7:]
-            new_state = self._schedule_manager.toggle(schedule_id)
-            if new_state is None:
-                await query.answer("Schedule not found")
-                return
-            await query.answer("ON" if new_state else "OFF")
-            await self._handle_scheduler_callback(query, chat_id, f"sched:detail:{schedule_id}")
+        workspace_map = {}
+        buttons: list[list[InlineKeyboardButton]] = []
+        for idx, workspace in enumerate(workspaces):
+            workspace_map[idx] = {"path": workspace.path, "name": workspace.name}
+            buttons.append([
+                InlineKeyboardButton(workspace.name, callback_data=f"sched:wspath:{idx}")
+            ])
+
+        self._sched_pending[user_id] = {
+            "workspaces": workspace_map,
+            "ai_provider": self._get_selected_ai_provider(user_id),
+        }
+        buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
+
+        await query.edit_message_text(
+            "<b>Add Workspace Schedule</b>\n\nSelect workspace:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_add_plugin(self, query, user_id: str) -> None:
+        """Start the add-plugin-schedule flow (plugin picker)."""
+        if not self.plugins or not self.plugins.plugins:
+            await query.edit_message_text("<b>No plugins loaded.</b>", parse_mode="HTML")
+            await query.answer()
             return
 
-        if action.startswith("delete:"):
-            schedule_id = action[7:]
-            if self._schedule_manager.remove(schedule_id):
-                await query.edit_message_text(
-                    self._build_scheduler_screen_text(user_id),
-                    reply_markup=InlineKeyboardMarkup(self._build_scheduler_keyboard(user_id)),
-                    parse_mode="HTML",
+        plugin_map: dict[int, dict] = {}
+        buttons: list[list[InlineKeyboardButton]] = []
+        idx = 0
+        for plugin in self.plugins.plugins:
+            actions = plugin.get_scheduled_actions()
+            if not actions:
+                continue
+            plugin_map[idx] = {"name": plugin.name, "actions": actions}
+            buttons.append([
+                InlineKeyboardButton(
+                    f"🔌 {plugin.name} ({len(actions)} actions)",
+                    callback_data=f"sched:plugin:{idx}",
                 )
-                await query.answer("Deleted")
-            else:
-                await query.answer("Delete failed")
-            return
+            ])
+            idx += 1
 
-        if action.startswith("chtime:"):
-            schedule_id = action[7:]
-            schedule = self._schedule_manager.get(schedule_id)
-            if not schedule:
-                await query.answer("Schedule not found")
-                return
+        if not buttons:
             await query.edit_message_text(
-                f"<b>Change Time</b>\n\n"
-                f"{schedule.type_emoji} <b>{escape_html(schedule.name)}</b>\n"
-                f"Current: <b>{escape_html(schedule.time_str)}</b>\n\n"
-                f"Select new hour:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_hour_keyboard(f"sched:chtime_hour:{schedule_id}:") + [[
-                        InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")
-                    ]]
-                ),
+                "<b>No schedulable plugins.</b>\n\nImplement <code>get_scheduled_actions()</code> in your plugin.",
                 parse_mode="HTML",
             )
             await query.answer()
             return
 
-        if action.startswith("chtime_hour:"):
-            schedule_id, hour = action[12:].split(":")
-            await query.edit_message_text(
-                f"<b>Change Time</b>\n\n"
-                f"New hour: <b>{int(hour):02d}:00</b>\n\n"
-                f"Select minute:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_minute_keyboard("sched:chtime_min", schedule_id, int(hour)) + [[
-                        InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")
-                    ]]
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
+        self._sched_pending[user_id] = {"plugin_map": plugin_map}
+        buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
+        await query.edit_message_text(
+            "<b>Add Plugin Schedule</b>\n\nSelect plugin:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_select_plugin(self, query, user_id: str, plugin_idx: int) -> None:
+        """Show action picker for the selected plugin."""
+        pending = self._sched_pending.get(user_id, {})
+        plugin_info = pending.get("plugin_map", {}).get(plugin_idx)
+        if not plugin_info:
+            await query.answer("Invalid plugin")
             return
 
-        if action.startswith("chtime_min:"):
-            schedule_id, hour, minute = action[11:].split(":")
-            schedule = self._schedule_manager.get(schedule_id)
-            current_trigger = normalize_trigger_type(schedule.trigger_type) if schedule else "cron"
-            current_label = "Daily" if current_trigger == "cron" else "One-time"
+        pending["selected_plugin"] = plugin_info["name"]
+        self._sched_pending[user_id] = pending
+        buttons = [
+            [InlineKeyboardButton(item.description, callback_data=f"sched:pluginaction:{idx}")]
+            for idx, item in enumerate(plugin_info["actions"])
+        ]
+        buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
+        await query.edit_message_text(
+            f"<b>🔌 {plugin_info['name']}</b>\n\nSelect action:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_select_plugin_action(self, query, user_id: str, action_idx: int) -> None:
+        """Store the chosen plugin action and show hour picker."""
+        pending = self._sched_pending.get(user_id, {})
+        plugin_name = pending.get("selected_plugin")
+        actions = []
+        for info in pending.get("plugin_map", {}).values():
+            if info["name"] == plugin_name:
+                actions = info["actions"]
+                break
+        if action_idx >= len(actions):
+            await query.answer("Invalid action")
+            return
+
+        selected_action = actions[action_idx]
+        pending.update({
+            "type": "plugin",
+            "plugin_name": plugin_name,
+            "action_name": selected_action.name,
+            "name": f"{plugin_name}:{selected_action.description}",
+        })
+        self._sched_pending[user_id] = pending
+        await query.edit_message_text(
+            f"<b>Plugin Schedule</b>\n\n"
+            f"🔌 <b>{escape_html(plugin_name)}</b> - {escape_html(selected_action.description)}\n\n"
+            f"Select hour:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_hour_keyboard("sched:time:plugin:_:") + [[
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
+                ]]
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_select_wspath(self, query, user_id: str, ws_idx: int) -> None:
+        """Store the chosen workspace and show hour picker."""
+        pending = self._sched_pending.get(user_id, {})
+        ws_info = pending.get("workspaces", {}).get(ws_idx)
+        if not ws_info:
+            await query.answer("Invalid workspace")
+            return
+
+        pending.update({
+            "type": "workspace",
+            "workspace_path": ws_info["path"],
+            "name": ws_info["name"],
+        })
+        self._sched_pending[user_id] = pending
+        await query.edit_message_text(
+            f"<b>Add Workspace Schedule</b>\n\n"
+            f"Workspace: <b>{escape_html(ws_info['name'])}</b>\n"
+            f"<code>{escape_html(ws_info['path'])}</code>\n\n"
+            f"Select hour:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_hour_keyboard(f"sched:time:workspace:{ws_idx}:") + [[
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
+                ]]
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_select_time(self, query, user_id: str, action_data: str) -> None:
+        """Store the chosen hour and show minute picker. action_data = 'type:path_idx:hour'"""
+        parts = action_data.split(":")
+        if len(parts) != 3:
+            await query.answer("Invalid request")
+            return
+
+        schedule_type, path_idx, hour = parts[0], parts[1], int(parts[2])
+        normalized_type = normalize_schedule_type(schedule_type)
+        pending = self._sched_pending.get(user_id, {})
+        pending["type"] = normalized_type
+        pending["hour"] = hour
+        pending.setdefault("ai_provider", self._get_selected_ai_provider(user_id))
+
+        if normalized_type == "workspace" and path_idx != "_":
+            ws_info = pending.get("workspaces", {}).get(int(path_idx))
+            if ws_info:
+                pending["workspace_path"] = ws_info["path"]
+                pending["name"] = ws_info["name"]
+
+        self._sched_pending[user_id] = pending
+        await query.edit_message_text(
+            f"<b>Add {self._schedule_type_title(normalized_type)} Schedule</b>\n\n"
+            f"Hour: <b>{hour:02d}:00</b>{self._format_workspace_path_line(pending)}\n\n"
+            f"Select minute:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_minute_keyboard("sched:minute") + [[
+                    InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
+                ]]
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_select_minute(self, query, user_id: str, minute: int) -> None:
+        """Store the chosen minute and show trigger-mode picker."""
+        pending = self._sched_pending.get(user_id, {})
+        pending["minute"] = minute
+        self._sched_pending[user_id] = pending
+
+        hour = pending.get("hour", 9)
+        await query.edit_message_text(
+            f"<b>{self._schedule_type_title(normalize_schedule_type(pending.get('type')))} Schedule</b>\n\n"
+            f"Time: <b>{hour:02d}:{minute:02d}</b>{self._format_workspace_path_line(pending)}\n\n"
+            f"Choose schedule mode:",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Daily", callback_data="sched:trigger:cron"),
+                    InlineKeyboardButton("One-time", callback_data="sched:trigger:once"),
+                ],
+                [InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")],
+            ]),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _sched_select_trigger(self, query, chat_id: int, trigger_type_raw: str) -> None:
+        """Store trigger type; for plugin schedules register immediately, otherwise show AI picker."""
+        user_id = str(chat_id)
+        trigger_type = normalize_trigger_type(trigger_type_raw)
+        pending = self._sched_pending.get(user_id, {})
+        if not pending:
+            await query.answer("Schedule flow expired")
+            return
+        pending["trigger_type"] = trigger_type
+        if trigger_type == "once":
+            pending["run_at_local"] = self._build_once_run_at(pending.get("hour", 0), pending.get("minute", 0))
+        else:
+            pending["run_at_local"] = None
+        self._sched_pending[user_id] = pending
+
+        schedule_type = normalize_schedule_type(pending.get("type"))
+        if schedule_type == "plugin":
             await query.edit_message_text(
-                f"<b>Change Time</b>\n\n"
-                f"New time: <b>{int(hour):02d}:{int(minute):02d}</b>\n"
-                f"Current mode: <b>{current_label}</b>\n\n"
-                f"Choose schedule mode:",
+                self._register_plugin_schedule(user_id, chat_id, pending),
                 reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("Daily", callback_data=f"sched:chtime_trigger:{schedule_id}:{hour}:{minute}:cron"),
-                        InlineKeyboardButton("One-time", callback_data=f"sched:chtime_trigger:{schedule_id}:{hour}:{minute}:once"),
-                    ],
-                    [InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")],
+                    [InlineKeyboardButton(BUTTON_SCHEDULE_LIST, callback_data="sched:refresh")]
                 ]),
                 parse_mode="HTML",
             )
-            await query.answer()
+            self._sched_pending.pop(user_id, None)
+            await query.answer("Registered")
             return
 
-        if action.startswith("chtime_trigger:"):
-            schedule_id, hour, minute, trigger = action[15:].split(":")
-            result = self._schedule_manager.update_time(schedule_id, int(hour), int(minute), trigger_type=trigger)
-            if result:
-                trigger_label = "Daily" if trigger == "cron" else "One-time"
-                await query.answer(f"{int(hour):02d}:{int(minute):02d} ({trigger_label})")
-            else:
-                await query.answer("Update failed")
-            await self._handle_scheduler_callback(query, chat_id, f"sched:detail:{schedule_id}")
-            return
-
-        if action in ("add:ai", "add:claude", "add:chat"):
-            provider = self._get_selected_ai_provider(user_id)
-            self._sched_pending[user_id] = {
-                "type": "chat",
-                "ai_provider": provider,
-            }
-            await query.edit_message_text(
-                f"<b>Add Chat Schedule</b>\n\n"
-                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
-                f"Select hour:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_hour_keyboard("sched:time:chat:_:") + [[
-                        InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
-                    ]]
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action == "add:workspace":
-            if not self._workspace_registry:
-                await query.answer("Workspace feature not initialized.")
-                return
-
-            workspaces = self._workspace_registry.list_by_user(user_id)
-            if not workspaces:
-                await query.edit_message_text(
-                    "<b>No workspaces registered.</b>\n\nRegister one first at /workspace.",
-                    parse_mode="HTML",
+        provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
+        await query.edit_message_text(
+            f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
+            f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>{self._format_workspace_path_line(pending)}\n"
+            f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+            f"Select AI:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_provider_choice_keyboard(
+                    provider,
+                    "sched:provider:",
+                    back_callback=f"sched:minute:{pending.get('minute', 0)}",
                 )
-                await query.answer()
-                return
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
 
-            workspace_map = {}
-            buttons: list[list[InlineKeyboardButton]] = []
-            for idx, workspace in enumerate(workspaces):
-                workspace_map[idx] = {"path": workspace.path, "name": workspace.name}
-                buttons.append([
-                    InlineKeyboardButton(workspace.name, callback_data=f"sched:wspath:{idx}")
-                ])
-
-            self._sched_pending[user_id] = {
-                "workspaces": workspace_map,
-                "ai_provider": self._get_selected_ai_provider(user_id),
-            }
-            buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
-
-            await query.edit_message_text(
-                "<b>Add Workspace Schedule</b>\n\nSelect workspace:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML",
-            )
-            await query.answer()
+    async def _sched_select_provider(self, query, user_id: str, provider: str) -> None:
+        """Store chosen provider and show model picker."""
+        pending = self._sched_pending.get(user_id, {})
+        if not pending:
+            await query.answer("Schedule flow expired")
+            return
+        if not is_supported_provider(provider):
+            await query.answer("Unsupported AI")
             return
 
-        if action == "add:plugin":
-            if not self.plugins or not self.plugins.plugins:
-                await query.edit_message_text("<b>No plugins loaded.</b>", parse_mode="HTML")
-                await query.answer()
-                return
+        pending["ai_provider"] = provider
+        self._sched_pending[user_id] = pending
+        schedule_type = normalize_schedule_type(pending.get("type"))
+        trigger_type = normalize_trigger_type(pending.get("trigger_type"))
 
-            plugin_map: dict[int, dict] = {}
-            buttons: list[list[InlineKeyboardButton]] = []
-            idx = 0
-            for plugin in self.plugins.plugins:
-                actions = plugin.get_scheduled_actions()
-                if not actions:
-                    continue
-                plugin_map[idx] = {"name": plugin.name, "actions": actions}
-                buttons.append([
-                    InlineKeyboardButton(
-                        f"🔌 {plugin.name} ({len(actions)} actions)",
-                        callback_data=f"sched:plugin:{idx}",
-                    )
-                ])
-                idx += 1
+        await query.edit_message_text(
+            f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
+            f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>{self._format_workspace_path_line(pending)}\n"
+            f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
+            f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+            f"Select model:",
+            reply_markup=InlineKeyboardMarkup([
+                self._build_model_buttons(provider, "sched:model:"),
+                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"sched:trigger:{trigger_type}")],
+            ]),
+            parse_mode="HTML",
+        )
+        await query.answer()
 
-            if not buttons:
-                await query.edit_message_text(
-                    "<b>No schedulable plugins.</b>\n\nImplement <code>get_scheduled_actions()</code> in your plugin.",
-                    parse_mode="HTML",
-                )
-                await query.answer()
-                return
-
-            self._sched_pending[user_id] = {"plugin_map": plugin_map}
-            buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
-            await query.edit_message_text(
-                "<b>Add Plugin Schedule</b>\n\nSelect plugin:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML",
-            )
-            await query.answer()
+    async def _sched_select_model(self, query, user_id: str, model: str) -> None:
+        """Store chosen model and prompt for the schedule message via ForceReply."""
+        pending = self._sched_pending.get(user_id, {})
+        provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
+        if not is_supported_model(provider, model):
+            await query.edit_message_text("❌ Unsupported model for the selected AI.")
             return
 
-        if action.startswith("plugin:") and not action.startswith("pluginaction:"):
-            plugin_idx = int(action[7:])
-            pending = self._sched_pending.get(user_id, {})
-            plugin_info = pending.get("plugin_map", {}).get(plugin_idx)
-            if not plugin_info:
-                await query.answer("Invalid plugin")
-                return
-
-            pending["selected_plugin"] = plugin_info["name"]
-            self._sched_pending[user_id] = pending
-            buttons = [
-                [InlineKeyboardButton(item.description, callback_data=f"sched:pluginaction:{idx}")]
-                for idx, item in enumerate(plugin_info["actions"])
-            ]
-            buttons.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
-            await query.edit_message_text(
-                f"<b>🔌 {plugin_info['name']}</b>\n\nSelect action:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("pluginaction:"):
-            action_idx = int(action[13:])
-            pending = self._sched_pending.get(user_id, {})
-            plugin_name = pending.get("selected_plugin")
-            actions = []
-            for info in pending.get("plugin_map", {}).values():
-                if info["name"] == plugin_name:
-                    actions = info["actions"]
-                    break
-            if action_idx >= len(actions):
-                await query.answer("Invalid action")
-                return
-
-            selected_action = actions[action_idx]
-            pending.update({
-                "type": "plugin",
-                "plugin_name": plugin_name,
-                "action_name": selected_action.name,
-                "name": f"{plugin_name}:{selected_action.description}",
-            })
-            self._sched_pending[user_id] = pending
-            await query.edit_message_text(
-                f"<b>Plugin Schedule</b>\n\n"
-                f"🔌 <b>{escape_html(plugin_name)}</b> - {escape_html(selected_action.description)}\n\n"
-                f"Select hour:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_hour_keyboard("sched:time:plugin:_:") + [[
-                        InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
-                    ]]
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("wspath:"):
-            ws_idx = int(action[7:])
-            pending = self._sched_pending.get(user_id, {})
-            ws_info = pending.get("workspaces", {}).get(ws_idx)
-            if not ws_info:
-                await query.answer("Invalid workspace")
-                return
-
-            pending.update({
-                "type": "workspace",
-                "workspace_path": ws_info["path"],
-                "name": ws_info["name"],
-            })
-            self._sched_pending[user_id] = pending
-            await query.edit_message_text(
-                f"<b>Add Workspace Schedule</b>\n\n"
-                f"Workspace: <b>{escape_html(ws_info['name'])}</b>\n"
-                f"<code>{escape_html(ws_info['path'])}</code>\n\n"
-                f"Select hour:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_hour_keyboard(f"sched:time:workspace:{ws_idx}:") + [[
-                        InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
-                    ]]
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("time:"):
-            parts = action[5:].split(":")
-            if len(parts) != 3:
-                await query.answer("Invalid request")
-                return
-
-            schedule_type, path_idx, hour = parts[0], parts[1], int(parts[2])
-            normalized_type = normalize_schedule_type(schedule_type)
-            pending = self._sched_pending.get(user_id, {})
-            pending["type"] = normalized_type
-            pending["hour"] = hour
-            pending.setdefault("ai_provider", self._get_selected_ai_provider(user_id))
-
-            if normalized_type == "workspace" and path_idx != "_":
-                ws_info = pending.get("workspaces", {}).get(int(path_idx))
-                if ws_info:
-                    pending["workspace_path"] = ws_info["path"]
-                    pending["name"] = ws_info["name"]
-
-            self._sched_pending[user_id] = pending
-            await query.edit_message_text(
-                f"<b>Add {self._schedule_type_title(normalized_type)} Schedule</b>\n\n"
-                f"Hour: <b>{hour:02d}:00</b>{self._format_workspace_path_line(pending)}\n\n"
-                f"Select minute:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_minute_keyboard("sched:minute") + [[
-                        InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
-                    ]]
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("minute:"):
-            minute = int(action[7:])
-            pending = self._sched_pending.get(user_id, {})
-            pending["minute"] = minute
-            self._sched_pending[user_id] = pending
-
-            hour = pending.get("hour", 9)
-            await query.edit_message_text(
-                f"<b>{self._schedule_type_title(normalize_schedule_type(pending.get('type')))} Schedule</b>\n\n"
-                f"Time: <b>{hour:02d}:{minute:02d}</b>{self._format_workspace_path_line(pending)}\n\n"
-                f"Choose schedule mode:",
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("Daily", callback_data="sched:trigger:cron"),
-                        InlineKeyboardButton("One-time", callback_data="sched:trigger:once"),
-                    ],
-                    [InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")],
-                ]),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("trigger:"):
-            trigger_type = normalize_trigger_type(action[8:])
-            pending = self._sched_pending.get(user_id, {})
-            if not pending:
-                await query.answer("Schedule flow expired")
-                return
-            pending["trigger_type"] = trigger_type
-            if trigger_type == "once":
-                pending["run_at_local"] = self._build_once_run_at(pending.get("hour", 0), pending.get("minute", 0))
-            else:
-                pending["run_at_local"] = None
-            self._sched_pending[user_id] = pending
-
-            schedule_type = normalize_schedule_type(pending.get("type"))
-            if schedule_type == "plugin":
-                await query.edit_message_text(
-                    self._register_plugin_schedule(user_id, chat_id, pending),
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(BUTTON_SCHEDULE_LIST, callback_data="sched:refresh")]
-                    ]),
-                    parse_mode="HTML",
-                )
-                self._sched_pending.pop(user_id, None)
-                await query.answer("Registered")
-                return
-
-            provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-            await query.edit_message_text(
-                f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
-                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>{self._format_workspace_path_line(pending)}\n"
-                f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
-                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
-                f"Select AI:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_provider_choice_keyboard(
-                        provider,
-                        "sched:provider:",
-                        back_callback=f"sched:minute:{pending.get('minute', 0)}",
-                    )
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("provider:"):
-            provider = action[9:]
-            pending = self._sched_pending.get(user_id, {})
-            if not pending:
-                await query.answer("Schedule flow expired")
-                return
-            if not is_supported_provider(provider):
-                await query.answer("Unsupported AI")
-                return
-
-            pending["ai_provider"] = provider
-            self._sched_pending[user_id] = pending
-            schedule_type = normalize_schedule_type(pending.get("type"))
-            trigger_type = normalize_trigger_type(pending.get("trigger_type"))
-
-            await query.edit_message_text(
-                f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
-                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>{self._format_workspace_path_line(pending)}\n"
-                f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
-                f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
-                f"Select model:",
-                reply_markup=InlineKeyboardMarkup([
-                    self._build_model_buttons(provider, "sched:model:"),
-                    [InlineKeyboardButton(BUTTON_BACK, callback_data=f"sched:trigger:{trigger_type}")],
-                ]),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("model:"):
-            model = action[6:]
-            pending = self._sched_pending.get(user_id, {})
-            provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-            if not is_supported_model(provider, model):
-                await query.edit_message_text("❌ Unsupported model for the selected AI.")
-                return
-
-            pending["model"] = model
-            self._sched_pending[user_id] = pending
-            schedule_type = normalize_schedule_type(pending.get("type"))
-            trigger_type = normalize_trigger_type(pending.get("trigger_type"))
-            hour = pending.get("hour", 0)
-            minute = pending.get("minute", 0)
-            await query.edit_message_text(
-                f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
-                f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
-                f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
-                f"AI: <b>{self._format_provider_display(provider)}</b>\n"
-                f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>){self._format_workspace_path_line(pending)}\n\n"
-                f"Enter scheduled message below:",
-                parse_mode="HTML",
-            )
-            await query.message.reply_text(
-                "Enter scheduled message (schedule_input):",
-                reply_markup=ForceReply(
-                    selective=True,
-                    input_field_placeholder="e.g., Summarize today's tasks",
-                ),
-            )
-            await query.answer()
-            return
-
-        await query.answer("Unknown action")
+        pending["model"] = model
+        self._sched_pending[user_id] = pending
+        schedule_type = normalize_schedule_type(pending.get("type"))
+        trigger_type = normalize_trigger_type(pending.get("trigger_type"))
+        hour = pending.get("hour", 0)
+        minute = pending.get("minute", 0)
+        await query.edit_message_text(
+            f"<b>Add {self._schedule_type_title(schedule_type)} Schedule</b>\n\n"
+            f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
+            f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
+            f"AI: <b>{self._format_provider_display(provider)}</b>\n"
+            f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>){self._format_workspace_path_line(pending)}\n\n"
+            f"Enter scheduled message below:",
+            parse_mode="HTML",
+        )
+        await query.message.reply_text(
+            "Enter scheduled message (schedule_input):",
+            reply_markup=ForceReply(
+                selective=True,
+                input_field_placeholder="e.g., Summarize today's tasks",
+            ),
+        )
+        await query.answer()
 
     @staticmethod
     def _build_hour_keyboard(prefix: str) -> list[list[InlineKeyboardButton]]:

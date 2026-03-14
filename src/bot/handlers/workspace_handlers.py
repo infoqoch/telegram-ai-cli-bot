@@ -87,8 +87,397 @@ class WorkspaceHandlers(BaseHandler):
             await query.answer("Workspace feature disabled")
             return
 
-        # Refresh
         if action == "refresh":
+            return await self._ws_refresh(query, user_id)
+        if action.startswith("select:"):
+            return await self._ws_select(query, action[7:])
+        if action.startswith("session:"):
+            return await self._ws_start_session(query, user_id, action[8:])
+        if action.startswith("sess_model:"):
+            return await self._ws_create_session(query, user_id, action)
+        if action.startswith("schedule:"):
+            return await self._ws_schedule(query, action[9:])
+        if action.startswith("sched_time:"):
+            return await self._ws_sched_time(query, user_id, action)
+        if action.startswith("sched_minute:"):
+            return await self._ws_sched_minute(query, user_id, action)
+        if action.startswith("sched_trigger:"):
+            return await self._ws_sched_trigger(query, user_id, action)
+        if action.startswith("sched_provider:"):
+            return await self._ws_sched_provider(query, user_id, action)
+        if action.startswith("sched_model:"):
+            return await self._ws_sched_model(query, user_id, action)
+        if action == "add":
+            return await self._ws_add(query, user_id)
+        if action.startswith("recommend:"):
+            return await self._ws_recommend(query, user_id, action)
+        if action == "manual":
+            return await self._ws_manual(query, user_id)
+        if action.startswith("delete:"):
+            return await self._ws_delete(query, user_id, action[7:])
+        await query.answer("Unknown action")
+
+    async def _ws_refresh(self, query, user_id: str) -> None:
+        """Handle ws:refresh - refresh workspace list."""
+        text = self._workspace_registry.get_status_text(user_id)
+        keyboard = self._build_workspace_keyboard(user_id)
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        await query.answer("Refreshed")
+
+    async def _ws_select(self, query, ws_id: str) -> None:
+        """Handle ws:select:<ws_id> - show workspace action selection."""
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        buttons = [
+            [
+                InlineKeyboardButton(BUTTON_WORKSPACE_SESSION, callback_data=f"ws:session:{ws_id}"),
+                InlineKeyboardButton(BUTTON_WORKSPACE_SCHEDULE, callback_data=f"ws:schedule:{ws_id}"),
+            ],
+            [InlineKeyboardButton(BUTTON_BACK, callback_data="ws:refresh")],
+        ]
+
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b>\n\n"
+            f"<code>{escape_html(ws.short_path)}</code>\n"
+            f"{escape_html(ws.description)}\n\n"
+            f"What would you like to do?",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+        await query.answer()
+
+    async def _ws_start_session(self, query, user_id: str, ws_id: str) -> None:
+        """Handle ws:session:<ws_id> - show model selection for session start."""
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        provider = self._get_selected_ai_provider(user_id)
+
+        buttons = [
+            self._build_model_buttons(provider, f"ws:sess_model:{ws_id}:"),
+            [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")],
+        ]
+
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Start Session\n\n"
+            f"<code>{escape_html(ws.short_path)}</code>\n\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
+            f"Select model:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+        await query.answer()
+
+    async def _ws_create_session(self, query, user_id: str, action: str) -> None:
+        """Handle ws:sess_model:<ws_id>:<model> - create workspace session."""
+        parts = action.split(":")
+        ws_id, model = parts[1], parts[2]
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        # Prevent duplicate workspace sessions
+        existing = self.sessions.list_sessions(user_id)
+        for s in existing:
+            if s.get("workspace_path") == ws.path:
+                self.sessions.switch_session(user_id, s["full_session_id"])
+                await query.edit_message_text(
+                    f"A workspace session already exists.\n"
+                    f"Switched to existing session: <b>{escape_html(s.get('name', ws.name))}</b>",
+                    parse_mode="HTML"
+                )
+                await query.answer("Switched to existing session")
+                return
+
+        self._workspace_registry.mark_used(ws_id)
+        provider = self._get_selected_ai_provider(user_id)
+
+        session_name = f"{ws.name} ({model})"
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=provider,
+            model=model,
+            name=session_name,
+            workspace_path=ws.path,
+        )
+
+        model_emoji = get_model_emoji(model)
+        await query.edit_message_text(
+            f"<b>Workspace Session Created!</b>\n\n"
+            f"<b>{escape_html(ws.name)}</b>\n"
+            f"<code>{escape_html(ws.short_path)}</code>\n"
+            f"AI: <b>{self._format_provider_display(provider)}</b>\n"
+            f"{model_emoji} Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n"
+            f"Session: <code>{session_id[:8]}</code>\n\n"
+            f"Messages will now use this workspace context.",
+            parse_mode="HTML"
+        )
+        await query.answer("Session created")
+
+    async def _ws_schedule(self, query, ws_id: str) -> None:
+        """Handle ws:schedule:<ws_id> - show hour selection for schedule."""
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        buttons = []
+        row = []
+        for hour in AVAILABLE_HOURS:
+            row.append(InlineKeyboardButton(f"{hour:02d}:00", callback_data=f"ws:sched_time:{ws_id}:{hour}"))
+            if len(row) == 4:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")])
+
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+            f"<code>{escape_html(ws.short_path)}</code>\n\n"
+            f"Select hour:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _ws_sched_time(self, query, user_id: str, action: str) -> None:
+        """Handle ws:sched_time:<ws_id>:<hour> - store hour, show minute selection."""
+        _, ws_id, hour_text = action.split(":")
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        self._ws_pending[user_id] = {
+            "ws_id": ws_id,
+            "hour": int(hour_text),
+            "ai_provider": self._get_selected_ai_provider(user_id),
+        }
+
+        buttons = []
+        row = []
+        for minute in range(0, 60, 5):
+            row.append(InlineKeyboardButton(f":{minute:02d}", callback_data=f"ws:sched_minute:{ws_id}:{minute}"))
+            if len(row) == 4:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")])
+
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+            f"Hour: <b>{int(hour_text):02d}:00</b>\n\n"
+            f"Select minute:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _ws_sched_minute(self, query, user_id: str, action: str) -> None:
+        """Handle ws:sched_minute:<ws_id>:<minute> - store minute, show trigger selection."""
+        _, ws_id, minute_text = action.split(":")
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        pending = self._ws_pending.get(user_id, {})
+        pending["minute"] = int(minute_text)
+        pending["ai_provider"] = self._get_selected_ai_provider(user_id)
+        self._ws_pending[user_id] = pending
+
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+            f"Time: <b>{pending.get('hour', 0):02d}:{int(minute_text):02d}</b>\n\n"
+            f"Choose schedule mode:",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Daily", callback_data=f"ws:sched_trigger:{ws_id}:cron"),
+                    InlineKeyboardButton("One-time", callback_data=f"ws:sched_trigger:{ws_id}:once"),
+                ],
+                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")],
+            ]),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _ws_sched_trigger(self, query, user_id: str, action: str) -> None:
+        """Handle ws:sched_trigger:<ws_id>:<trigger_type> - store trigger type, show provider selection."""
+        _, ws_id, trigger_type = action.split(":")
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        pending = self._ws_pending.get(user_id, {})
+        pending["trigger_type"] = normalize_trigger_type(trigger_type)
+        if pending["trigger_type"] == "once":
+            pending["run_at_local"] = next_occurrence(
+                pending.get("hour", 0),
+                pending.get("minute", 0),
+            ).isoformat()
+        else:
+            pending["run_at_local"] = None
+        self._ws_pending[user_id] = pending
+
+        provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+            f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
+            f"Schedule: <b>{'One-time' if pending['trigger_type'] == 'once' else 'Daily'}</b>\n"
+            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+            f"Select AI:",
+            reply_markup=InlineKeyboardMarkup(
+                self._build_provider_choice_keyboard(
+                    provider,
+                    f"ws:sched_provider:{ws_id}:",
+                    back_callback=f"ws:sched_minute:{ws_id}:{pending.get('minute', 0)}",
+                )
+            ),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _ws_sched_provider(self, query, user_id: str, action: str) -> None:
+        """Handle ws:sched_provider:<ws_id>:<provider> - store provider, show model selection."""
+        _, ws_id, provider = action.split(":")
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+        if not is_supported_provider(provider):
+            await query.answer("Unsupported AI")
+            return
+
+        pending = self._ws_pending.get(user_id, {})
+        pending["ai_provider"] = provider
+        self._ws_pending[user_id] = pending
+        trigger_type = pending.get("trigger_type", "cron")
+
+        buttons = [
+            self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
+            [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:sched_trigger:{ws_id}:{trigger_type}")],
+        ]
+
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+            f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
+            f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
+            f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
+            f"Select model:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
+
+    async def _ws_sched_model(self, query, user_id: str, action: str) -> None:
+        """Handle ws:sched_model:<ws_id>:<model> - store model, prompt for schedule message."""
+        _, ws_id, model = action.split(":")
+        ws = self._workspace_registry.get(ws_id)
+        if not ws:
+            await query.answer("Workspace not found")
+            return
+
+        pending = self._ws_pending.get(user_id, {})
+        pending["model"] = model
+        self._ws_pending[user_id] = pending
+
+        provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
+        await query.edit_message_text(
+            f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+            f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
+            f"Schedule: <b>{'One-time' if pending.get('trigger_type') == 'once' else 'Daily'}</b>\n"
+            f"AI: <b>{self._format_provider_display(provider)}</b>\n"
+            f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n\n"
+            f"Enter scheduled message below:",
+            parse_mode="HTML",
+        )
+        await query.message.reply_text(
+            "Enter scheduled message:",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Summarize today's tasks"),
+        )
+        await query.answer()
+
+    async def _ws_add(self, query, user_id: str) -> None:
+        """Handle ws:add - start AI recommendation flow for workspace registration."""
+        await query.edit_message_text(
+            "<b>Register Workspace</b>\n\n"
+            "What is this workspace for?\n"
+            "AI will recommend suitable paths.\n\n"
+            "Enter the purpose below:",
+            parse_mode="HTML"
+        )
+
+        self._ws_pending[user_id] = {"action": "recommend"}
+
+        await query.message.reply_text(
+            "Enter purpose:",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Investment analysis, React project")
+        )
+        await query.answer()
+
+    async def _ws_recommend(self, query, user_id: str, action: str) -> None:
+        """Handle ws:recommend:<idx> - select a recommended path and ask for name."""
+        idx = int(action[10:])
+        pending = self._ws_pending.get(user_id, {})
+        recommendations = pending.get("recommendations", [])
+
+        if idx >= len(recommendations):
+            await query.answer("Invalid selection")
+            return
+
+        rec = recommendations[idx]
+        pending["action"] = "recommend_name"
+        pending["path"] = rec["path"]
+        pending["suggested_name"] = rec["name"]
+        pending["description"] = rec.get("description", rec.get("reason", ""))
+        self._ws_pending[user_id] = pending
+
+        await query.edit_message_text(
+            f"<b>Selected:</b> <code>{rec['path'].replace(str(Path.home()), '~')}</code>\n\n"
+            f"Enter workspace name:",
+            parse_mode="HTML"
+        )
+        await query.message.reply_text(
+            f"{rec['name']}",
+            reply_markup=ForceReply(selective=True, input_field_placeholder=rec["name"])
+        )
+        await query.answer()
+
+    async def _ws_manual(self, query, user_id: str) -> None:
+        """Handle ws:manual - start manual path input flow."""
+        pending = self._ws_pending.get(user_id, {})
+        pending["action"] = "manual_path"
+        self._ws_pending[user_id] = pending
+
+        await query.edit_message_text(
+            "<b>Manual Workspace Registration</b>\n\n"
+            "Enter path directly:",
+            parse_mode="HTML"
+        )
+
+        await query.message.reply_text(
+            "Enter path:",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="/path/to/workspace")
+        )
+        await query.answer()
+
+    async def _ws_delete(self, query, user_id: str, ws_id: str) -> None:
+        """Handle ws:delete:<ws_id> - delete workspace and refresh list."""
+        if self._workspace_registry.remove(ws_id):
+            await query.answer("Deleted")
             text = self._workspace_registry.get_status_text(user_id)
             keyboard = self._build_workspace_keyboard(user_id)
             await query.edit_message_text(
@@ -96,381 +485,8 @@ class WorkspaceHandlers(BaseHandler):
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
-            await query.answer("Refreshed")
-            return
-
-        # Workspace select - action selection
-        if action.startswith("select:"):
-            ws_id = action[7:]
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            buttons = [
-                [
-                    InlineKeyboardButton(BUTTON_WORKSPACE_SESSION, callback_data=f"ws:session:{ws_id}"),
-                    InlineKeyboardButton(BUTTON_WORKSPACE_SCHEDULE, callback_data=f"ws:schedule:{ws_id}"),
-                ],
-                [InlineKeyboardButton(BUTTON_BACK, callback_data="ws:refresh")],
-            ]
-
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b>\n\n"
-                f"<code>{escape_html(ws.short_path)}</code>\n"
-                f"{escape_html(ws.description)}\n\n"
-                f"What would you like to do?",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
-            )
-            await query.answer()
-            return
-
-        # Start session - model selection
-        if action.startswith("session:"):
-            ws_id = action[8:]
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            provider = self._get_selected_ai_provider(user_id)
-
-            buttons = [
-                self._build_model_buttons(provider, f"ws:sess_model:{ws_id}:"),
-                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")],
-            ]
-
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Start Session\n\n"
-                f"<code>{escape_html(ws.short_path)}</code>\n\n"
-                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
-                f"Select model:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
-            )
-            await query.answer()
-            return
-
-        # Create session
-        if action.startswith("sess_model:"):
-            parts = action.split(":")
-            ws_id, model = parts[1], parts[2]
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            # Prevent duplicate workspace sessions
-            existing = self.sessions.list_sessions(user_id)
-            for s in existing:
-                if s.get("workspace_path") == ws.path:
-                    self.sessions.switch_session(user_id, s["full_session_id"])
-                    await query.edit_message_text(
-                        f"A workspace session already exists.\n"
-                        f"Switched to existing session: <b>{escape_html(s.get('name', ws.name))}</b>",
-                        parse_mode="HTML"
-                    )
-                    await query.answer("Switched to existing session")
-                    return
-
-            self._workspace_registry.mark_used(ws_id)
-            provider = self._get_selected_ai_provider(user_id)
-
-            session_name = f"{ws.name} ({model})"
-            session_id = self.sessions.create_session(
-                user_id=user_id,
-                ai_provider=provider,
-                model=model,
-                name=session_name,
-                workspace_path=ws.path,
-            )
-
-            model_emoji = get_model_emoji(model)
-            await query.edit_message_text(
-                f"<b>Workspace Session Created!</b>\n\n"
-                f"<b>{escape_html(ws.name)}</b>\n"
-                f"<code>{escape_html(ws.short_path)}</code>\n"
-                f"AI: <b>{self._format_provider_display(provider)}</b>\n"
-                f"{model_emoji} Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n"
-                f"Session: <code>{session_id[:8]}</code>\n\n"
-                f"Messages will now use this workspace context.",
-                parse_mode="HTML"
-            )
-            await query.answer("Session created")
-            return
-
-        if action.startswith("schedule:"):
-            ws_id = action[9:]
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            buttons = []
-            row = []
-            for hour in AVAILABLE_HOURS:
-                row.append(InlineKeyboardButton(f"{hour:02d}:00", callback_data=f"ws:sched_time:{ws_id}:{hour}"))
-                if len(row) == 4:
-                    buttons.append(row)
-                    row = []
-            if row:
-                buttons.append(row)
-            buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")])
-
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"<code>{escape_html(ws.short_path)}</code>\n\n"
-                f"Select hour:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("sched_time:"):
-            _, ws_id, hour_text = action.split(":")
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            self._ws_pending[user_id] = {
-                "ws_id": ws_id,
-                "hour": int(hour_text),
-                "ai_provider": self._get_selected_ai_provider(user_id),
-            }
-
-            buttons = []
-            row = []
-            for minute in range(0, 60, 5):
-                row.append(InlineKeyboardButton(f":{minute:02d}", callback_data=f"ws:sched_minute:{ws_id}:{minute}"))
-                if len(row) == 4:
-                    buttons.append(row)
-                    row = []
-            if row:
-                buttons.append(row)
-            buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")])
-
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Hour: <b>{int(hour_text):02d}:00</b>\n\n"
-                f"Select minute:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("sched_minute:"):
-            _, ws_id, minute_text = action.split(":")
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            pending = self._ws_pending.get(user_id, {})
-            pending["minute"] = int(minute_text)
-            pending["ai_provider"] = self._get_selected_ai_provider(user_id)
-            self._ws_pending[user_id] = pending
-
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Time: <b>{pending.get('hour', 0):02d}:{int(minute_text):02d}</b>\n\n"
-                f"Choose schedule mode:",
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("Daily", callback_data=f"ws:sched_trigger:{ws_id}:cron"),
-                        InlineKeyboardButton("One-time", callback_data=f"ws:sched_trigger:{ws_id}:once"),
-                    ],
-                    [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:schedule:{ws_id}")],
-                ]),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("sched_trigger:"):
-            _, ws_id, trigger_type = action.split(":")
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            pending = self._ws_pending.get(user_id, {})
-            pending["trigger_type"] = normalize_trigger_type(trigger_type)
-            if pending["trigger_type"] == "once":
-                pending["run_at_local"] = next_occurrence(
-                    pending.get("hour", 0),
-                    pending.get("minute", 0),
-                ).isoformat()
-            else:
-                pending["run_at_local"] = None
-            self._ws_pending[user_id] = pending
-
-            provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
-                f"Schedule: <b>{'One-time' if pending['trigger_type'] == 'once' else 'Daily'}</b>\n"
-                f"Current AI: <b>{self._format_provider_display(provider)}</b>\n\n"
-                f"Select AI:",
-                reply_markup=InlineKeyboardMarkup(
-                    self._build_provider_choice_keyboard(
-                        provider,
-                        f"ws:sched_provider:{ws_id}:",
-                        back_callback=f"ws:sched_minute:{ws_id}:{pending.get('minute', 0)}",
-                    )
-                ),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("sched_provider:"):
-            _, ws_id, provider = action.split(":")
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-            if not is_supported_provider(provider):
-                await query.answer("Unsupported AI")
-                return
-
-            pending = self._ws_pending.get(user_id, {})
-            pending["ai_provider"] = provider
-            self._ws_pending[user_id] = pending
-            trigger_type = pending.get("trigger_type", "cron")
-
-            buttons = [
-                self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
-                [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:sched_trigger:{ws_id}:{trigger_type}")],
-            ]
-
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
-                f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
-                f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
-                f"Select model:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML",
-            )
-            await query.answer()
-            return
-
-        if action.startswith("sched_model:"):
-            _, ws_id, model = action.split(":")
-            ws = self._workspace_registry.get(ws_id)
-            if not ws:
-                await query.answer("Workspace not found")
-                return
-
-            pending = self._ws_pending.get(user_id, {})
-            pending["model"] = model
-            self._ws_pending[user_id] = pending
-
-            provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-            await query.edit_message_text(
-                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
-                f"Time: <b>{pending.get('hour', 0):02d}:{pending.get('minute', 0):02d}</b>\n"
-                f"Schedule: <b>{'One-time' if pending.get('trigger_type') == 'once' else 'Daily'}</b>\n"
-                f"AI: <b>{self._format_provider_display(provider)}</b>\n"
-                f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n\n"
-                f"Enter scheduled message below:",
-                parse_mode="HTML",
-            )
-            await query.message.reply_text(
-                "Enter scheduled message:",
-                reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Summarize today's tasks"),
-            )
-            await query.answer()
-            return
-
-        # Add new - AI recommendation start
-        if action == "add":
-            await query.edit_message_text(
-                "<b>Register Workspace</b>\n\n"
-                "What is this workspace for?\n"
-                "AI will recommend suitable paths.\n\n"
-                "Enter the purpose below:",
-                parse_mode="HTML"
-            )
-
-            self._ws_pending[user_id] = {"action": "recommend"}
-
-            await query.message.reply_text(
-                "Enter purpose:",
-                reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Investment analysis, React project")
-            )
-            await query.answer()
-            return
-
-        # Recommendation selection → ask for name
-        if action.startswith("recommend:"):
-            idx = int(action[10:])
-            pending = self._ws_pending.get(user_id, {})
-            recommendations = pending.get("recommendations", [])
-
-            if idx >= len(recommendations):
-                await query.answer("Invalid selection")
-                return
-
-            rec = recommendations[idx]
-            pending["action"] = "recommend_name"
-            pending["path"] = rec["path"]
-            pending["suggested_name"] = rec["name"]
-            pending["description"] = rec.get("description", rec.get("reason", ""))
-            self._ws_pending[user_id] = pending
-
-            await query.edit_message_text(
-                f"<b>Selected:</b> <code>{rec['path'].replace(str(Path.home()), '~')}</code>\n\n"
-                f"Enter workspace name:",
-                parse_mode="HTML"
-            )
-            await query.message.reply_text(
-                f"{rec['name']}",
-                reply_markup=ForceReply(selective=True, input_field_placeholder=rec["name"])
-            )
-            await query.answer()
-            return
-
-        # Manual input selection
-        if action == "manual":
-            pending = self._ws_pending.get(user_id, {})
-            pending["action"] = "manual_path"
-            self._ws_pending[user_id] = pending
-
-            await query.edit_message_text(
-                "<b>Manual Workspace Registration</b>\n\n"
-                "Enter path directly:",
-                parse_mode="HTML"
-            )
-
-            await query.message.reply_text(
-                "Enter path:",
-                reply_markup=ForceReply(selective=True, input_field_placeholder="/path/to/workspace")
-            )
-            await query.answer()
-            return
-
-        # Delete
-        if action.startswith("delete:"):
-            ws_id = action[7:]
-            if self._workspace_registry.remove(ws_id):
-                await query.answer("Deleted")
-                text = self._workspace_registry.get_status_text(user_id)
-                keyboard = self._build_workspace_keyboard(user_id)
-                await query.edit_message_text(
-                    text,
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="HTML"
-                )
-            else:
-                await query.answer("Delete failed")
-            return
-
-        await query.answer("Unknown action")
+        else:
+            await query.answer("Delete failed")
 
     async def _handle_workspace_force_reply(self, update: Update, chat_id: int, message: str) -> None:
         """Handle workspace ForceReply responses."""

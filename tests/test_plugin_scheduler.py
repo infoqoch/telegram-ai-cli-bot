@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.plugins.loader import Plugin, PluginResult, ScheduledAction
+from tests.helpers import make_query, get_text, get_callback_data, make_handlers
 
 
 # =============================================================================
@@ -133,46 +134,6 @@ class TestTodoPluginScheduledActions:
 # =============================================================================
 # 3. Callback Flow - Plugin Schedule UI
 # =============================================================================
-
-def make_query():
-    """재사용 가능한 query mock."""
-    query = MagicMock()
-    query.answer = AsyncMock()
-    query.edit_message_text = AsyncMock()
-    query.message = MagicMock()
-    query.message.reply_text = AsyncMock()
-    query.message.chat_id = 12345
-    return query
-
-
-def get_text(query):
-    call = query.edit_message_text.call_args
-    if not call:
-        return ""
-    return call[0][0] if call[0] else call[1].get("text", "")
-
-
-def get_callback_data(query):
-    call = query.edit_message_text.call_args
-    if not call:
-        return []
-    markup = call[1].get("reply_markup")
-    if not markup:
-        return []
-    return [btn.callback_data for row in markup.inline_keyboard for btn in row]
-
-
-def make_handlers():
-    from src.bot.handlers import BotHandlers
-    h = BotHandlers(
-        session_service=MagicMock(),
-        claude_client=MagicMock(),
-        auth_manager=MagicMock(),
-        require_auth=False,
-        allowed_chat_ids=[],
-    )
-    return h
-
 
 class TestPluginScheduleCallbackFlow:
     """플러그인 스케줄 UI 콜백 플로우 테스트."""
