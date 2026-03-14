@@ -142,6 +142,7 @@ class DetachedJobManager:
             stderr=stderr_file,
             start_new_session=True,
         )
+        stderr_file.close()
         logger.info(f"Detached worker spawned: job_id={job_id}, pid={process.pid}")
         return process.pid
 
@@ -262,9 +263,9 @@ class DetachedJobManager:
             await bot.send_message(
                 chat_id=job["chat_id"],
                 text=(
-                    f"⚠️ {reason} 때문에 아래 메시지의 응답을 전달하지 못했습니다.\n"
+                    f"⚠️ Could not deliver the response due to: {reason}\n"
                     f"<code>{escape_html(short_request)}</code>\n\n"
-                    f"다시 메시지를 보내주세요."
+                    f"Please send your message again."
                 ),
                 parse_mode="HTML",
             )
