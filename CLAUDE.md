@@ -418,6 +418,7 @@ class MyPlugin(Plugin):
 2. **안전한 로딩**: 플러그인 로드 실패 시 봇은 계속 동작 (try-catch 격리)
 3. **데이터 저장**: `self.repository` (Repository 인스턴스, PluginLoader가 주입)
 4. **검증 후 배포**: `python -m py_compile plugins/custom/my.py`
+5. **스케줄 응답 필수**: `execute_scheduled_action()`은 빈 문자열(`""`)을 반환하지 않는다. 데이터가 없더라도 사용자에게 "없음" 상태를 알리는 메시지를 반환해야 한다. 스케줄을 설정한 이상 실행 결과는 반드시 사용자에게 도달해야 한다.
 
 ### 플러그인 데이터 저장 확장
 
@@ -511,6 +512,45 @@ class MyPlugin(Plugin):
 1. **고정 명령어**: 언더바로 연결 (`/new_opus`, `/model_haiku`)
 2. **동적 파라미터**: 언더바 + ID (`/s_{id}`, `/h_{id}`, `/d_{id}`)
 3. **단축 명령어**: 자주 쓰는 명령어 (`/sl` = `/session_list`, `/nw` = `/new_workspace`, `/ws` = `/workspace`)
+
+## 로컬 세션 디스커버리 (Import Local Session)
+
+봇 외부에서 CLI로 직접 생성한 Claude/Codex 세션을 봇으로 가져오는 기능.
+
+### 개요
+
+봇은 자체 DB에 세션을 관리하지만, 사용자가 터미널에서 `claude` 또는 `codex` CLI를 직접 실행한 세션은 봇이 알 수 없다. `LocalSessionDiscoveryService`가 provider CLI의 로컬 저장소를 스캔하여 이러한 세션을 발견하고, 사용자가 선택하면 봇 DB에 새 세션으로 등록한다.
+
+### 데이터 소스
+
+| Provider | 소스 | 경로 | 내용 |
+|----------|------|------|------|
+| Claude | 인덱스 | `~/.claude/projects/*/sessions-index.json` | 세션 메타 (ID, summary, messageCount, cwd) |
+| Claude | Raw | `~/.claude/projects/*/{uuid}.jsonl` | JSONL 세션 로그 (인덱스에 없는 세션 보완) |
+| Codex | 인덱스 | `~/.codex/session_index.jsonl` | 세션 메타 (id, thread_name, updated_at) |
+| Codex | Raw | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | JSONL 세션 로그 |
+
+**검색 범위는 provider CLI의 저장 convention에 의해 결정된다.** 위 4개 소스 어디에도 없는 세션은 발견 불가.
+
+### 핵심 클래스
+
+| 클래스 | 위치 | 역할 |
+|--------|------|------|
+| `LocalSessionDiscoveryService` | `src/services/local_session_discovery.py` | 로컬 세션 스캔, 정렬, 중복 병합 |
+| `DiscoveredSession` | 동일 파일 | 발견된 세션 데이터 (provider, id, title, updated_at, workspace_path, preview) |
+
+### 동작 규칙
+
+- **읽기 전용**: 로컬 파일을 읽기만 하며, provider 저장소를 수정하지 않음
+- **온디맨드 스캔**: import UI를 열 때마다 새로 스캔 (캐시 없음)
+- **중복 병합**: 같은 session ID가 인덱스와 raw 양쪽에 있으면 `updated_at` 기준 최신 메타 우선
+- **Raw 스캔 제한**: 성능을 위해 파일 앞 160줄만 읽어 첫 사용자 프롬프트와 workspace path 추출
+- **subagent 제외**: `~/.claude/projects/*/subagents/` 하위 파일은 스킵
+- **Import 시**: 봇 DB에 새 세션 생성, `provider_session_id`로 외부 세션과 연결. 이미 import된 세션은 기존 세션으로 전환.
+
+### 콜백 prefix
+
+`sess:import`, `sess:import:{offset}`, `sess:import_pick:{provider}:{id}` → `session_callbacks.py`에서 처리
 
 ## 워크스페이스 세션
 

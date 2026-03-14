@@ -192,7 +192,7 @@ Current AI: Claude
 - 선택 즉시 현재 AI가 바뀐다.
 - 세션 목록(`/sl`), 현재 세션(`/session`), 새 세션(`/new`), 모델 변경(`/model`)은 모두 현재 선택된 AI 기준으로 동작한다.
 - AI를 바꿔도 다른 AI의 세션은 삭제되지 않는다.
-- 각 AI는 별도의 current session 상태를 가진다. Claude에서 보던 현재 세션과 Codex에서 보던 현재 세션을 각각 기억한다.
+- 현재 세션은 AI 제공자와 무관하게 **전체에서 1개만** 유지한다. 세션 전환 시 다른 제공자의 current session은 자동 해제된다.
 - 시작 화면, 도움말, 세션 화면에는 항상 `Current AI: {provider}`를 표시한다.
 
 ### 사용자 시나리오
@@ -208,6 +208,65 @@ Current AI: Claude
 **세션 삭제:** 목록에서 `Del` 버튼 → 확인 화면 → `Delete` 버튼. 현재 세션은 삭제 불가 (다른 세션으로 전환 먼저 필요).
 
 **이전 세션 복귀:** `/back` → 직전에 사용하던 세션으로 즉시 전환.
+
+**로컬 세션 가져오기 (Import Local Session):** 세션 목록 → `Import Local` → 로컬 CLI에서 직접 만든 세션 목록 표시 → 선택 → 봇 세션으로 등록.
+
+### Import Local Session
+
+#### 개념
+
+터미널에서 `claude` 또는 `codex` CLI를 직접 실행하면, 해당 세션은 봇이 모른다. Import Local은 이렇게 로컬에만 존재하는 세션을 봇으로 가져와서 텔레그램에서 이어서 대화할 수 있게 한다.
+
+#### 데이터 소스
+
+로컬 머신의 provider CLI 저장소를 직접 스캔한다:
+
+| Provider | 스캔 경로 |
+|----------|----------|
+| Claude | `~/.claude/projects/*/sessions-index.json` + raw `*.jsonl` |
+| Codex | `~/.codex/session_index.jsonl` + `~/.codex/sessions/YYYY/MM/DD/*.jsonl` |
+
+위 경로에 파일이 없는 세션은 발견되지 않는다 (다른 머신에서 만든 세션, 삭제된 세션 등).
+
+#### UI 플로우
+
+```
+세션 목록 → [Import Local]
+    │
+    ▼
+Import Local Session
+Recent local sessions across 📚 Claude and 🤖 Codex.
+
+Showing 1-10 recent sessions.
+
+1. Fix authentication bug
+   📚 Claude • a1b2c3d4 • 03/13 14:30
+   ~/AiSandbox/my-project
+
+2. Refactor database layer
+   🤖 Codex • e5f6g7h8 • 03/12 09:15
+
+[📚 a1b2c3d4 Fix authenticat...]
+[🤖 e5f6g7h8 Refactor databa...]
+[← Newer] [Older →]                ← 페이지네이션
+[Back]
+```
+
+#### 선택 후 동작
+
+| 상황 | 결과 |
+|------|------|
+| 최초 import | 봇 DB에 새 세션 생성 + 세션 상세 화면 표시 |
+| 이미 import됨 | 기존 봇 세션으로 전환 + "already attached" 안내 |
+| 워크스페이스 경로 존재 | 워크스페이스 세션으로 등록 (cwd 연결) |
+| 워크스페이스 경로 없음/삭제됨 | 일반 세션으로 등록 |
+
+#### 주의사항
+
+- Import 후 봇 히스토리는 import 시점부터 시작된다 (provider 측 기존 대화는 유지되지만 봇 UI에는 표시되지 않음)
+- 정렬은 `updated_at` 내림차순 (최신 사용 순)
+- 페이지당 10개, Claude/Codex 세션이 혼합 표시됨
+- 봇 DB와 무관하게 로컬 파일만 스캔하므로, 봇에서 삭제한 세션이 다시 보일 수 있음
 
 ### 세션 목록 화면
 
@@ -433,10 +492,18 @@ Runs: N
 [Back]
 ```
 
-### 시간 선택 UI
+### 시간 변경 플로우
 
-- 시간: 00h~23h (앱 로컬 시간대 기준), 4열 그리드 (24개 버튼)
-- 분: 00~55, 5분 간격, 4열 그리드 (12개 버튼)
+`Change Time` → 시간 선택(00h~23h) → 분 선택(00~55, 5분 간격) → 반복 유형 선택(`Daily` / `One-time`) → 변경 완료.
+
+- 시간: 앱 로컬 시간대 기준, 4열 그리드 (24개 버튼)
+- 분: 5분 간격, 4열 그리드 (12개 버튼)
+- 반복 유형: 현재 설정된 유형이 기본 선택됨. 변경하면 `cron_expr` / `run_at_local`이 자동 재계산됨.
+
+### ON/OFF 토글 동작
+
+- **OFF → ON**: `once` 스케줄의 경우 `run_at_local`을 현재 시각 기준 **가장 가까운 미래 시각**으로 재설정한다. 오늘 해당 시각이 아직 지나지 않았으면 오늘, 이미 지났으면 내일로 설정.
+- **ON → OFF**: 런타임 스케줄러에서 해제만 하고 설정은 유지.
 
 ### 스케줄 실행 결과
 
@@ -445,7 +512,12 @@ Runs: N
 📅 ScheduleName
 
 {실행 결과 텍스트}
+
+[💬 Session]        ← Chat/Workspace 스케줄만 표시
 ```
+
+- `💬 Session` 버튼: 실행 결과와 연결된 세션으로 전환. 세션이 아직 없으면 해당 실행의 provider session을 봇 세션으로 등록하고 전환한다.
+- Plugin 스케줄은 AI 세션이 없으므로 버튼 미표시.
 
 ---
 
@@ -627,7 +699,7 @@ Queue (1)
 | 봇 UI (명령어 응답, 버튼, 에러) | 영어 | 통일 완료 |
 | Claude 응답 | 한국어 | 시스템 프롬프트로 지정 |
 | 플러그인 트리거 | 한국어 | `할일`, `메모`, `날씨` 등 자연어 |
-| 내부 에러/디버그 로그 | 한국어 광범위 잔존 | main.py, handlers, services, client.py 등 |
+| 내부 에러/디버그 로그 | 영어 | 전체 전환 완료 |
 
 ---
 
