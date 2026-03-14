@@ -166,6 +166,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 ```
 src/
 ├── main.py                    # 봇 진입점, 핸들러 등록
+├── bootstrap.py               # 봇 런타임 구성 (핸들러/서비스 조립)
 ├── worker_job.py              # Claude detached worker 진입점
 ├── config.py                  # 환경변수 기반 설정 (Pydantic Settings)
 ├── constants.py               # 전역 상수 (모델, 시간, 제한값)
@@ -173,9 +174,14 @@ src/
 ├── lock.py                    # 파일 락 (싱글톤)
 ├── supervisor.py              # 프로세스 감시
 ├── scheduler_manager.py       # 통합 job_queue 매니저
+├── schedule_utils.py          # 스케줄 트리거 파싱/표시/계산 유틸
+├── time_utils.py              # 타임존 설정
+├── ui_emoji.py                # UI 이모지 상수
+├── runtime_exit_codes.py      # 프로세스 종료 코드 상수
 ├── logging_config.py          # 로깅 설정
 │
 ├── ai/
+│   ├── base_client.py         # CLI client 공통 기반 (subprocess 관리)
 │   ├── catalog.py             # provider/model profile 정의
 │   ├── registry.py            # provider → client 라우팅
 │   └── client_types.py        # 공통 응답 타입/프로토콜
@@ -191,16 +197,19 @@ src/
 │   │   ├── message_handlers.py   # 메시지 처리 + AI 디스패치
 │   │   ├── workspace_handlers.py # 워크스페이스 명령어/콜백
 │   │   └── admin_handlers.py     # 관리 명령어 (/tasks, /scheduler 등)
+│   ├── command_catalog.py     # 공유 명령어 메타데이터 (CommandSpec)
 │   ├── middleware.py           # 인증/권한 데코레이터
-│   ├── formatters.py          # 메시지 포맷팅 (마크다운→HTML, truncation, escape_html)
-│   ├── session_queue.py       # 세션 큐 매니저
+│   ├── formatters.py          # 메시지 포맷팅 (마크다운→HTML, truncation, escape_html, split_message)
+│   ├── runtime/               # 런타임 컴포넌트
+│   │   ├── detached_job_manager.py  # Detached worker 생명주기 관리
+│   │   └── pending_request_store.py # 대기 요청 DB 영속화
 │   ├── constants.py           # UI 상수 (이모지, 제한값)
 │   └── prompts/               # 시스템 프롬프트
 │
 ├── claude/
-│   └── client.py              # Claude CLI 래퍼
+│   └── client.py              # Claude CLI 래퍼 (BaseCLIClient 상속)
 ├── codex/
-│   └── client.py              # Codex CLI 래퍼
+│   └── client.py              # Codex CLI 래퍼 (BaseCLIClient 상속)
 │
 ├── plugins/
 │   └── loader.py              # Plugin 기본 클래스 + PluginLoader
@@ -211,13 +220,14 @@ src/
 │   ├── schema.sql             # DDL (Single Source of Truth)
 │   └── adapters/              # 도메인별 어댑터
 │       ├── schedule_adapter.py
-│       └── workspace_adapter.py
+│       ├── workspace_adapter.py
+│       └── plugin_storage.py
 │
 └── services/
     ├── session_service.py     # 세션 생명주기
     ├── job_service.py         # detached provider job 실행 + Telegram 응답
-    ├── message_service.py     # 메시지 처리
-    └── schedule_service.py    # 스케줄 CRUD + 실행
+    ├── schedule_execution_service.py  # 스케줄 실행
+    └── local_session_discovery.py     # 로컬 CLI 세션 발견/임포트
 ```
 
 **기본 호출 흐름:** Handler → Service → Repository → SQLite
@@ -247,8 +257,7 @@ src/
 | `ADMIN_CHAT_ID` | `0` | 관리자 알림/리포트 수신 chat ID |
 | `AI_COMMAND` | `claude` | AI CLI 명령어 |
 | `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 시간 |
-| `RESPONSE_NOTIFY_SECONDS` | `60` | 응답 대기 알림까지 시간(초) |
-| `SESSION_LIST_AI_SUMMARY` | `false` | 세션 목록에서 AI 요약 사용 여부 |
+| `APP_TIMEZONE` | `Asia/Seoul` | 앱 타임존 |
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
 | `AUTH_SECRET_KEY` | (조건부 필수) | 인증 키 (`REQUIRE_AUTH=true` 시 필수) |
 | `AUTH_TIMEOUT_MINUTES` | `30` | 인증 유효 시간 |
@@ -321,7 +330,7 @@ supervisor
 
 **규칙:**
 - provider 외부 세션 ID를 DB primary key로 가정하지 않음
-- current/previous session은 provider별로 분리 관리
+- current session은 전체에서 1개만 유지 (provider 전환 시 다른 provider의 current는 NULL로 해제)
 - `/sl`, `/session`, `/model`, `/new`는 현재 선택된 provider 기준으로 동작
 - 모델 버튼/표시는 catalog에서 관리하고, CLI 플래그는 client가 해석
 - 비지원 provider 흔적(`gemini` 등)은 코드와 운영 DB에서 제거
@@ -441,6 +450,10 @@ class MyPlugin(Plugin):
 
 | Prefix | 대상 | 등록 위치 |
 |--------|------|----------|
+| `menu:` | 메인 메뉴 네비게이션 | `callback_handlers.py` |
+| `ai:` | AI 프로바이더 선택 | `callback_handlers.py` |
+| `resp:` | AI 응답 후속 버튼 | `callback_handlers.py` |
+| `plug:` | 플러그인 허브 네비게이션 | `callback_handlers.py` |
 | `td:` | 투두 플러그인 | `callback_handlers.py` |
 | `memo:` | 메모 플러그인 | `callback_handlers.py` |
 | `weather:` | 날씨 플러그인 | `callback_handlers.py` |
@@ -565,6 +578,6 @@ class MyPlugin(Plugin):
 
 | 타입 | 설명 |
 |------|------|
-| `claude` | 일반 스케줄 (새 세션에서 실행) |
+| `chat` | 일반 스케줄 (새 세션에서 실행) |
 | `workspace` | 워크스페이스 스케줄 (경로의 CLAUDE.md 적용) |
 | `plugin` | 플러그인 액션 스케줄 (모델/메시지 불필요) |
