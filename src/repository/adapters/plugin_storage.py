@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
-from src.repository.repository import Memo, Todo, WeatherLocation
+from src.repository.repository import Diary, Memo, Todo, WeatherLocation
 
 if TYPE_CHECKING:
     from src.repository.repository import Repository
@@ -245,6 +245,86 @@ class RepositoryTodoStore:
             "done": row["done"] or 0,
             "pending": row["pending"] or 0,
         }
+
+
+def _row_to_diary(row: sqlite3.Row) -> Diary:
+    """Convert one SQLite row to the shared Diary dataclass."""
+    return Diary(
+        id=row["id"],
+        chat_id=row["chat_id"],
+        date=row["date"],
+        content=row["content"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+class RepositoryDiaryStore:
+    """Diary store adapter over the repository."""
+
+    def __init__(self, repo: "Repository"):
+        self._repo = repo
+
+    def add(self, chat_id: int, date: str, content: str) -> Diary:
+        now = _now_utc()
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            "INSERT INTO diaries (chat_id, date, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, date, content, now, now),
+        )
+        conn.commit()
+        return Diary(
+            id=cursor.lastrowid or 0,
+            chat_id=chat_id,
+            date=date,
+            content=content,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def get(self, diary_id: int) -> Optional[Diary]:
+        conn = _require_conn(self._repo)
+        row = conn.execute("SELECT * FROM diaries WHERE id = ?", (diary_id,)).fetchone()
+        return _row_to_diary(row) if row else None
+
+    def get_by_date(self, chat_id: int, date: str) -> Optional[Diary]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            "SELECT * FROM diaries WHERE chat_id = ? AND date = ?",
+            (chat_id, date),
+        ).fetchone()
+        return _row_to_diary(row) if row else None
+
+    def update(self, diary_id: int, content: str) -> bool:
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            "UPDATE diaries SET content = ? WHERE id = ?",
+            (content, diary_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete(self, diary_id: int) -> bool:
+        conn = _require_conn(self._repo)
+        cursor = conn.execute("DELETE FROM diaries WHERE id = ?", (diary_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def list_by_chat(self, chat_id: int, limit: int = 10, offset: int = 0) -> list[Diary]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            "SELECT * FROM diaries WHERE chat_id = ? ORDER BY date DESC LIMIT ? OFFSET ?",
+            (chat_id, limit, offset),
+        ).fetchall()
+        return [_row_to_diary(row) for row in rows]
+
+    def count_by_chat(self, chat_id: int) -> int:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM diaries WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+        return row["cnt"] if row else 0
 
 
 class RepositoryWeatherLocationStore:

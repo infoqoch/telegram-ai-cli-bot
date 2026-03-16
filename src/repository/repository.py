@@ -252,6 +252,17 @@ class Todo:
 
 
 @dataclass
+class Diary:
+    """Diary entry data."""
+    id: int
+    chat_id: int
+    date: str
+    content: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass
 class WeatherLocation:
     """Weather location data."""
     chat_id: int

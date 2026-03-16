@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
-from src.repository.repository import Memo, Todo, WeatherLocation
+from src.repository.repository import Diary, Memo, Todo, WeatherLocation
 
 
 class PluginDatabase(Protocol):
@@ -73,6 +73,31 @@ class TodoStore(Protocol):
 
     def stats_for_date(self, chat_id: int, date: str) -> dict[str, int]:
         """Return aggregate todo stats for one date."""
+
+
+class DiaryStore(Protocol):
+    """Diary persistence contract for plugins."""
+
+    def add(self, chat_id: int, date: str, content: str) -> Diary:
+        """Create one diary entry."""
+
+    def get(self, diary_id: int) -> Optional[Diary]:
+        """Return one diary by id."""
+
+    def get_by_date(self, chat_id: int, date: str) -> Optional[Diary]:
+        """Return the diary entry for a specific date."""
+
+    def update(self, diary_id: int, content: str) -> bool:
+        """Update diary content."""
+
+    def delete(self, diary_id: int) -> bool:
+        """Delete one diary entry."""
+
+    def list_by_chat(self, chat_id: int, limit: int = 10, offset: int = 0) -> list[Diary]:
+        """List diary entries for one chat, ordered by date descending."""
+
+    def count_by_chat(self, chat_id: int) -> int:
+        """Return total diary count for one chat."""
 
 
 class WeatherLocationStore(Protocol):
