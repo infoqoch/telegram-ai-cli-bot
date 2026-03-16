@@ -278,6 +278,9 @@ END;
         if not diary:
             return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
 
+        if diary.chat_id != chat_id:
+            return {"text": "❌ 권한이 없습니다.", "edit": True}
+
         return {
             "text": f"✏️ <b>일기 수정</b>\n\n<b>{_format_date_display(diary.date)}</b>\n\n현재 내용:\n{escape_html(diary.content)}",
             "force_reply_prompt": "✏️ 수정할 내용을 입력하세요:",
@@ -391,6 +394,9 @@ END;
         if not diary:
             return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
 
+        if diary.chat_id != chat_id:
+            return {"text": "❌ 권한이 없습니다.", "edit": True}
+
         date_display = _format_date_display(diary.date)
 
         buttons = [
@@ -415,6 +421,9 @@ END;
         if not diary:
             return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
 
+        if diary.chat_id != chat_id:
+            return {"text": "❌ 권한이 없습니다.", "edit": True}
+
         date_display = _format_date_display(diary.date)
         preview = escape_html(diary.content[:50]) + ("..." if len(diary.content) > 50 else "")
 
@@ -436,6 +445,9 @@ END;
         diary = self.store.get(diary_id)
         if not diary:
             return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
+
+        if diary.chat_id != chat_id:
+            return {"text": "❌ 권한이 없습니다.", "edit": True}
 
         date_display = _format_date_display(diary.date)
         self.store.delete(diary_id)

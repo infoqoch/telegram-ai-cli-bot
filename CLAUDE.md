@@ -457,6 +457,7 @@ class MyPlugin(Plugin):
 | `td:` | 투두 플러그인 | `callback_handlers.py` |
 | `memo:` | 메모 플러그인 | `callback_handlers.py` |
 | `weather:` | 날씨 플러그인 | `callback_handlers.py` |
+| `diary:` | 일기 플러그인 | `callback_handlers.py` |
 | `sess:` | 세션 관리 | `callback_handlers.py` |
 | `sched:` | 스케줄러 | `callback_handlers.py` |
 | `ws:` | 워크스페이스 | `callback_handlers.py` |
@@ -473,6 +474,7 @@ class MyPlugin(Plugin):
 | `sess_rename:{session_id}` | 세션 이름 변경 | `message_handlers.py` |
 | `schedule_input` | 스케줄 메시지 입력 | `message_handlers.py` |
 | `_ws_pending` | 워크스페이스 플로우 | `message_handlers.py` (dict 기반) |
+| `diary_write` | 일기 작성/수정 | `message_handlers.py` (plugin interaction) |
 
 ## 메시지 처리 흐름
 
