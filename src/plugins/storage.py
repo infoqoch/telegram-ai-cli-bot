@@ -99,6 +99,9 @@ class DiaryStore(Protocol):
     def count_by_chat(self, chat_id: int) -> int:
         """Return total diary count for one chat."""
 
+    def list_by_month(self, chat_id: int, year: int, month: int) -> list[Diary]:
+        """List diary entries for one chat in a specific month, ordered by date descending."""
+
 
 class WeatherLocationStore(Protocol):
     """Weather location persistence contract for plugins."""

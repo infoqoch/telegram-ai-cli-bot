@@ -326,6 +326,19 @@ class RepositoryDiaryStore:
         ).fetchone()
         return row["cnt"] if row else 0
 
+    def list_by_month(self, chat_id: int, year: int, month: int) -> list[Diary]:
+        start = f"{year:04d}-{month:02d}-01"
+        if month == 12:
+            end = f"{year + 1:04d}-01-01"
+        else:
+            end = f"{year:04d}-{month + 1:02d}-01"
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            "SELECT * FROM diaries WHERE chat_id = ? AND date >= ? AND date < ? ORDER BY date DESC",
+            (chat_id, start, end),
+        ).fetchall()
+        return [_row_to_diary(row) for row in rows]
+
 
 class RepositoryWeatherLocationStore:
     """Weather location store adapter over the repository."""

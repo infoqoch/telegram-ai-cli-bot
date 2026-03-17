@@ -229,17 +229,16 @@ class TestDiaryPlugin:
     # ---- handle (menu) -----------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_handle_returns_menu(self):
-        """'일기' 단독 입력 → 메뉴 응답 + 쓰기/목록 버튼."""
+    async def test_handle_returns_list(self):
+        """'일기' 단독 입력 → 목록 응답 (첫 화면이 목록)."""
         plugin, mock_store = _make_plugin()
-        mock_store.get_by_date.return_value = None
         mock_store.count_by_chat.return_value = 0
+        mock_store.list_by_month.return_value = []
 
         result = await plugin.handle("일기", 1)
 
         assert result.handled is True
         assert result.response is not None
-        assert "일기" in result.response
         assert result.reply_markup is not None
 
     # ---- handle_callback: write --------------------------------------------
@@ -284,14 +283,14 @@ class TestDiaryPlugin:
         """diary:list - 일기 없음 → '작성된 일기가 없습니다' 메시지."""
         plugin, mock_store = _make_plugin()
         mock_store.count_by_chat.return_value = 0
-        mock_store.list_by_chat.return_value = []
+        mock_store.list_by_month.return_value = []
 
         result = plugin.handle_callback("diary:list", 1)
 
         assert "없습니다" in result["text"]
 
     def test_callback_list_with_entries(self):
-        """diary:list - 일기 있음 → 목록 표시."""
+        """diary:list - 일기 있음 → 월별 목록 표시."""
         plugin, mock_store = _make_plugin()
         entries = [
             Diary(id=1, chat_id=1, date="2026-03-17", content="월요일 일기",
@@ -300,7 +299,7 @@ class TestDiaryPlugin:
                   created_at="2026-03-16T10:00:00", updated_at="2026-03-16T10:00:00"),
         ]
         mock_store.count_by_chat.return_value = 2
-        mock_store.list_by_chat.return_value = entries
+        mock_store.list_by_month.return_value = entries
 
         result = plugin.handle_callback("diary:list", 1)
 
@@ -359,7 +358,7 @@ class TestDiaryPlugin:
         )
         mock_store.get.return_value = diary
         mock_store.count_by_chat.return_value = 0
-        mock_store.list_by_chat.return_value = []
+        mock_store.list_by_month.return_value = []
 
         result = plugin.handle_callback("diary:del_confirm:1", 1)
 
