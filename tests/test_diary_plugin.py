@@ -466,3 +466,99 @@ class TestDiaryPlugin:
 
         assert result != ""
         assert "이미 작성" in result
+
+    # ---- handle_callback: write_yesterday ------------------------------------
+
+    def test_menu_shows_yesterday_status(self):
+        """메뉴에 어제 상태 표시 및 '⏪ 어제 쓰기' 버튼 확인."""
+        plugin, mock_store = _make_plugin()
+        today = date.today().isoformat()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+        # today: no entry, yesterday: has entry
+        mock_store.get_by_date.side_effect = lambda cid, d: (
+            None if d == today else (
+                Diary(id=1, chat_id=1, date=yesterday, content="어제 일기",
+                      created_at="2026-03-16T10:00:00", updated_at="2026-03-16T10:00:00")
+                if d == yesterday else None
+            )
+        )
+        mock_store.count_by_chat.return_value = 1
+
+        result = plugin._handle_menu(1)
+
+        text = result["text"]
+        # Today status line
+        assert "📝 오늘 일기 미작성" in text
+        # Yesterday status line
+        assert "✅ 어제 일기 작성됨" in text
+
+        # Check for "⏪ 어제 쓰기" button
+        markup = result["reply_markup"]
+        buttons_flat = [btn for row in markup.inline_keyboard for btn in row]
+        button_texts = [b.text for b in buttons_flat]
+        assert "⏪ 어제 쓰기" in button_texts
+
+    def test_callback_write_yesterday_no_existing(self):
+        """diary:write_yesterday - 어제 일기 없음 → ForceReply with '어제' labels."""
+        plugin, mock_store = _make_plugin()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        mock_store.get_by_date.return_value = None
+
+        result = plugin.handle_callback("diary:write_yesterday", 1)
+
+        # Should have ForceReply for yesterday
+        assert "force_reply" in result
+        assert "force_reply_prompt" in result
+        assert result.get("interaction_action") == "write"
+        assert result.get("interaction_state", {}).get("target_date") == yesterday
+
+        # Check placeholder and prompt contain yesterday labels
+        force_reply = result["force_reply"]
+        assert "어제" in force_reply.input_field_placeholder or "어제" in result.get("force_reply_prompt", "")
+
+    def test_callback_write_yesterday_existing(self):
+        """diary:write_yesterday - 어제 일기 이미 있음 → 기존 내용 + 수정/보기 버튼."""
+        plugin, mock_store = _make_plugin()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        existing = Diary(
+            id=42, chat_id=1, date=yesterday, content="어제 일기입니다.",
+            created_at="2026-03-16T10:00:00", updated_at="2026-03-16T10:00:00",
+        )
+        mock_store.get_by_date.return_value = existing
+
+        result = plugin.handle_callback("diary:write_yesterday", 1)
+
+        text = result["text"]
+        assert "이미 작성" in text
+        assert "어제의 일기" in text
+
+        # Check for edit/view buttons
+        markup = result["reply_markup"]
+        buttons_flat = [btn for row in markup.inline_keyboard for btn in row]
+        cb_datas = [b.callback_data for b in buttons_flat]
+        assert "diary:edit:42" in cb_datas
+        assert "diary:view:42" in cb_datas
+
+    def test_process_write_yesterday_via_interaction(self):
+        """handle_interaction - target_date=yesterday → 어제 날짜로 저장."""
+        from src.plugins.loader import PluginInteraction
+
+        plugin, mock_store = _make_plugin()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        saved = Diary(
+            id=10, chat_id=1, date=yesterday, content="어제의 추억",
+            created_at="2026-03-16T10:00:00", updated_at="2026-03-16T10:00:00",
+        )
+        mock_store.get_by_date.return_value = None  # no existing
+        mock_store.add.return_value = saved
+
+        interaction = PluginInteraction(
+            plugin_name="diary", chat_id=1, action="write",
+            state={"target_date": yesterday}
+        )
+        result = plugin.handle_interaction("어제의 추억", 1, interaction)
+
+        # Verify add was called with yesterday's date
+        mock_store.add.assert_called_once_with(1, yesterday, "어제의 추억")
+        assert "저장되었습니다" in result["text"]
