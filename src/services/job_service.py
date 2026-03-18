@@ -243,8 +243,12 @@ class JobService:
             notify_task.cancel()
             try:
                 await notify_task
-            except asyncio.CancelledError:
-                pass
+            except (asyncio.CancelledError, Exception) as exc:
+                if not isinstance(exc, asyncio.CancelledError):
+                    logger.warning(
+                        f"Detached provider long-task notice failed - job_id={job_id}, "
+                        f"session={session_id[:8]}, error={self._format_exception(exc)}"
+                    )
 
         elapsed = time.time() - start_time
         logger.info(
