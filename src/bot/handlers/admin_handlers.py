@@ -102,6 +102,30 @@ class AdminHandlers(BaseHandler):
         clear_context()
 
     @authorized_only
+    @authenticated_only
+    async def cal_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /cal command - open Google Calendar plugin."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        logger.info("/cal command received")
+
+        if self.plugins:
+            cal_plugin = self.plugins.get_plugin_by_name("calendar")
+            if cal_plugin:
+                result = await cal_plugin.handle("캘린더", chat_id)
+                if result.handled:
+                    await update.message.reply_text(
+                        result.response or "📅 Calendar",
+                        reply_markup=result.reply_markup,
+                        parse_mode="HTML",
+                    )
+                    clear_context()
+                    return
+
+        await update.message.reply_text("⚠️ Calendar plugin not loaded.")
+        clear_context()
+
+    @authorized_only
     async def chatid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /chatid command - show user's chat ID."""
         chat_id = update.effective_chat.id

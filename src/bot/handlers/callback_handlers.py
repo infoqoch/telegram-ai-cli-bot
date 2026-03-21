@@ -212,6 +212,27 @@ class CallbackHandlers(BaseHandler):
             )
             return
 
+        if action == "calendar":
+            if self.plugins:
+                cal_plugin = self.plugins.get_plugin_by_name("calendar")
+                if cal_plugin:
+                    result = await cal_plugin.handle("캘린더", chat_id)
+                    if result.handled:
+                        keyboard = result.reply_markup
+                        if not keyboard:
+                            keyboard = self._build_menu_back_markup()
+                        await query.edit_message_text(
+                            result.response or "📅 Calendar",
+                            reply_markup=keyboard,
+                            parse_mode="HTML",
+                        )
+                        return
+            await query.edit_message_text(
+                "⚠️ Calendar plugin not loaded.",
+                reply_markup=self._build_menu_back_markup(),
+            )
+            return
+
         if action == "plugins":
             await query.edit_message_text(
                 self._build_plugins_text(),

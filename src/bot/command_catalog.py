@@ -29,6 +29,7 @@ BASE_COMMAND_SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("scheduler", "Open the scheduler hub", menu_label="📅 Scheduler", callback_data="menu:scheduler"),
     CommandSpec("tasks", "Show active tasks", menu_label="📌 Tasks", callback_data="menu:tasks"),
     CommandSpec("select_ai", "Choose Claude or Codex", menu_label="🔀 AI", callback_data="menu:ai"),
+    CommandSpec("cal", "Open the calendar", menu_label="📅 Calendar", callback_data="menu:calendar"),
     CommandSpec("plugins", "Browse the plugin catalog", menu_label="🔌 Plugins", callback_data="menu:plugins", requires_plugins=True),
     CommandSpec("reload", "Reload plugins", admin_only=True),
 )
