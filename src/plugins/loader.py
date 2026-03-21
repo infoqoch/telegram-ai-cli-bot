@@ -131,6 +131,32 @@ class Plugin(ABC):
         """Register plugin-owned system jobs into the shared app runtime."""
         del context
 
+    # AI context
+    ai_context_file: str = "ai_context.md"
+
+    def _load_ai_context_file(self) -> str:
+        """Load static AI context description from markdown file."""
+        import inspect
+        plugin_dir = Path(inspect.getfile(self.__class__)).parent
+        context_path = plugin_dir / self.ai_context_file
+        if context_path.exists():
+            return context_path.read_text(encoding="utf-8")
+        return ""
+
+    async def get_ai_context(self, chat_id: int) -> str:
+        """Return full AI context: static description + dynamic data.
+
+        Override get_ai_dynamic_context() to provide live data.
+        """
+        static = self._load_ai_context_file()
+        dynamic = await self.get_ai_dynamic_context(chat_id)
+        if dynamic:
+            return f"{static}\n\n[현재 데이터]\n{dynamic}"
+        return static
+
+    async def get_ai_dynamic_context(self, chat_id: int) -> str:
+        """Override to provide dynamic context data from DB. Default: empty."""
+        return ""
 
 
 class PluginLoader:

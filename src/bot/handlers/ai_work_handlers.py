@@ -1,14 +1,10 @@
 """AI Work handlers - contextual AI assistance for each domain."""
 
-import re
-from datetime import datetime, timedelta
+from pathlib import Path
 
 from telegram import ForceReply
-from telegram.ext import ContextTypes
 
 from src.logging_config import logger
-from src.time_utils import app_now, get_app_timezone
-from src.ui_emoji import BUTTON_AI_WORK
 from .base import BaseHandler
 
 
@@ -23,9 +19,23 @@ DOMAIN_LABELS = {
     "diary": "일기",
 }
 
+# Domains handled by plugins (via plugin.get_ai_context)
+PLUGIN_DOMAINS = {"todo", "memo", "weather", "diary", "calendar"}
+
+# Domains handled by core handlers (via md file + _ctx_ methods)
+CORE_DOMAINS = {"scheduler", "workspace", "tasks"}
+
 
 class AiWorkHandlers(BaseHandler):
     """Contextual AI assistance - '✨ AI와 작업하기' feature."""
+
+    def _load_core_context(self, domain: str) -> str:
+        """Load static AI context markdown for a core domain."""
+        context_dir = Path(__file__).parent.parent / "ai_contexts"
+        context_path = context_dir / f"{domain}.md"
+        if context_path.exists():
+            return context_path.read_text(encoding="utf-8")
+        return ""
 
     async def _handle_aiwork_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle aiwork:{domain} callback - show ForceReply prompt."""
@@ -53,7 +63,7 @@ class AiWorkHandlers(BaseHandler):
         context_text = await self._gather_domain_context(chat_id, domain)
 
         augmented_message = (
-            f"[참고 정보 - 현재 {label} 데이터]\n"
+            f"[참고 정보 - {label}]\n"
             f"{context_text}\n\n"
             f"위 정보를 참고하여 다음 요청에 답해주세요:\n"
             f"{message}"
@@ -62,25 +72,43 @@ class AiWorkHandlers(BaseHandler):
         await self._dispatch_to_ai(update, chat_id, user_id, augmented_message)
 
     async def _gather_domain_context(self, chat_id: int, domain: str) -> str:
-        """Gather domain-specific context data."""
-        gatherers = {
-            "scheduler": self._ctx_scheduler,
-            "workspace": self._ctx_workspace,
-            "calendar": self._ctx_calendar,
-            "tasks": self._ctx_tasks,
-            "todo": self._ctx_todo,
-            "memo": self._ctx_memo,
-            "weather": self._ctx_weather,
-            "diary": self._ctx_diary,
-        }
-        gatherer = gatherers.get(domain)
-        if not gatherer:
-            return "(알 수 없는 도메인)"
+        """Gather context: plugin domains delegate to plugin, core domains use md + dynamic."""
         try:
-            return await gatherer(chat_id)
+            if domain in PLUGIN_DOMAINS:
+                return await self._gather_plugin_context(chat_id, domain)
+            if domain in CORE_DOMAINS:
+                return await self._gather_core_context(chat_id, domain)
+            return "(알 수 없는 도메인)"
         except Exception as e:
             logger.error(f"Context gathering error for {domain}: {e}", exc_info=True)
             return f"(데이터 수집 중 오류: {e})"
+
+    async def _gather_plugin_context(self, chat_id: int, domain: str) -> str:
+        """Delegate context gathering to the plugin."""
+        if not self.plugins:
+            return "(플러그인 없음)"
+        plugin = self.plugins.get_plugin_by_name(domain)
+        if not plugin:
+            return f"({domain} 플러그인 없음)"
+        return await plugin.get_ai_context(chat_id)
+
+    async def _gather_core_context(self, chat_id: int, domain: str) -> str:
+        """Load core context: static md file + dynamic data."""
+        static = self._load_core_context(domain)
+
+        dynamic_gatherers = {
+            "scheduler": self._ctx_scheduler,
+            "workspace": self._ctx_workspace,
+            "tasks": self._ctx_tasks,
+        }
+        gatherer = dynamic_gatherers.get(domain)
+        dynamic = await gatherer(chat_id) if gatherer else ""
+
+        if dynamic:
+            return f"{static}\n\n[현재 데이터]\n{dynamic}"
+        return static
+
+    # --- Core domain dynamic data gatherers ---
 
     async def _ctx_scheduler(self, chat_id: int) -> str:
         repo = self._repository
@@ -107,33 +135,6 @@ class AiWorkHandlers(BaseHandler):
             lines.append(f"- {ws.name} ({ws.short_path})")
         return "\n".join(lines)
 
-    async def _ctx_calendar(self, chat_id: int) -> str:
-        if not self.plugins:
-            return "(캘린더 플러그인 없음)"
-        cal_plugin = self.plugins.get_plugin_by_name("calendar")
-        if not cal_plugin:
-            return "(캘린더 플러그인 없음)"
-        try:
-            gcal = getattr(cal_plugin, '_gcal', None)
-            if gcal and getattr(gcal, 'available', False):
-                today = app_now()
-                start = today.replace(hour=0, minute=0, second=0, microsecond=0)
-                end = start + timedelta(days=1)
-                events = gcal.list_events(start, end)
-                if not events:
-                    return "오늘 일정이 없습니다."
-                lines = []
-                for ev in events:
-                    if ev.all_day:
-                        time_str = "종일"
-                    else:
-                        time_str = ev.start.strftime("%H:%M")
-                    lines.append(f"- {time_str}: {ev.summary}")
-                return "\n".join(lines)
-        except Exception as e:
-            logger.warning(f"Calendar context error: {e}")
-        return "(캘린더 데이터 조회 실패)"
-
     async def _ctx_tasks(self, chat_id: int) -> str:
         repo = self._repository
         if not repo:
@@ -151,66 +152,4 @@ class AiWorkHandlers(BaseHandler):
             lines.append(f"대기 중인 메시지: {len(queued)}개")
         else:
             lines.append("대기 중인 메시지 없음")
-        return "\n".join(lines)
-
-    async def _ctx_todo(self, chat_id: int) -> str:
-        repo = self._repository
-        if not repo:
-            return "(데이터 없음)"
-        today_str = app_now().strftime("%Y-%m-%d")
-        todos = repo.list_todos_by_date(chat_id, today_str)
-        if not todos:
-            return f"오늘({today_str}) 등록된 할일이 없습니다."
-        lines = [f"오늘({today_str}) 할일 목록:"]
-        for t in todos:
-            status = "✅" if t.done else "⬜"
-            lines.append(f"  {status} {t.text}")
-        stats = repo.get_todo_stats(chat_id, today_str)
-        if stats:
-            lines.append(f"\n통계: 전체 {stats.get('total', 0)}개, 완료 {stats.get('done', 0)}개, 미완료 {stats.get('pending', 0)}개")
-        return "\n".join(lines)
-
-    async def _ctx_memo(self, chat_id: int) -> str:
-        repo = self._repository
-        if not repo:
-            return "(데이터 없음)"
-        memos = repo.list_memos(chat_id)
-        if not memos:
-            return "저장된 메모가 없습니다."
-        lines = [f"저장된 메모 {len(memos)}개:"]
-        for m in memos:
-            content = m.content[:80]
-            lines.append(f"  - #{m.id}: {content}")
-        return "\n".join(lines)
-
-    async def _ctx_weather(self, chat_id: int) -> str:
-        repo = self._repository
-        if not repo:
-            return "(데이터 없음)"
-        location = repo.get_weather_location(chat_id)
-        if location:
-            return f"마지막 조회 지역: {location.name}"
-        return "최근 조회한 날씨 지역이 없습니다. 날씨 관련 질문을 자유롭게 해주세요."
-
-    async def _ctx_diary(self, chat_id: int) -> str:
-        if not self.plugins:
-            return "(일기 플러그인 없음)"
-        diary_plugin = self.plugins.get_plugin_by_name("diary")
-        if not diary_plugin:
-            return "(일기 플러그인 없음)"
-        store = getattr(diary_plugin, 'storage', None)
-        if not store:
-            return "(데이터 없음)"
-        today = app_now()
-        try:
-            entries = store.list_by_month(chat_id, today.year, today.month)
-        except Exception as e:
-            logger.warning(f"Diary context error: {e}")
-            return "(일기 데이터 조회 실패)"
-        if not entries:
-            return f"{today.year}년 {today.month}월에 작성된 일기가 없습니다."
-        lines = [f"{today.year}년 {today.month}월 일기 ({len(entries)}개):"]
-        for d in entries:
-            content = d.content[:60]
-            lines.append(f"  - {d.date}: {content}...")
         return "\n".join(lines)
