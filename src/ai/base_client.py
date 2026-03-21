@@ -2,17 +2,58 @@
 
 import asyncio
 from contextlib import suppress
+from dataclasses import dataclass
 import os
+import shlex
 import signal
+from pathlib import Path
 from typing import Optional
 
 from src.logging_config import logger
 
 
+@dataclass(frozen=True)
+class PromptConfig:
+    """Resolved prompts for one AI call."""
+
+    system: Optional[str] = None
+    append: Optional[str] = None
+
+
 class BaseCLIClient:
-    """Base class providing shared subprocess management for CLI-based AI clients."""
+    """Base class providing shared subprocess management and prompt resolution."""
 
     _DRAIN_TIMEOUT_SECONDS = 5
+
+    def __init__(
+        self,
+        command: str,
+        system_prompt_file: Optional[Path] = None,
+        timeout: Optional[int] = None,
+    ):
+        self.command_parts = shlex.split(command)
+        self.system_prompt = self._load_system_prompt(system_prompt_file)
+        self.timeout = timeout
+
+    @staticmethod
+    def _load_system_prompt(path: Optional[Path]) -> Optional[str]:
+        if path and path.exists():
+            return path.read_text(encoding="utf-8")
+        return None
+
+    def _resolve_prompts(self, workspace_path: Optional[str]) -> PromptConfig:
+        """Determine prompts for one AI call.
+
+        Non-workspace: system_prompt as main system prompt.
+        Workspace: system_prompt as append (workspace has its own context).
+        """
+        if workspace_path:
+            return PromptConfig(append=self.system_prompt)
+        return PromptConfig(system=self.system_prompt)
+
+    def _inject_prompt_args(self, cmd: list[str], prompts: PromptConfig) -> None:
+        """Inject prompt arguments into CLI command. Override in subclass."""
+        raise NotImplementedError
 
     @classmethod
     async def _drain_process(

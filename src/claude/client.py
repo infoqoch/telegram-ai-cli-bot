@@ -8,7 +8,6 @@ import os
 import pty
 import re
 import select
-import shlex
 import signal
 import subprocess
 import time
@@ -25,7 +24,7 @@ _USAGE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-from src.ai.base_client import BaseCLIClient
+from src.ai.base_client import BaseCLIClient, PromptConfig
 from src.ai.catalog import get_profile
 from src.ai.client_types import ChatError, ChatResponse
 from src.logging_config import logger
@@ -41,20 +40,18 @@ class ClaudeClient(BaseCLIClient):
         timeout: Optional[int] = None,
     ):
         logger.trace(f"ClaudeClient.__init__() - command='{command}', timeout={timeout}")
-        self.command_parts = shlex.split(command)
-        self.system_prompt = self._load_system_prompt(system_prompt_file)
-        self.timeout = timeout
+        super().__init__(command, system_prompt_file, timeout)
         logger.trace(f"command_parts={self.command_parts}")
         logger.trace(f"system_prompt loaded={self.system_prompt is not None}")
 
-    def _load_system_prompt(self, path: Optional[Path]) -> Optional[str]:
-        logger.trace(f"_load_system_prompt() - path={path}")
-        if path and path.exists():
-            content = path.read_text(encoding="utf-8")
-            logger.trace(f"system prompt loaded - length={len(content)}")
-            return content
-        logger.trace("system prompt none")
-        return None
+    def _inject_prompt_args(self, cmd: list[str], prompts: PromptConfig) -> None:
+        """Inject prompt arguments using Claude CLI flags."""
+        if prompts.system:
+            cmd.extend(["--system-prompt", prompts.system])
+            logger.trace("--system-prompt added")
+        if prompts.append:
+            cmd.extend(["--append-system-prompt", prompts.append])
+            logger.trace("--append-system-prompt added")
 
     async def create_session(self, workspace_path: Optional[str] = None) -> Optional[str]:
         """Create a new Claude session and return session_id.
@@ -624,21 +621,8 @@ req.end();
         cmd.append("--dangerously-skip-permissions")
         logger.trace("--dangerously-skip-permissions option added")
 
-        if self.system_prompt:
-            cmd.extend(["--system-prompt", self.system_prompt])
-            logger.trace("system prompt option added")
-
-        # workspace session: append telegram response format (workspace CLAUDE.md + telegram format)
-        if workspace_path:
-            telegram_format_prompt = (
-                "응답 포맷 규칙: "
-                "1) Telegram HTML 사용 (<b>, <i>, <code>, <pre>) "
-                "2) 마크다운 금지 (**, *, #, ```) "
-                "3) 모바일 최적화 (간결하게) "
-                "4) 한국어로 응답"
-            )
-            cmd.extend(["--append-system-prompt", telegram_format_prompt])
-            logger.trace("workspace session - telegram format prompt added")
+        prompts = self._resolve_prompts(workspace_path)
+        self._inject_prompt_args(cmd, prompts)
 
         cmd.append(message)
         logger.trace(f"final command length: {len(cmd)} parts")

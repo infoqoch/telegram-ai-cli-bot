@@ -2,11 +2,9 @@
 
 import asyncio
 import json
-import shlex
-from pathlib import Path
 from typing import Optional
 
-from src.ai.base_client import BaseCLIClient
+from src.ai.base_client import BaseCLIClient, PromptConfig
 from src.ai.catalog import get_profile
 from src.ai.client_types import ChatError, ChatResponse
 from src.logging_config import logger
@@ -15,20 +13,11 @@ from src.logging_config import logger
 class CodexClient(BaseCLIClient):
     """Async wrapper for Codex CLI."""
 
-    def __init__(
-        self,
-        command: str = "codex",
-        system_prompt_file: Optional[Path] = None,
-        timeout: Optional[int] = None,
-    ):
-        self.command_parts = shlex.split(command)
-        self.system_prompt = self._load_system_prompt(system_prompt_file)
-        self.timeout = timeout
-
-    def _load_system_prompt(self, path: Optional[Path]) -> Optional[str]:
-        if path and path.exists():
-            return path.read_text(encoding="utf-8")
-        return None
+    def _inject_prompt_args(self, cmd: list[str], prompts: PromptConfig) -> None:
+        """Inject prompt arguments using Codex CLI flags."""
+        content = prompts.system or prompts.append
+        if content:
+            cmd.extend(["-c", f'instructions="{content}"'])
 
     async def chat(
         self,
@@ -87,8 +76,8 @@ class CodexClient(BaseCLIClient):
         common.append("--dangerously-bypass-approvals-and-sandbox")
         common.append("--skip-git-repo-check")
 
-        if self.system_prompt:
-            common.extend(["-c", f'instructions="{self.system_prompt}"'])
+        prompts = self._resolve_prompts(workspace_path)
+        self._inject_prompt_args(common, prompts)
 
         if session_id:
             common.append(session_id)
