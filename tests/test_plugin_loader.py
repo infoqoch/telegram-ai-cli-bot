@@ -4,6 +4,7 @@ PluginLoader.load_all() 시점에 name, CALLBACK_PREFIX, FORCE_REPLY_MARKER
 중복을 올바르게 감지하고 두 번째 플러그인을 거부하는지 검증한다.
 """
 
+import inspect
 import io
 import textwrap
 import tempfile
@@ -33,6 +34,22 @@ def _write_plugin(base_dir: Path, plugin_dir: str, filename: str, content: str) 
     target_dir = base_dir / "plugins" / plugin_dir
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / filename).write_text(textwrap.dedent(content))
+
+
+def _write_package_plugin(
+    base_dir: Path,
+    plugin_dir: str,
+    package_name: str,
+    plugin_content: str,
+    ai_context: str | None = None,
+) -> None:
+    """base_dir/plugins/{plugin_dir}/{package_name}/ 에 패키지형 플러그인을 작성한다."""
+    package_dir = base_dir / "plugins" / plugin_dir / package_name
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (package_dir / "plugin.py").write_text(textwrap.dedent(plugin_content), encoding="utf-8")
+    if ai_context is not None:
+        (package_dir / "ai_context.md").write_text(ai_context, encoding="utf-8")
 
 
 def _make_plugin_src(
@@ -363,6 +380,73 @@ class TestPluginMenuSurfaces:
         loader.load_all()
 
         assert [plugin.name for plugin in loader.get_plugins_for_surface("main_menu")] == ["beta", "alpha"]
+
+
+class TestPackagePluginLoading:
+    """패키지형 plugin.py 로딩 회귀 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_package_plugin_supports_inspect_and_ai_context(self, base_dir):
+        _write_package_plugin(
+            base_dir,
+            "builtin",
+            "calendarish",
+            _make_plugin_src("CalendarishPlugin", "calendarish"),
+            ai_context="# Calendarish Context",
+        )
+
+        loader = PluginLoader(base_dir)
+        loader.load_all()
+        plugin = loader.get_plugin_by_name("calendarish")
+
+        assert plugin is not None
+        assert inspect.getfile(plugin.__class__) == str(
+            base_dir / "plugins" / "builtin" / "calendarish" / "plugin.py"
+        )
+        context = await plugin.get_ai_context(1)
+        assert "# Calendarish Context" in context
+
+    def test_package_plugins_get_distinct_module_names(self, base_dir):
+        _write_package_plugin(base_dir, "builtin", "alpha", _make_plugin_src("AlphaPlugin", "alpha"))
+        _write_package_plugin(base_dir, "builtin", "beta", _make_plugin_src("BetaPlugin", "beta"))
+
+        loader = PluginLoader(base_dir)
+        loader.load_all()
+
+        alpha = loader.get_plugin_by_name("alpha")
+        beta = loader.get_plugin_by_name("beta")
+
+        assert alpha is not None
+        assert beta is not None
+        assert alpha.__class__.__module__ != beta.__class__.__module__
+
+    def test_reload_package_plugin_invalidates_old_module(self, base_dir):
+        _write_package_plugin(
+            base_dir,
+            "builtin",
+            "reloadable",
+            _make_plugin_src("ReloadablePlugin", "reloadable"),
+        )
+
+        loader = PluginLoader(base_dir)
+        loader.load_all()
+        first = loader.get_plugin_by_name("reloadable")
+        assert first is not None
+        first_module = first.__class__.__module__
+
+        _write_package_plugin(
+            base_dir,
+            "builtin",
+            "reloadable",
+            _make_plugin_src("ReloadablePluginV2", "reloadable"),
+        )
+
+        assert loader.reload_plugin("reloadable") is True
+
+        reloaded = loader.get_plugin_by_name("reloadable")
+        assert reloaded is not None
+        assert reloaded.__class__.__name__ == "ReloadablePluginV2"
+        assert reloaded.__class__.__module__ == first_module
 
     def test_main_menu_surface_respects_env_override(self, base_dir, monkeypatch):
         _write_plugin(

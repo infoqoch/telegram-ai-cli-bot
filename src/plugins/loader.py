@@ -2,6 +2,8 @@
 
 import importlib.util
 import os
+import re
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -172,8 +174,13 @@ class Plugin(ABC):
 
     def _load_ai_context_file(self) -> str:
         """Load static AI context description from markdown file."""
-        import inspect
-        plugin_dir = Path(inspect.getfile(self.__class__)).parent
+        module_file = getattr(self, "_module_file", None)
+        if module_file:
+            plugin_dir = Path(module_file).parent
+        else:
+            import inspect
+
+            plugin_dir = Path(inspect.getfile(self.__class__)).parent
         context_path = plugin_dir / self.ai_context_file
         if context_path.exists():
             return context_path.read_text(encoding="utf-8")
@@ -349,16 +356,7 @@ class PluginLoader:
         logger.trace(f"attempting load from __init__.py")
 
         try:
-            spec = importlib.util.spec_from_file_location(
-                package_path.name, init_file
-            )
-            if not spec or not spec.loader:
-                logger.warning(f"spec creation failed: {package_path}")
-                return None
-
-            logger.trace("loading module")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            module_name, module = self._load_module_from_file(init_file)
 
             # Plugin 클래스 찾기
             logger.trace("searching for Plugin class")
@@ -371,8 +369,9 @@ class PluginLoader:
                 ):
                     plugin = attr()
                     plugin._base_dir = self.base_dir
+                    plugin._module_name = module_name
+                    plugin._module_file = init_file
                     plugin.bind_runtime(self._repository)
-                    self._loaded_modules[package_path.name] = module
                     logger.trace(f"Plugin class found: {attr_name} -> {plugin.name}")
                     return plugin
 
@@ -398,18 +397,7 @@ class PluginLoader:
         logger.trace(f"_load_plugin_safe() - file={file_path}")
 
         try:
-            # 모듈 로드
-            spec = importlib.util.spec_from_file_location(
-                file_path.stem, file_path
-            )
-            if not spec or not spec.loader:
-                logger.warning(f"spec creation failed: {file_path}")
-                return None
-
-            logger.trace("executing module")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            logger.trace(f"module executed: {file_path.stem}")
+            module_name, module = self._load_module_from_file(file_path)
 
             # Plugin 클래스 찾기
             logger.trace("searching for Plugin class")
@@ -422,8 +410,9 @@ class PluginLoader:
                 ):
                     plugin = attr()
                     plugin._base_dir = self.base_dir  # 데이터 디렉토리용
+                    plugin._module_name = module_name
+                    plugin._module_file = file_path
                     plugin.bind_runtime(self._repository)
-                    self._loaded_modules[file_path.stem] = module
                     logger.trace(f"Plugin instance created: {plugin.name} (class: {attr_name})")
                     return plugin
 
@@ -437,6 +426,40 @@ class PluginLoader:
             logger.error(f"plugin load failed: {file_path} - {e}", exc_info=True)
             return None
 
+    def _build_module_name(self, file_path: Path) -> str:
+        """Build a deterministic unique module name for a plugin file."""
+        resolved = file_path.resolve()
+        try:
+            relative = resolved.relative_to(self.base_dir.resolve())
+            stem = "_".join(relative.with_suffix("").parts)
+        except ValueError:
+            stem = resolved.stem
+        sanitized = re.sub(r"[^0-9a-zA-Z_]", "_", stem)
+        return f"_dynamic_plugin_{sanitized}"
+
+    def _load_module_from_file(self, file_path: Path) -> tuple[str, Any]:
+        """Load a module from file and register it in sys.modules for inspect/reload."""
+        module_name = self._build_module_name(file_path)
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if not spec or not spec.loader:
+            raise ImportError(f"spec creation failed: {file_path}")
+
+        logger.trace(f"executing module: {module_name}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules.pop(module_name, None)
+        sys.modules[module_name] = module
+
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            self._loaded_modules.pop(module_name, None)
+            raise
+
+        self._loaded_modules[module_name] = module
+        logger.trace(f"module executed: {module_name}")
+        return module_name, module
+
     def reload_plugin(self, name: str) -> bool:
         """특정 플러그인 핫 리로드 (파일 + 패키지 지원).
 
@@ -447,6 +470,9 @@ class PluginLoader:
             성공 여부
         """
         logger.trace(f"reload_plugin() - name={name}")
+
+        existing_plugins = [p for p in self.plugins if p.name == name]
+        self._invalidate_module_cache(name, existing_plugins)
 
         # 기존 플러그인 제거
         self.plugins = [p for p in self.plugins if p.name != name]
@@ -459,7 +485,6 @@ class PluginLoader:
             # 1. 디렉토리 패키지 기반 시도
             package_path = dir_base / name
             if package_path.is_dir():
-                self._invalidate_module_cache(name)
                 plugin = self._load_plugin_from_package(package_path)
                 if plugin:
                     plugin._source_group = plugin_dir
@@ -471,7 +496,6 @@ class PluginLoader:
             # 2. 단일 파일 기반 시도
             file_path = dir_base / f"{name}.py"
             if file_path.exists():
-                self._invalidate_module_cache(name)
                 plugin = self._load_plugin_safe(file_path)
                 if plugin:
                     plugin._source_group = plugin_dir
@@ -483,18 +507,22 @@ class PluginLoader:
         logger.warning(f"plugin reload failed: {name}")
         return False
 
-    def _invalidate_module_cache(self, name: str) -> None:
+    def _invalidate_module_cache(self, name: str, existing_plugins: Optional[list[Plugin]] = None) -> None:
         """모듈 캐시 제거 (핫 리로드 시 이전 코드가 남는 문제 방지)."""
-        import sys
+        plugins = existing_plugins if existing_plugins is not None else [p for p in self.plugins if p.name == name]
+        module_names = {name, "plugin"}
+        module_names.update(
+            module_name
+            for module_name in (getattr(plugin, "_module_name", None) for plugin in plugins)
+            if module_name
+        )
 
-        # _loaded_modules에서 제거
-        self._loaded_modules.pop(name, None)
-        self._loaded_modules.pop("plugin", None)
+        for module_name in module_names:
+            self._loaded_modules.pop(module_name, None)
 
-        # sys.modules에서 관련 모듈 제거 (핫 리로드 핵심)
         modules_to_remove = [
             key for key in sys.modules
-            if key == name or key == "plugin" or key.startswith(f"{name}.")
+            if key in module_names or any(key.startswith(f"{module_name}.") for module_name in module_names)
         ]
         for mod_key in modules_to_remove:
             del sys.modules[mod_key]
