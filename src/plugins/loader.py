@@ -28,6 +28,8 @@ class ScheduledAction:
     """플러그인 스케줄 가능 액션."""
     name: str  # 액션 식별자 (e.g., "morning_check")
     description: str  # 표시용 설명 (e.g., "오전 할일 체크")
+    recommended_hour: int | None = None  # 추천 시간 (None이면 interval 모드)
+    recommended_minute: int | None = None  # 추천 분 (hour=None이면 */minute 간격)
 
 
 @dataclass

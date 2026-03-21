@@ -157,6 +157,8 @@ class SchedulerCallbackHandlers(BaseHandler):
             return await self._sched_select_plugin(query, user_id, int(action[7:]))
         if action.startswith("pluginaction:"):
             return await self._sched_select_plugin_action(query, user_id, int(action[13:]))
+        if action == "pluginrec":
+            return await self._sched_plugin_recommended(query, chat_id)
         if action.startswith("wspath:"):
             return await self._sched_select_wspath(query, user_id, int(action[7:]))
         if action.startswith("time:"):
@@ -416,7 +418,7 @@ class SchedulerCallbackHandlers(BaseHandler):
         await query.answer()
 
     async def _sched_select_plugin_action(self, query, user_id: str, action_idx: int) -> None:
-        """Store the chosen plugin action and show hour picker."""
+        """Store the chosen plugin action and show hour picker (with optional recommended)."""
         pending = self._sched_pending.get(user_id, {})
         plugin_name = pending.get("selected_plugin")
         actions = []
@@ -434,20 +436,74 @@ class SchedulerCallbackHandlers(BaseHandler):
             "plugin_name": plugin_name,
             "action_name": selected_action.name,
             "name": f"{plugin_name}:{selected_action.description}",
+            "rec_hour": selected_action.recommended_hour,
+            "rec_minute": selected_action.recommended_minute,
         })
         self._sched_pending[user_id] = pending
+
+        # Build keyboard with optional recommended button at top
+        keyboard = []
+        rec_label = self._build_recommended_label(selected_action)
+        if rec_label:
+            keyboard.append([InlineKeyboardButton(f"⭐ {rec_label}", callback_data="sched:pluginrec")])
+
+        keyboard.extend(self._build_hour_keyboard("sched:time:plugin:_:"))
+        keyboard.append([InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")])
+
         await query.edit_message_text(
             f"<b>Plugin Schedule</b>\n\n"
             f"🔌 <b>{escape_html(plugin_name)}</b> - {escape_html(selected_action.description)}\n\n"
             f"Select hour:",
-            reply_markup=InlineKeyboardMarkup(
-                self._build_hour_keyboard("sched:time:plugin:_:") + [[
-                    InlineKeyboardButton(BUTTON_CANCEL, callback_data="sched:refresh")
-                ]]
-            ),
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML",
         )
         await query.answer()
+
+    async def _sched_plugin_recommended(self, query, chat_id: int) -> None:
+        """Register a plugin schedule with the recommended time preset."""
+        user_id = str(chat_id)
+        pending = self._sched_pending.get(user_id, {})
+        if not pending:
+            await query.answer("Schedule flow expired")
+            return
+
+        rec_hour = pending.get("rec_hour")
+        rec_minute = pending.get("rec_minute")
+
+        if rec_hour is not None:
+            # Fixed time: e.g., 08:00 daily
+            pending["hour"] = rec_hour
+            pending["minute"] = rec_minute or 0
+            pending["trigger_type"] = "cron"
+        else:
+            # Interval: e.g., every 5 min
+            interval = rec_minute or 5
+            pending["hour"] = 0
+            pending["minute"] = 0
+            pending["trigger_type"] = "cron"
+            pending["cron_expr"] = f"*/{interval} * * * *"
+
+        self._sched_pending[user_id] = pending
+
+        result_text = self._register_plugin_schedule(user_id, chat_id, pending)
+        await query.edit_message_text(
+            result_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(BUTTON_SCHEDULE_LIST, callback_data="sched:refresh")]
+            ]),
+            parse_mode="HTML",
+        )
+        self._sched_pending.pop(user_id, None)
+        await query.answer("Registered")
+
+    @staticmethod
+    def _build_recommended_label(action) -> str | None:
+        """Build a recommended label string from a ScheduledAction, or None."""
+        if action.recommended_hour is None and action.recommended_minute is None:
+            return None
+        if action.recommended_hour is not None:
+            return f"Recommended: {action.recommended_hour:02d}:{(action.recommended_minute or 0):02d} daily"
+        return f"Recommended: every {action.recommended_minute} min"
 
     async def _sched_select_wspath(self, query, user_id: str, ws_idx: int) -> None:
         """Store the chosen workspace and show hour picker."""
@@ -684,6 +740,7 @@ class SchedulerCallbackHandlers(BaseHandler):
             message="",
             schedule_type="plugin",
             trigger_type=trigger_type,
+            cron_expr=pending.get("cron_expr"),
             ai_provider=ai_provider,
             model="sonnet",
             plugin_name=pending.get("plugin_name"),

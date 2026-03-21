@@ -692,10 +692,14 @@ class CalendarPlugin(Plugin):
 
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         return [
-            ScheduledAction(name="morning_briefing", description="☀️ Morning briefing"),
-            ScheduledAction(name="evening_summary", description="🌙 Evening summary (tomorrow)"),
-            ScheduledAction(name="reminder_10m", description="🔔 10-min before reminder"),
-            ScheduledAction(name="reminder_1h", description="🔔 1-hour before reminder"),
+            ScheduledAction(name="morning_briefing", description="☀️ Morning briefing",
+                            recommended_hour=8, recommended_minute=0),
+            ScheduledAction(name="evening_summary", description="🌙 Evening summary (tomorrow)",
+                            recommended_hour=22, recommended_minute=0),
+            ScheduledAction(name="reminder_10m", description="🔔 10-min before reminder",
+                            recommended_hour=None, recommended_minute=5),
+            ScheduledAction(name="reminder_1h", description="🔔 1-hour before reminder",
+                            recommended_hour=None, recommended_minute=5),
         ]
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
