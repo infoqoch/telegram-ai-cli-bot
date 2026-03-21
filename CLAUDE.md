@@ -425,10 +425,15 @@ class MyPlugin(Plugin):
     async def handle(self, message: str, chat_id: int) -> PluginResult: ...
 
     # --- 선택 API ---
-    # handle_callback(callback_data, chat_id) → dict    # 인라인 버튼 콜백
-    # handle_force_reply(message, chat_id) → dict       # ForceReply 응답
-    # get_scheduled_actions() → list[ScheduledAction]   # 스케줄 액션 목록
-    # execute_scheduled_action(action_name, chat_id) → str  # 스케줄 실행
+    # handle_callback(callback_data, chat_id) → dict            # 인라인 버튼 콜백 (동기)
+    # handle_callback_async(callback_data, chat_id) → dict      # 인라인 버튼 콜백 (비동기)
+    # handle_force_reply(message, chat_id) → dict               # ForceReply 응답
+    # handle_interaction(message, chat_id, interaction) → dict   # 멀티스텝 ForceReply 플로우
+    # get_schema() → str                                        # 플러그인 테이블 DDL
+    # build_storage(repository) → Any                           # 플러그인 전용 스토리지 어댑터
+    # get_scheduled_actions() → list[ScheduledAction]           # 스케줄 액션 목록
+    # execute_scheduled_action(action_name, chat_id) → str      # 스케줄 실행
+    # register_system_jobs(context: PluginSystemJobContext)      # 백그라운드 잡 등록
 ```
 
 참고 구현체: `plugins/builtin/todo/` (콜백+ForceReply+스케줄), `plugins/builtin/memo/` (간단한 CRUD), `plugins/builtin/diary/` (콜백+ForceReply+스케줄+월별 목록)
