@@ -72,6 +72,8 @@ class CalendarPlugin(Plugin):
         self._gcal = GoogleCalendarClient()
         # Ephemeral event cache: chat_id -> list[CalendarEvent]
         self._event_cache: dict[int, list[CalendarEvent]] = {}
+        # Dedup for reminders: set of "event_id:reminder_type"
+        self._sent_reminders: set[str] = set()
 
     async def get_ai_dynamic_context(self, chat_id: int) -> str:
         from src.time_utils import app_now
@@ -691,45 +693,102 @@ class CalendarPlugin(Plugin):
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         return [
             ScheduledAction(name="morning_briefing", description="☀️ Morning briefing"),
+            ScheduledAction(name="evening_summary", description="🌙 Evening summary (tomorrow)"),
+            ScheduledAction(name="reminder_10m", description="🔔 10-min before reminder"),
+            ScheduledAction(name="reminder_1h", description="🔔 1-hour before reminder"),
         ]
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
+        from src.time_utils import app_now
+
         if action_name == "morning_briefing":
-            today = app_today()
-            tz = get_app_timezone()
-            start = datetime(today.year, today.month, today.day, tzinfo=tz)
-            end = start + timedelta(days=1)
-            events = self._gcal.list_events(start, end)
+            return self._build_day_briefing(
+                app_today(), title="☀️ <b>Today</b>"
+            )
 
-            if not events:
-                return {
-                    "text": (
-                        f"☀️ <b>Today</b> — {format_date_display(today)}\n"
-                        f"{'─' * 20}\n"
-                        f"No events ☀️"
-                    ),
-                    "reply_markup": InlineKeyboardMarkup(
-                        [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
-                    ),
-                }
+        if action_name == "evening_summary":
+            tomorrow = app_today() + timedelta(days=1)
+            return self._build_day_briefing(
+                tomorrow, title="🌙 <b>Tomorrow</b>"
+            )
 
-            lines = [
-                f"☀️ <b>Today</b> — {format_date_display(today)} ({len(events)})",
-                "─" * 20,
-            ]
-            for ev in events:
-                if ev.all_day:
-                    lines.append(f"🌅 All day  {escape_html(ev.summary)}")
-                else:
-                    lines.append(
-                        f"⏰ {ev.start.strftime('%H:%M')}  {escape_html(ev.summary)}"
-                    )
+        if action_name == "reminder_10m":
+            return self._build_reminder(app_now(), minutes=10, label="10 min")
 
+        if action_name == "reminder_1h":
+            return self._build_reminder(app_now(), minutes=60, label="1 hour")
+
+        raise NotImplementedError(f"Action '{action_name}' not implemented")
+
+    def _build_day_briefing(self, target: date, title: str) -> dict:
+        """Build a day briefing message for the given date."""
+        tz = get_app_timezone()
+        start = datetime(target.year, target.month, target.day, tzinfo=tz)
+        end = start + timedelta(days=1)
+        events = self._gcal.list_events(start, end)
+
+        if not events:
             return {
-                "text": "\n".join(lines),
+                "text": (
+                    f"{title} — {format_date_display(target)}\n"
+                    f"{'─' * 20}\n"
+                    f"No events ☀️"
+                ),
                 "reply_markup": InlineKeyboardMarkup(
                     [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
                 ),
             }
 
-        raise NotImplementedError(f"Action '{action_name}' not implemented")
+        lines = [
+            f"{title} — {format_date_display(target)} ({len(events)})",
+            "─" * 20,
+        ]
+        for ev in events:
+            if ev.all_day:
+                lines.append(f"🌅 All day  {escape_html(ev.summary)}")
+            else:
+                lines.append(
+                    f"⏰ {ev.start.strftime('%H:%M')}  {escape_html(ev.summary)}"
+                )
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(
+                [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
+            ),
+        }
+
+    def _build_reminder(self, now: datetime, minutes: int, label: str) -> str | dict:
+        """Check for events starting within the given window and send reminders."""
+        end = now + timedelta(minutes=minutes)
+        events = self._gcal.list_events(now, end)
+
+        # Filter: only timed events (not all-day), not already reminded
+        to_remind = []
+        for ev in events:
+            if ev.all_day:
+                continue
+            key = f"{ev.id}:{label}"
+            if key not in self._sent_reminders:
+                to_remind.append(ev)
+                self._sent_reminders.add(key)
+
+        # Cleanup old entries (keep set from growing indefinitely)
+        if len(self._sent_reminders) > 500:
+            self._sent_reminders.clear()
+
+        if not to_remind:
+            return ""  # Empty = no message sent
+
+        lines = [f"🔔 <b>Upcoming in {label}</b>", "─" * 20]
+        for ev in to_remind:
+            lines.append(
+                f"⏰ {ev.start.strftime('%H:%M')}  {escape_html(ev.summary)}"
+            )
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(
+                [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
+            ),
+        }

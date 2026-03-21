@@ -175,8 +175,12 @@ class TestCalendarPlugin:
     def test_scheduled_actions(self):
         plugin = CalendarPlugin()
         actions = plugin.get_scheduled_actions()
-        assert len(actions) == 1
-        assert actions[0].name == "morning_briefing"
+        assert len(actions) == 4
+        names = [a.name for a in actions]
+        assert "morning_briefing" in names
+        assert "evening_summary" in names
+        assert "reminder_10m" in names
+        assert "reminder_1h" in names
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +388,60 @@ class TestCalendarScheduledActions:
         result = await plugin.execute_scheduled_action("morning_briefing", 1)
         assert isinstance(result, dict)
         assert "No events" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_evening_summary(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = [
+            _make_event("ev1", "Morning Meeting", 9),
+        ]
+        result = await plugin.execute_scheduled_action("evening_summary", 1)
+        assert isinstance(result, dict)
+        assert "Tomorrow" in result["text"]
+        assert "Morning Meeting" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_reminder_10m_with_event(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = [
+            _make_event("ev1", "Soon Meeting", 10),
+        ]
+        result = await plugin.execute_scheduled_action("reminder_10m", 1)
+        assert isinstance(result, dict)
+        assert "Soon Meeting" in result["text"]
+        assert "10 min" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_reminder_dedup(self):
+        """Same event should not be reminded twice."""
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = [
+            _make_event("ev1", "Dedup Test", 10),
+        ]
+        r1 = await plugin.execute_scheduled_action("reminder_10m", 1)
+        assert isinstance(r1, dict)
+        assert "Dedup Test" in r1["text"]
+
+        # Second call - same event should be skipped
+        r2 = await plugin.execute_scheduled_action("reminder_10m", 1)
+        assert r2 == ""  # Empty = no message
+
+    @pytest.mark.asyncio
+    async def test_reminder_no_events(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = []
+        result = await plugin.execute_scheduled_action("reminder_10m", 1)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_reminder_1h(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = [
+            _make_event("ev1", "Later Meeting", 11),
+        ]
+        result = await plugin.execute_scheduled_action("reminder_1h", 1)
+        assert isinstance(result, dict)
+        assert "1 hour" in result["text"]
 
 
 # ---------------------------------------------------------------------------
