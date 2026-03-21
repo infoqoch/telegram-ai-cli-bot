@@ -43,17 +43,17 @@ build_minute_keyboard = _ui.build_minute_keyboard
 format_date_display = _ui.format_date_display
 format_date_full = _ui.format_date_full
 
-WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 class CalendarPlugin(Plugin):
     """Google Calendar integration plugin."""
 
     name = "calendar"
-    description = "Google Calendar 연동"
+    description = "Google Calendar"
     usage = (
         "📅 <b>Calendar Plugin</b>\n\n"
-        "<code>캘린더</code> or <code>/cal</code> - Open calendar\n\n"
+        "<code>/cal</code> - Open calendar\n\n"
         "<b>Features</b>\n"
         "• 📅 View today's events\n"
         "• ➕ Add new events\n"
@@ -70,7 +70,7 @@ class CalendarPlugin(Plugin):
     def __init__(self):
         super().__init__()
         self._gcal = GoogleCalendarClient()
-        # Ephemeral event cache: chat_id → list[CalendarEvent]
+        # Ephemeral event cache: chat_id -> list[CalendarEvent]
         self._event_cache: dict[int, list[CalendarEvent]] = {}
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
@@ -88,9 +88,9 @@ class CalendarPlugin(Plugin):
             return PluginResult(
                 handled=True,
                 response=(
-                    "⚠️ Google Calendar이 설정되지 않았습니다.\n\n"
-                    "<code>GOOGLE_SERVICE_ACCOUNT_FILE</code>과 "
-                    "<code>GOOGLE_CALENDAR_ID</code> 환경변수를 설정하세요."
+                    "⚠️ Google Calendar not configured.\n\n"
+                    "Set <code>GOOGLE_SERVICE_ACCOUNT_FILE</code> and "
+                    "<code>GOOGLE_CALENDAR_ID</code> in .env"
                 ),
             )
 
@@ -155,13 +155,13 @@ class CalendarPlugin(Plugin):
         if action == "ah":
             return self._show_minute_select(parts[2], int(parts[3]))
 
-        # Add: minute selected → ForceReply for title
+        # Add: minute selected -> ForceReply for title
         if action == "am":
             return self._prompt_title(
                 date_str=parts[2], hour=int(parts[3]), minute=int(parts[4]),
             )
 
-        # Add: all-day event → ForceReply for title
+        # Add: all-day event -> ForceReply for title
         if action == "allday":
             return self._prompt_title(date_str=parts[2], all_day=True)
 
@@ -201,7 +201,7 @@ class CalendarPlugin(Plugin):
             event_id = parts[2]
             return self._show_edit_minute_select(event_id, parts[3], int(parts[4]))
 
-        # Edit minute picked → execute time update
+        # Edit minute picked -> execute time update
         if action == "edm":
             event_id = parts[2]
             return self._execute_edit_time(
@@ -221,9 +221,9 @@ class CalendarPlugin(Plugin):
         title = message.strip()
         if not title:
             return {
-                "text": "❌ 제목이 비어 있습니다.",
+                "text": "❌ Title cannot be empty.",
                 "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
+                    [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
                 ),
             }
 
@@ -249,17 +249,17 @@ class CalendarPlugin(Plugin):
         date_label = format_date_full(target_date)
         today = app_today()
         if target_date == today:
-            header = f"📅 오늘 일정 — {format_date_display(target_date)}"
+            header = f"📅 Today — {format_date_display(target_date)}"
         else:
             header = f"📅 {date_label}"
 
         if not events:
-            text = f"{header}\n{'─' * 20}\n일정이 없습니다 ☀️"
+            text = f"{header}\n{'─' * 20}\nNo events ☀️"
         else:
             lines = [f"{header}\n{'─' * 20}"]
             for ev in events:
                 if ev.all_day:
-                    lines.append(f"🌅 종일  {escape_html(ev.summary)}")
+                    lines.append(f"🌅 All day  {escape_html(ev.summary)}")
                 else:
                     time_str = ev.start.strftime("%H:%M")
                     lines.append(f"⏰ {time_str}  {escape_html(ev.summary)}")
@@ -269,7 +269,7 @@ class CalendarPlugin(Plugin):
         buttons = []
         for i, ev in enumerate(events):
             if ev.all_day:
-                label = f"🌅 종일 · {ev.summary[:25]}"
+                label = f"🌅 All day · {ev.summary[:25]}"
             else:
                 label = f"{ev.start.strftime('%H:%M')} · {ev.summary[:25]}"
             buttons.append([InlineKeyboardButton(label, callback_data=f"cal:ev:{i}")])
@@ -287,13 +287,13 @@ class CalendarPlugin(Plugin):
     def _show_event_detail(self, chat_id: int, idx: int) -> dict:
         events = self._event_cache.get(chat_id, [])
         if idx < 0 or idx >= len(events):
-            return {"text": "❌ 이벤트를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Event not found.", "edit": True}
 
         ev = events[idx]
         lines = [f"📌 <b>{escape_html(ev.summary)}</b>"]
 
         if ev.all_day:
-            lines.append(f"🌅 종일 ({format_date_display(ev.start.date())})")
+            lines.append(f"🌅 All day ({format_date_display(ev.start.date())})")
         else:
             lines.append(
                 f"⏰ {ev.start.strftime('%H:%M')} - {ev.end.strftime('%H:%M')}"
@@ -308,10 +308,10 @@ class CalendarPlugin(Plugin):
 
         buttons = [
             [
-                InlineKeyboardButton("✏️ 수정", callback_data=f"cal:edit:{idx}"),
-                InlineKeyboardButton("🗑 삭제", callback_data=f"cal:del:{idx}"),
+                InlineKeyboardButton("✏️ Edit", callback_data=f"cal:edit:{idx}"),
+                InlineKeyboardButton("🗑 Delete", callback_data=f"cal:del:{idx}"),
             ],
-            [InlineKeyboardButton("◀ 목록", callback_data=f"cal:day:{ev.start.date().isoformat()}")],
+            [InlineKeyboardButton("◀ Back", callback_data=f"cal:day:{ev.start.date().isoformat()}")],
         ]
 
         return {
@@ -324,14 +324,14 @@ class CalendarPlugin(Plugin):
 
     def _show_add_date_select(self) -> dict:
         return {
-            "text": "📅 <b>날짜를 선택하세요</b>",
+            "text": "📅 <b>Select date</b>",
             "reply_markup": InlineKeyboardMarkup(build_date_quick_select()),
             "edit": True,
         }
 
     def _show_calendar_grid(self, year: int, month: int) -> dict:
         return {
-            "text": "📅 날짜를 선택하세요",
+            "text": "📅 Select date",
             "reply_markup": InlineKeyboardMarkup(build_calendar_grid(year, month)),
             "edit": True,
         }
@@ -342,7 +342,7 @@ class CalendarPlugin(Plugin):
         rows: list[list[InlineKeyboardButton]] = []
         import calendar as cal_mod
 
-        rows.append([InlineKeyboardButton(f"📅 {year}년 {month}월", callback_data="cal:noop")])
+        rows.append([InlineKeyboardButton(f"📅 {year}/{month:02d}", callback_data="cal:noop")])
         rows.append([
             InlineKeyboardButton(d, callback_data="cal:noop")
             for d in WEEKDAY_NAMES
@@ -365,13 +365,13 @@ class CalendarPlugin(Plugin):
         py, pm = (year - 1, 12) if month == 1 else (year, month - 1)
         ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
         rows.append([
-            InlineKeyboardButton(f"◀ {pm}월", callback_data=f"cal:agrid:{py}-{pm:02d}"),
-            InlineKeyboardButton(f"{nm}월 ▶", callback_data=f"cal:agrid:{ny}-{nm:02d}"),
+            InlineKeyboardButton(f"◀ {pm}", callback_data=f"cal:agrid:{py}-{pm:02d}"),
+            InlineKeyboardButton(f"{nm} ▶", callback_data=f"cal:agrid:{ny}-{nm:02d}"),
         ])
-        rows.append([InlineKeyboardButton("❌ 취소", callback_data="cal:hub")])
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="cal:hub")])
 
         return {
-            "text": "📅 <b>일정 추가</b> — 날짜를 선택하세요",
+            "text": "📅 <b>Add Event</b> — Select date",
             "reply_markup": InlineKeyboardMarkup(rows),
             "edit": True,
         }
@@ -379,7 +379,7 @@ class CalendarPlugin(Plugin):
     def _show_hour_select(self, date_str: str) -> dict:
         d = date.fromisoformat(date_str)
         return {
-            "text": f"⏰ <b>시작 시간을 선택하세요</b>\n\n📅 {format_date_full(d)}",
+            "text": f"⏰ <b>Select start hour</b>\n\n📅 {format_date_full(d)}",
             "reply_markup": InlineKeyboardMarkup(build_hour_keyboard(date_str)),
             "edit": True,
         }
@@ -387,7 +387,7 @@ class CalendarPlugin(Plugin):
     def _show_minute_select(self, date_str: str, hour: int) -> dict:
         d = date.fromisoformat(date_str)
         return {
-            "text": f"⏰ <b>{hour}시 몇 분?</b>\n\n📅 {format_date_full(d)}",
+            "text": f"⏰ <b>{hour:02d}h — select minute</b>\n\n📅 {format_date_full(d)}",
             "reply_markup": InlineKeyboardMarkup(build_minute_keyboard(date_str, hour)),
             "edit": True,
         }
@@ -401,21 +401,21 @@ class CalendarPlugin(Plugin):
     ) -> dict:
         d = date.fromisoformat(date_str)
         if all_day:
-            time_line = "🌅 종일"
+            time_line = "🌅 All day"
         else:
             time_line = f"⏰ {hour:02d}:{minute:02d}"
 
         return {
             "text": (
-                f"📝 <b>일정 추가</b>\n\n"
+                f"📝 <b>Add Event</b>\n\n"
                 f"📅 {format_date_full(d)}\n"
                 f"{time_line}\n\n"
-                f"제목을 입력하세요."
+                f"Enter the title."
             ),
-            "force_reply_prompt": "📝 일정 제목을 입력하세요:",
+            "force_reply_prompt": "📝 Enter event title:",
             "force_reply": ForceReply(
                 selective=True,
-                input_field_placeholder="예: 팀 미팅, 치과 예약...",
+                input_field_placeholder="e.g., Team meeting, Dentist...",
             ),
             "interaction_action": "create",
             "interaction_state": {
@@ -441,26 +441,26 @@ class CalendarPlugin(Plugin):
 
         if not event:
             return {
-                "text": f"❌ 일정 등록에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
+                "text": f"❌ Failed to create event.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
+                    [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
                 ),
             }
 
         if all_day:
-            time_line = "🌅 종일"
+            time_line = "🌅 All day"
         else:
             time_line = f"⏰ {start.strftime('%H:%M')}"
 
         return {
             "text": (
-                f"✅ 일정이 등록되었습니다!\n\n"
+                f"✅ Event created!\n\n"
                 f"📅 {format_date_full(d)}\n"
                 f"{time_line}\n"
                 f"📌 {escape_html(title)}"
             ),
             "reply_markup": InlineKeyboardMarkup([
-                [InlineKeyboardButton("📅 캘린더로", callback_data=f"cal:day:{date_str}")],
+                [InlineKeyboardButton("📅 Calendar", callback_data=f"cal:day:{date_str}")],
             ]),
         }
 
@@ -469,19 +469,19 @@ class CalendarPlugin(Plugin):
     def _show_edit_menu(self, chat_id: int, idx: int) -> dict:
         events = self._event_cache.get(chat_id, [])
         if idx < 0 or idx >= len(events):
-            return {"text": "❌ 이벤트를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Event not found.", "edit": True}
 
         ev = events[idx]
         buttons = [
             [
-                InlineKeyboardButton("📅 날짜/시간", callback_data=f"cal:eddate:{ev.id}"),
-                InlineKeyboardButton("📌 제목", callback_data=f"cal:edt:{idx}"),
+                InlineKeyboardButton("📅 Date/Time", callback_data=f"cal:eddate:{ev.id}"),
+                InlineKeyboardButton("📌 Title", callback_data=f"cal:edt:{idx}"),
             ],
-            [InlineKeyboardButton("◀ 돌아가기", callback_data=f"cal:ev:{idx}")],
+            [InlineKeyboardButton("◀ Back", callback_data=f"cal:ev:{idx}")],
         ]
 
         return {
-            "text": f"✏️ <b>무엇을 수정할까요?</b>\n\n📌 {escape_html(ev.summary)}",
+            "text": f"✏️ <b>What to edit?</b>\n\n📌 {escape_html(ev.summary)}",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
@@ -489,18 +489,18 @@ class CalendarPlugin(Plugin):
     def _show_edit_title_prompt(self, chat_id: int, idx: int) -> dict:
         events = self._event_cache.get(chat_id, [])
         if idx < 0 or idx >= len(events):
-            return {"text": "❌ 이벤트를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Event not found.", "edit": True}
 
         ev = events[idx]
         return {
             "text": (
-                f"✏️ <b>제목 수정</b>\n\n"
-                f"현재: <code>{escape_html(ev.summary)}</code>"
+                f"✏️ <b>Edit Title</b>\n\n"
+                f"Current: <code>{escape_html(ev.summary)}</code>"
             ),
-            "force_reply_prompt": "✏️ 새 제목을 입력하세요:",
+            "force_reply_prompt": "✏️ Enter new title:",
             "force_reply": ForceReply(
                 selective=True,
-                input_field_placeholder="새 제목을 입력하세요...",
+                input_field_placeholder="Enter new title...",
             ),
             "interaction_action": "edit_title",
             "interaction_state": {"event_id": ev.id},
@@ -512,33 +512,33 @@ class CalendarPlugin(Plugin):
 
         if not event:
             return {
-                "text": f"❌ 제목 수정에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
+                "text": f"❌ Failed to update title.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
+                    [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
                 ),
             }
 
         return {
-            "text": f"✅ 제목이 수정되었습니다!\n\n📌 {escape_html(title)}",
+            "text": f"✅ Title updated!\n\n📌 {escape_html(title)}",
             "reply_markup": InlineKeyboardMarkup([
-                [InlineKeyboardButton("📅 캘린더로", callback_data=f"cal:day:{event.start.date().isoformat()}")],
+                [InlineKeyboardButton("📅 Calendar", callback_data=f"cal:day:{event.start.date().isoformat()}")],
             ]),
         }
 
     def _show_edit_date_select(self, event_id: str) -> dict:
         today = app_today()
         buttons = []
-        for delta, label in [(0, "오늘"), (1, "내일"), (2, "모레")]:
+        for delta, label in [(0, "Today"), (1, "Tomorrow"), (2, "Day after")]:
             d = today + timedelta(days=delta)
             buttons.append(InlineKeyboardButton(
                 f"{label} {d.month}/{d.day}",
                 callback_data=f"cal:edd:{event_id}:{d.isoformat()}",
             ))
         return {
-            "text": "📅 <b>새 날짜를 선택하세요</b>",
+            "text": "📅 <b>Select new date</b>",
             "reply_markup": InlineKeyboardMarkup([
                 buttons,
-                [InlineKeyboardButton("❌ 취소", callback_data="cal:hub")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="cal:hub")],
             ]),
             "edit": True,
         }
@@ -547,37 +547,41 @@ class CalendarPlugin(Plugin):
         d = date.fromisoformat(date_str)
         rows = []
         row = []
-        for h in range(9, 21):
+        for h in range(24):
             row.append(InlineKeyboardButton(
-                f"{h:02d}", callback_data=f"cal:edh:{event_id}:{date_str}:{h}"
+                f"{h:02d}h", callback_data=f"cal:edh:{event_id}:{date_str}:{h}"
             ))
-            if len(row) == 6:
+            if len(row) == 4:
                 rows.append(row)
                 row = []
         if row:
             rows.append(row)
-        rows.append([InlineKeyboardButton("❌ 취소", callback_data="cal:hub")])
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="cal:hub")])
 
         return {
-            "text": f"⏰ <b>새 시간을 선택하세요</b>\n\n📅 {format_date_full(d)}",
+            "text": f"⏰ <b>Select new hour</b>\n\n📅 {format_date_full(d)}",
             "reply_markup": InlineKeyboardMarkup(rows),
             "edit": True,
         }
 
     def _show_edit_minute_select(self, event_id: str, date_str: str, hour: int) -> dict:
         d = date.fromisoformat(date_str)
+        rows = []
+        row = []
+        for m in range(0, 60, 5):
+            row.append(InlineKeyboardButton(
+                f":{m:02d}", callback_data=f"cal:edm:{event_id}:{date_str}:{hour}:{m}"
+            ))
+            if len(row) == 4:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="cal:hub")])
+
         return {
-            "text": f"⏰ <b>{hour}시 몇 분?</b>\n\n📅 {format_date_full(d)}",
-            "reply_markup": InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        f"{m:02d}분",
-                        callback_data=f"cal:edm:{event_id}:{date_str}:{hour}:{m}",
-                    )
-                    for m in (0, 15, 30, 45)
-                ],
-                [InlineKeyboardButton("❌ 취소", callback_data="cal:hub")],
-            ]),
+            "text": f"⏰ <b>{hour:02d}h — select minute</b>\n\n📅 {format_date_full(d)}",
+            "reply_markup": InlineKeyboardMarkup(rows),
             "edit": True,
         }
 
@@ -592,21 +596,21 @@ class CalendarPlugin(Plugin):
         event = self._gcal.update_event(event_id, start=new_start, end=new_end)
         if not event:
             return {
-                "text": f"❌ 시간 수정에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
+                "text": f"❌ Failed to update time.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
+                    [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
                 ),
             }
 
         return {
             "text": (
-                f"✅ 일정이 수정되었습니다!\n\n"
+                f"✅ Event updated!\n\n"
                 f"📅 {format_date_full(d)}\n"
                 f"⏰ {hour:02d}:{minute:02d}\n"
                 f"📌 {escape_html(event.summary)}"
             ),
             "reply_markup": InlineKeyboardMarkup([
-                [InlineKeyboardButton("📅 캘린더로", callback_data=f"cal:day:{date_str}")],
+                [InlineKeyboardButton("📅 Calendar", callback_data=f"cal:day:{date_str}")],
             ]),
             "edit": True,
         }
@@ -616,24 +620,24 @@ class CalendarPlugin(Plugin):
     def _show_delete_confirm(self, chat_id: int, idx: int) -> dict:
         events = self._event_cache.get(chat_id, [])
         if idx < 0 or idx >= len(events):
-            return {"text": "❌ 이벤트를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Event not found.", "edit": True}
 
         ev = events[idx]
         if ev.all_day:
-            time_line = "🌅 종일"
+            time_line = "🌅 All day"
         else:
             time_line = f"⏰ {ev.start.strftime('%H:%M')} - {ev.end.strftime('%H:%M')}"
 
         buttons = [
             [
-                InlineKeyboardButton("✅ 삭제", callback_data=f"cal:delok:{ev.id}"),
-                InlineKeyboardButton("❌ 취소", callback_data=f"cal:ev:{idx}"),
+                InlineKeyboardButton("✅ Delete", callback_data=f"cal:delok:{ev.id}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"cal:ev:{idx}"),
             ]
         ]
 
         return {
             "text": (
-                f"⚠️ <b>이 일정을 삭제할까요?</b>\n\n"
+                f"⚠️ <b>Delete this event?</b>\n\n"
                 f"📌 {escape_html(ev.summary)}\n"
                 f"📅 {format_date_display(ev.start.date())}\n"
                 f"{time_line}"
@@ -647,17 +651,17 @@ class CalendarPlugin(Plugin):
 
         if not success:
             return {
-                "text": f"❌ 삭제에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
+                "text": f"❌ Failed to delete event.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
+                    [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
                 ),
                 "edit": True,
             }
 
         return {
-            "text": "🗑 일정이 삭제되었습니다.",
+            "text": "🗑 Event deleted.",
             "reply_markup": InlineKeyboardMarkup(
-                [[InlineKeyboardButton("📅 캘린더로", callback_data="cal:hub")]]
+                [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
             ),
             "edit": True,
         }
@@ -666,7 +670,7 @@ class CalendarPlugin(Plugin):
 
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         return [
-            ScheduledAction(name="morning_briefing", description="☀️ 아침 일정 브리핑"),
+            ScheduledAction(name="morning_briefing", description="☀️ Morning briefing"),
         ]
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
@@ -680,22 +684,22 @@ class CalendarPlugin(Plugin):
             if not events:
                 return {
                     "text": (
-                        f"☀️ <b>오늘 일정</b> — {format_date_display(today)}\n"
+                        f"☀️ <b>Today</b> — {format_date_display(today)}\n"
                         f"{'─' * 20}\n"
-                        f"오늘 일정이 없습니다 ☀️"
+                        f"No events ☀️"
                     ),
                     "reply_markup": InlineKeyboardMarkup(
-                        [[InlineKeyboardButton("📅 캘린더 열기", callback_data="cal:hub")]]
+                        [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
                     ),
                 }
 
             lines = [
-                f"☀️ <b>오늘 일정</b> — {format_date_display(today)} ({len(events)}건)",
+                f"☀️ <b>Today</b> — {format_date_display(today)} ({len(events)})",
                 "─" * 20,
             ]
             for ev in events:
                 if ev.all_day:
-                    lines.append(f"🌅 종일  {escape_html(ev.summary)}")
+                    lines.append(f"🌅 All day  {escape_html(ev.summary)}")
                 else:
                     lines.append(
                         f"⏰ {ev.start.strftime('%H:%M')}  {escape_html(ev.summary)}"
@@ -704,7 +708,7 @@ class CalendarPlugin(Plugin):
             return {
                 "text": "\n".join(lines),
                 "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 캘린더 열기", callback_data="cal:hub")]]
+                    [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
                 ),
             }
 

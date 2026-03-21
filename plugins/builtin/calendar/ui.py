@@ -9,17 +9,17 @@ from telegram import InlineKeyboardButton
 
 from src.time_utils import app_today
 
-WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def format_date_display(d: date) -> str:
-    """Short: 3월 21일 (금)."""
-    return f"{d.month}월 {d.day}일 ({WEEKDAY_NAMES[d.weekday()]})"
+    """Short: 3/21 (Sat)."""
+    return f"{d.month}/{d.day} ({WEEKDAY_NAMES[d.weekday()]})"
 
 
 def format_date_full(d: date) -> str:
-    """Full: 2026년 3월 21일 (금)."""
-    return f"{d.year}년 {d.month}월 {d.day}일 ({WEEKDAY_NAMES[d.weekday()]})"
+    """Full: 2026/03/21 (Sat)."""
+    return f"{d.year}/{d.month:02d}/{d.day:02d} ({WEEKDAY_NAMES[d.weekday()]})"
 
 
 def build_calendar_grid(year: int, month: int) -> list[list[InlineKeyboardButton]]:
@@ -29,7 +29,7 @@ def build_calendar_grid(year: int, month: int) -> list[list[InlineKeyboardButton
 
     # Title
     rows.append([
-        InlineKeyboardButton(f"📅 {year}년 {month}월", callback_data="cal:noop"),
+        InlineKeyboardButton(f"📅 {year}/{month:02d}", callback_data="cal:noop"),
     ])
 
     # Weekday header
@@ -56,11 +56,11 @@ def build_calendar_grid(year: int, month: int) -> list[list[InlineKeyboardButton
     nav = []
     py, pm = (year - 1, 12) if month == 1 else (year, month - 1)
     ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
-    nav.append(InlineKeyboardButton(f"◀ {pm}월", callback_data=f"cal:grid:{py}-{pm:02d}"))
-    nav.append(InlineKeyboardButton(f"{nm}월 ▶", callback_data=f"cal:grid:{ny}-{nm:02d}"))
+    nav.append(InlineKeyboardButton(f"◀ {pm}", callback_data=f"cal:grid:{py}-{pm:02d}"))
+    nav.append(InlineKeyboardButton(f"{nm} ▶", callback_data=f"cal:grid:{ny}-{nm:02d}"))
     rows.append(nav)
 
-    rows.append([InlineKeyboardButton("❌ 취소", callback_data="cal:hub")])
+    rows.append([InlineKeyboardButton("❌ Cancel", callback_data="cal:hub")])
     return rows
 
 
@@ -68,7 +68,7 @@ def build_date_quick_select() -> list[list[InlineKeyboardButton]]:
     """Quick date selection: today, tomorrow, day after."""
     today = app_today()
     buttons = []
-    for delta, label in [(0, "오늘"), (1, "내일"), (2, "모레")]:
+    for delta, label in [(0, "Today"), (1, "Tomorrow"), (2, "Day after")]:
         d = today + timedelta(days=delta)
         buttons.append(InlineKeyboardButton(
             f"{label} {d.month}/{d.day}",
@@ -76,8 +76,8 @@ def build_date_quick_select() -> list[list[InlineKeyboardButton]]:
         ))
     return [
         buttons,
-        [InlineKeyboardButton("📅 달력에서 선택", callback_data=f"cal:agrid:{today.year}-{today.month:02d}")],
-        [InlineKeyboardButton("❌ 취소", callback_data="cal:hub")],
+        [InlineKeyboardButton("📅 Pick from calendar", callback_data=f"cal:agrid:{today.year}-{today.month:02d}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cal:hub")],
     ]
 
 
@@ -95,10 +95,10 @@ def build_hour_keyboard(date_str: str) -> list[list[InlineKeyboardButton]]:
     if row:
         rows.append(row)
 
-    rows.append([InlineKeyboardButton("🌅 종일", callback_data=f"cal:allday:{date_str}")])
+    rows.append([InlineKeyboardButton("🌅 All day", callback_data=f"cal:allday:{date_str}")])
     rows.append([
-        InlineKeyboardButton("◀ 날짜 다시", callback_data="cal:add"),
-        InlineKeyboardButton("❌ 취소", callback_data="cal:hub"),
+        InlineKeyboardButton("◀ Back to date", callback_data="cal:add"),
+        InlineKeyboardButton("❌ Cancel", callback_data="cal:hub"),
     ])
     return rows
 
@@ -118,8 +118,8 @@ def build_minute_keyboard(date_str: str, hour: int) -> list[list[InlineKeyboardB
         rows.append(row)
 
     rows.append([
-        InlineKeyboardButton("◀ 시간 다시", callback_data=f"cal:ad:{date_str}"),
-        InlineKeyboardButton("❌ 취소", callback_data="cal:hub"),
+        InlineKeyboardButton("◀ Back to hour", callback_data=f"cal:ad:{date_str}"),
+        InlineKeyboardButton("❌ Cancel", callback_data="cal:hub"),
     ])
     return rows
 
@@ -135,7 +135,7 @@ def build_hub_nav(date_str: str) -> list[list[InlineKeyboardButton]]:
         InlineKeyboardButton(f"◀ {prev_d.month}/{prev_d.day}", callback_data=f"cal:day:{prev_d.isoformat()}"),
     ]
     if d != today:
-        nav.append(InlineKeyboardButton("오늘", callback_data="cal:hub"))
+        nav.append(InlineKeyboardButton("Today", callback_data="cal:hub"))
     nav.append(
         InlineKeyboardButton(f"{next_d.month}/{next_d.day} ▶", callback_data=f"cal:day:{next_d.isoformat()}")
     )
@@ -143,7 +143,7 @@ def build_hub_nav(date_str: str) -> list[list[InlineKeyboardButton]]:
     return [
         nav,
         [
-            InlineKeyboardButton("+ 일정 추가", callback_data="cal:add"),
-            InlineKeyboardButton("📅 달력", callback_data=f"cal:grid:{d.year}-{d.month:02d}"),
+            InlineKeyboardButton("+ Add Event", callback_data="cal:add"),
+            InlineKeyboardButton("📅 Calendar", callback_data=f"cal:grid:{d.year}-{d.month:02d}"),
         ],
     ]

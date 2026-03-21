@@ -37,24 +37,18 @@ class CalendarEvent:
 
 
 def _extract_error_reason(e: Exception) -> str:
-    """Extract a user-friendly error reason from Google API exceptions."""
-    msg = str(e)
-    # HttpError: extract 'message' from error_details if available
-    if hasattr(e, "error_details") and e.error_details:
-        details = e.error_details
-        if isinstance(details, list) and len(details) > 0:
-            detail_msg = details[0].get("message", "")
-            if detail_msg:
-                msg = detail_msg
-    if "writer access" in msg.lower():
-        return "쓰기 권한이 없습니다. 캘린더 공유 설정에서 '일정 변경' 이상 권한을 부여하세요."
-    if "403" in msg:
-        return "접근 권한이 없습니다. 캘린더 공유 설정을 확인하세요."
-    if "404" in msg or "not found" in msg.lower():
-        return "캘린더를 찾을 수 없습니다. GOOGLE_CALENDAR_ID와 공유 설정을 확인하세요."
-    if "401" in msg:
-        return "인증 실패. 서비스 계정 키를 확인하세요."
-    return msg
+    """Extract error reason string from Google API exceptions. Returns raw Google message."""
+    # HttpError: try error_details[0]['message'] first
+    try:
+        if hasattr(e, "error_details") and e.error_details:
+            details = e.error_details
+            if isinstance(details, list) and len(details) > 0:
+                detail_msg = details[0].get("message", "")
+                if detail_msg:
+                    return str(detail_msg)
+    except Exception:
+        pass
+    return str(e)
 
 
 class GoogleCalendarClient:
