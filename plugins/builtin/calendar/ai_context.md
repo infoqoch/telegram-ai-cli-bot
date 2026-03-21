@@ -33,6 +33,14 @@ Google Calendar API (서비스 계정 인증). DB 테이블 없이 Google 서버
 - 반복 일정 패턴 분석
 - 여유 시간 파악 및 활용 제안
 
+## MCP 도구 (사용 가능 시)
+
+MCP 도구가 활성화된 경우, 아래 도구로 캘린더 데이터를 직접 조회/생성할 수 있다.
+특정 기간의 일정이 필요하면 컨텍스트 데이터 대신 도구를 사용하라.
+
+- `calendar_list_events(start_date, end_date)`: 기간별 일정 조회 (YYYY-MM-DD 형식)
+- `calendar_create_event(summary, start, all_day)`: 새 일정 생성 (start는 YYYY-MM-DDTHH:MM 형식)
+
 ## 제약사항
 
 - Google 서비스 계정 설정 필요 (GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_CALENDAR_ID)

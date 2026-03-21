@@ -36,6 +36,15 @@ class ScheduledAction:
 
 
 @dataclass
+class ToolSpec:
+    """AI가 MCP를 통해 호출할 수 있는 도구 스펙."""
+    name: str              # MCP tool name (e.g., "calendar_list_events")
+    description: str       # Tool description (used by AI for decision-making)
+    parameters: dict       # JSON Schema for parameters
+    handler: any           # callable
+
+
+@dataclass
 class PluginInteraction:
     """Ephemeral plugin-owned interaction captured via a ForceReply prompt."""
 
@@ -200,6 +209,10 @@ class Plugin(ABC):
     async def get_ai_dynamic_context(self, chat_id: int) -> str:
         """Override to provide dynamic context data from DB. Default: empty."""
         return ""
+
+    def get_tool_specs(self) -> list[ToolSpec]:
+        """Return tools that AI can invoke via MCP. Override to expose capabilities."""
+        return []
 
 
 class PluginLoader:

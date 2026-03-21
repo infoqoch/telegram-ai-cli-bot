@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "bot-plugins": {
+      "command": "/Users/bae/AiSandbox/telegram-claude-bot/venv/bin/python",
+      "args": ["/Users/bae/AiSandbox/telegram-claude-bot/mcp_servers/plugin_bridge_server.py"]
+    }
+  }
+}

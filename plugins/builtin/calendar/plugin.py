@@ -18,6 +18,7 @@ from src.plugins.loader import (
     PluginMenuEntry,
     PluginResult,
     ScheduledAction,
+    ToolSpec,
 )
 from src.time_utils import app_today, get_app_timezone
 
@@ -89,6 +90,66 @@ class CalendarPlugin(Plugin):
         self._event_cache: dict[int, list[CalendarEvent]] = {}
         # Dedup for reminders: set of "event_id:reminder_type"
         self._sent_reminders: set[str] = set()
+
+    # ==================== MCP Tool Specs ====================
+
+    def get_tool_specs(self) -> list[ToolSpec]:
+        if not self._gcal or not self._gcal.available:
+            return []
+        return [
+            ToolSpec(
+                name="calendar_list_events",
+                description="Google Calendar 일정 조회. 날짜 범위를 지정하여 일정 목록을 반환한다.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "start_date": {"type": "string", "description": "시작일 (YYYY-MM-DD)"},
+                        "end_date": {"type": "string", "description": "종료일 (YYYY-MM-DD)"},
+                    },
+                    "required": ["start_date", "end_date"],
+                },
+                handler=self._tool_list_events,
+            ),
+            ToolSpec(
+                name="calendar_create_event",
+                description="새 Google Calendar 일정을 생성한다.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string", "description": "일정 제목"},
+                        "start": {"type": "string", "description": "시작 시각 (YYYY-MM-DDTHH:MM)"},
+                        "all_day": {"type": "boolean", "description": "종일 일정 여부", "default": False},
+                    },
+                    "required": ["summary", "start"],
+                },
+                handler=self._tool_create_event,
+            ),
+        ]
+
+    def _tool_list_events(self, start_date: str, end_date: str) -> str:
+        tz = get_app_timezone()
+        s = datetime.fromisoformat(start_date).replace(tzinfo=tz)
+        e = datetime.fromisoformat(end_date).replace(tzinfo=tz)
+        events = self._gcal.list_events(s, e)
+        if not events:
+            return "해당 기간에 일정이 없습니다."
+        lines = []
+        for ev in events:
+            if ev.all_day:
+                lines.append(f"- {ev.start.strftime('%m/%d')} 종일: {ev.summary}")
+            else:
+                lines.append(f"- {ev.start.strftime('%m/%d %H:%M')}: {ev.summary}")
+        return "\n".join(lines)
+
+    def _tool_create_event(self, summary: str, start: str, all_day: bool = False) -> str:
+        tz = get_app_timezone()
+        s = datetime.fromisoformat(start).replace(tzinfo=tz)
+        event = self._gcal.create_event(summary=summary, start=s, all_day=all_day)
+        if not event:
+            return f"일정 생성 실패: {self._gcal.last_error}"
+        return f"일정 생성됨: {event.summary} ({event.start.strftime('%m/%d %H:%M')})"
+
+    # ==================== AI Context ====================
 
     async def get_ai_dynamic_context(self, chat_id: int) -> str:
         from src.time_utils import app_now

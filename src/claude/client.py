@@ -621,6 +621,12 @@ req.end();
         cmd.append("--dangerously-skip-permissions")
         logger.trace("--dangerously-skip-permissions option added")
 
+        # MCP plugin tools (auto-enabled when config exists)
+        mcp_config = Path(__file__).parent.parent.parent / "mcp_servers" / "plugin_mcp.json"
+        if mcp_config.exists():
+            cmd.extend(["--mcp-config", str(mcp_config)])
+            logger.trace("--mcp-config option added")
+
         prompts = self._resolve_prompts(workspace_path)
         self._inject_prompt_args(cmd, prompts)
 
