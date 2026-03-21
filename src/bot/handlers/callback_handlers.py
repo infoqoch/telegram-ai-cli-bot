@@ -19,6 +19,15 @@ from .base import BaseHandler
 class CallbackHandlers(BaseHandler):
     """Callback query handlers - router and small utility callbacks."""
 
+    @staticmethod
+    def _resolve_plugin_launcher_back_callback(origin: str) -> str:
+        """Map a launcher origin token to one concrete back callback."""
+        if origin == "menu_open":
+            return "menu:open"
+        if origin == "menu":
+            return "plug:list:menu"
+        return "plug:list:standalone"
+
     async def callback_query_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle inline button callbacks."""
         query = update.callback_query
@@ -298,6 +307,8 @@ class CallbackHandlers(BaseHandler):
 
     async def _open_plugin_launcher(self, query, chat_id: int, plugin_name: str, origin: str) -> None:
         """Open one plugin root screen from the plugin launcher."""
+        back_callback = self._resolve_plugin_launcher_back_callback(origin)
+
         if not self.plugins:
             await query.edit_message_text("No plugins loaded.")
             return
@@ -307,21 +318,21 @@ class CallbackHandlers(BaseHandler):
             await query.edit_message_text(
                 f"Plugin not found: <code>{escape_html(plugin_name)}</code>",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(BUTTON_BACK, callback_data=f"plug:list:{origin}"),
+                    InlineKeyboardButton(BUTTON_BACK, callback_data=back_callback),
                 ]]),
                 parse_mode="HTML",
             )
             return
 
         try:
-            result = await plugin.handle(plugin.name, chat_id)
+            result = await plugin.open_launcher(chat_id)
         except Exception as exc:
             logger.exception(f"Plugin launcher open failed ({plugin_name}): {exc}")
             await query.edit_message_text(
                 f"Error opening <code>/{escape_html(plugin.name)}</code>.\n\n"
                 f"<code>{escape_html(str(exc))}</code>",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(BUTTON_BACK, callback_data=f"plug:list:{origin}"),
+                    InlineKeyboardButton(BUTTON_BACK, callback_data=back_callback),
                 ]]),
                 parse_mode="HTML",
             )
@@ -330,7 +341,7 @@ class CallbackHandlers(BaseHandler):
         if result.handled:
             reply_markup = self._append_plugin_launcher_back(
                 getattr(result, "reply_markup", None),
-                origin,
+                back_callback,
             )
             await query.edit_message_text(
                 text=result.response or plugin.usage,
@@ -346,7 +357,7 @@ class CallbackHandlers(BaseHandler):
                 f"Help: <code>/help_{escape_html(plugin.name)}</code>"
             ),
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(BUTTON_BACK, callback_data=f"plug:list:{origin}"),
+                InlineKeyboardButton(BUTTON_BACK, callback_data=back_callback),
             ]]),
             parse_mode="HTML",
         )
@@ -360,13 +371,12 @@ class CallbackHandlers(BaseHandler):
         for row in reply_markup.inline_keyboard:
             for button in row:
                 callback_data = getattr(button, "callback_data", "") or ""
-                if callback_data.startswith("plug:list:"):
+                if callback_data.startswith("plug:list:") or callback_data == "menu:open":
                     return callback_data
         return None
 
-    def _append_plugin_launcher_back(self, reply_markup, origin: str):
+    def _append_plugin_launcher_back(self, reply_markup, back_callback: str):
         """Append one launcher back row while preserving the plugin's own buttons."""
-        back_callback = f"plug:list:{origin}"
         existing_back = self._find_plugin_launcher_return_callback(reply_markup)
         if existing_back == back_callback:
             return reply_markup
@@ -473,8 +483,7 @@ class CallbackHandlers(BaseHandler):
             # 메시지 편집/전송
             reply_markup = result.get("reply_markup")
             if plugin_launcher_back:
-                origin = plugin_launcher_back.split(":")[-1]
-                reply_markup = self._append_plugin_launcher_back(reply_markup, origin)
+                reply_markup = self._append_plugin_launcher_back(reply_markup, plugin_launcher_back)
 
             if result.get("edit", True) and query.message:
                 await query.edit_message_text(

@@ -626,6 +626,9 @@ class TestSessionCallbackFlows:
 
         handlers.plugins = MagicMock()
         handlers.plugins.plugins = [memo, todo, hourly_ping]
+        handlers.plugins.get_plugins_for_surface.side_effect = (
+            lambda surface: [memo, todo, hourly_ping] if surface == "catalog" else []
+        )
         memo._source_group = "builtin"
         todo._source_group = "builtin"
         hourly_ping._source_group = "custom"
@@ -642,12 +645,39 @@ class TestSessionCallbackFlows:
         assert "menu:open" in callbacks
 
     @pytest.mark.asyncio
+    async def test_menu_open_includes_featured_plugin_buttons(self, handlers):
+        """Main menu should show promoted plugins directly when they opt into that surface."""
+        todo = MagicMock()
+        todo.name = "todo"
+        todo.get_menu_entry.return_value = MagicMock(label="📋 Todo")
+        weather = MagicMock()
+        weather.name = "weather"
+        weather.get_menu_entry.return_value = MagicMock(label="🌤️ Weather")
+
+        handlers.plugins = MagicMock()
+        handlers.plugins.get_plugins_for_surface.side_effect = (
+            lambda surface: [todo, weather] if surface in {"catalog", "main_menu"} else []
+        )
+
+        query = make_query()
+        await handlers._handle_menu_callback(query, 12345, "menu:open")
+
+        text = get_text(query)
+        callbacks = get_callback_data(query)
+        buttons = get_buttons(query)
+        assert "Featured tools" in text
+        assert "plug:open:todo:menu_open" in callbacks
+        assert "plug:open:weather:menu_open" in callbacks
+        assert "📋 Todo" in buttons
+        assert "🌤️ Weather" in buttons
+
+    @pytest.mark.asyncio
     async def test_plugin_hub_open_interactive_plugin_keeps_back(self, handlers):
         """Launcher-opened plugin screens should keep a return button to the plugin hub."""
         plugin = MagicMock()
         plugin.name = "memo"
         plugin.usage = "memo usage"
-        plugin.handle = AsyncMock(return_value=MagicMock(
+        plugin.open_launcher = AsyncMock(return_value=MagicMock(
             handled=True,
             response="📝 <b>Memo</b>",
             reply_markup=InlineKeyboardMarkup([[
@@ -666,6 +696,30 @@ class TestSessionCallbackFlows:
         assert "Memo" in text
         assert "memo:list" in callbacks
         assert "plug:list:menu" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_featured_plugin_open_keeps_back_to_main_menu(self, handlers):
+        """Main-menu promoted plugin screens should return directly to the main launcher."""
+        plugin = MagicMock()
+        plugin.name = "todo"
+        plugin.usage = "todo usage"
+        plugin.open_launcher = AsyncMock(return_value=MagicMock(
+            handled=True,
+            response="📋 <b>Todo</b>",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("List", callback_data="td:list"),
+            ]]),
+        ))
+
+        handlers.plugins = MagicMock()
+        handlers.plugins.get_plugin_by_name.return_value = plugin
+
+        query = make_query()
+        await handlers._handle_plugin_hub_callback(query, 12345, "plug:open:todo:menu_open")
+
+        callbacks = get_callback_data(query)
+        assert "td:list" in callbacks
+        assert "menu:open" in callbacks
 
     @pytest.mark.asyncio
     async def test_plugin_callback_preserves_launcher_back(self, handlers):
@@ -689,6 +743,29 @@ class TestSessionCallbackFlows:
         callbacks = get_callback_data(query)
         assert "memo:list" in callbacks
         assert "plug:list:menu" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_plugin_callback_preserves_main_menu_back(self, handlers):
+        """Promoted plugin callbacks should keep the direct back-to-menu action."""
+        plugin = MagicMock()
+        plugin.handle_callback_async = AsyncMock(return_value={
+            "text": "updated",
+            "reply_markup": InlineKeyboardMarkup([[
+                InlineKeyboardButton("Refresh", callback_data="td:list"),
+            ]]),
+            "edit": True,
+        })
+
+        query = make_query()
+        query.message.reply_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Back", callback_data="menu:open"),
+        ]])
+
+        await handlers._handle_plugin_callback(query, 12345, "td:list", plugin)
+
+        callbacks = get_callback_data(query)
+        assert "td:list" in callbacks
+        assert "menu:open" in callbacks
 
     @pytest.mark.asyncio
     async def test_plugin_callback_registers_interaction_for_force_reply(self, handlers):

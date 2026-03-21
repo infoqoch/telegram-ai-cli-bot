@@ -7,7 +7,14 @@ from typing import cast
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
 from src.logging_config import logger
-from src.plugins.loader import Plugin, PluginResult, ScheduledAction
+from src.plugins.loader import (
+    PLUGIN_SURFACE_CATALOG,
+    PLUGIN_SURFACE_MAIN_MENU,
+    Plugin,
+    PluginMenuEntry,
+    PluginResult,
+    ScheduledAction,
+)
 from src.plugins.storage import TodoStore
 from src.repository.adapters import RepositoryTodoStore
 from src.time_utils import app_today
@@ -19,6 +26,12 @@ class TodoPlugin(Plugin):
     name = "todo"
     description = "Todo management"
     display_name = "Todo"
+    MENU_ENTRY = PluginMenuEntry(
+        label="📋 Todo",
+        surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU),
+        priority=10,
+        default_promoted=True,
+    )
     usage = (
         "📋 <b>Todo Plugin</b>\n\n"
         "<b>Getting Started</b>\n"

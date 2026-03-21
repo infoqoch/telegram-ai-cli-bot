@@ -40,16 +40,19 @@ def _make_plugin_src(
     plugin_name: str,
     callback_prefix: str = "",
     force_reply_marker: str = "",
+    menu_entry: str = "",
 ) -> str:
     """단순 Plugin 서브클래스 소스를 생성한다."""
+    menu_imports = ", PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU, PluginMenuEntry" if menu_entry else ""
+    menu_line = f'    MENU_ENTRY = {menu_entry}\n' if menu_entry else ""
     return f"""\
-from src.plugins.loader import Plugin, PluginResult
+from src.plugins.loader import Plugin, PluginResult{menu_imports}
 
 class {class_name}(Plugin):
     name = "{plugin_name}"
     description = "Test plugin {plugin_name}"
     usage = "test"
-    CALLBACK_PREFIX = "{callback_prefix}"
+{menu_line}    CALLBACK_PREFIX = "{callback_prefix}"
     FORCE_REPLY_MARKER = "{force_reply_marker}"
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
@@ -319,3 +322,73 @@ class TestPluginRuntimeBinding:
         plugin.bind_runtime(sentinel_repo)
 
         assert plugin.storage is sentinel_store
+
+
+class TestPluginMenuSurfaces:
+    """플러그인 메뉴 surface 편성 테스트."""
+
+    def test_main_menu_surface_uses_default_promoted_priority(self, base_dir):
+        _write_plugin(
+            base_dir,
+            "builtin",
+            "alpha.py",
+            _make_plugin_src(
+                "AlphaPlugin",
+                "alpha",
+                menu_entry='PluginMenuEntry(label="Alpha", surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU), priority=20, default_promoted=True)',
+            ),
+        )
+        _write_plugin(
+            base_dir,
+            "builtin",
+            "beta.py",
+            _make_plugin_src(
+                "BetaPlugin",
+                "beta",
+                menu_entry='PluginMenuEntry(label="Beta", surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU), priority=10, default_promoted=True)',
+            ),
+        )
+        _write_plugin(
+            base_dir,
+            "builtin",
+            "gamma.py",
+            _make_plugin_src(
+                "GammaPlugin",
+                "gamma",
+                menu_entry='PluginMenuEntry(label="Gamma", surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU), priority=5, default_promoted=False)',
+            ),
+        )
+
+        loader = PluginLoader(base_dir)
+        loader.load_all()
+
+        assert [plugin.name for plugin in loader.get_plugins_for_surface("main_menu")] == ["beta", "alpha"]
+
+    def test_main_menu_surface_respects_env_override(self, base_dir, monkeypatch):
+        _write_plugin(
+            base_dir,
+            "builtin",
+            "alpha.py",
+            _make_plugin_src(
+                "AlphaPlugin",
+                "alpha",
+                menu_entry='PluginMenuEntry(label="Alpha", surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU), priority=20, default_promoted=True)',
+            ),
+        )
+        _write_plugin(
+            base_dir,
+            "builtin",
+            "beta.py",
+            _make_plugin_src(
+                "BetaPlugin",
+                "beta",
+                menu_entry='PluginMenuEntry(label="Beta", surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU), priority=10, default_promoted=False)',
+            ),
+        )
+
+        monkeypatch.setenv("BOT_MAIN_MENU_PLUGINS", "beta,alpha")
+
+        loader = PluginLoader(base_dir)
+        loader.load_all()
+
+        assert [plugin.name for plugin in loader.get_plugins_for_surface("main_menu")] == ["beta", "alpha"]

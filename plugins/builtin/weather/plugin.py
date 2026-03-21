@@ -9,7 +9,13 @@ from typing import Optional, cast
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.plugins.loader import Plugin, PluginResult
+from src.plugins.loader import (
+    PLUGIN_SURFACE_CATALOG,
+    PLUGIN_SURFACE_MAIN_MENU,
+    Plugin,
+    PluginMenuEntry,
+    PluginResult,
+)
 from src.plugins.storage import WeatherLocationStore
 from src.repository.adapters import RepositoryWeatherLocationStore
 
@@ -53,6 +59,12 @@ class WeatherPlugin(Plugin):
     name = "weather"
     description = "Weather lookup and location settings"
     display_name = "Weather"
+    MENU_ENTRY = PluginMenuEntry(
+        label="🌤️ Weather",
+        surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU),
+        priority=30,
+        default_promoted=True,
+    )
     usage = (
         "🌤️ <b>날씨 플러그인</b>\n\n"
         "<b>날씨 확인</b>\n"

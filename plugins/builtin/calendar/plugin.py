@@ -10,7 +10,15 @@ from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
-from src.plugins.loader import Plugin, PluginInteraction, PluginResult, ScheduledAction
+from src.plugins.loader import (
+    PLUGIN_SURFACE_CATALOG,
+    PLUGIN_SURFACE_MAIN_MENU,
+    Plugin,
+    PluginInteraction,
+    PluginMenuEntry,
+    PluginResult,
+    ScheduledAction,
+)
 from src.time_utils import app_today, get_app_timezone
 
 import importlib.util
@@ -52,6 +60,12 @@ class CalendarPlugin(Plugin):
     name = "calendar"
     description = "Google Calendar"
     display_name = "Calendar"
+    MENU_ENTRY = PluginMenuEntry(
+        label="📅 Calendar",
+        surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU),
+        priority=20,
+        default_promoted=True,
+    )
     usage = (
         "📅 <b>Calendar Plugin</b>\n\n"
         "<code>/cal</code> - Open calendar\n\n"

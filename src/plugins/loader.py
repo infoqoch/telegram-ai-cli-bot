@@ -1,10 +1,11 @@
 """Plugin loader with safe loading and hot reload support."""
 
 import importlib.util
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from src.logging_config import logger
 from src.plugins.storage import PluginDatabase
@@ -50,6 +51,25 @@ class PluginSystemJobContext:
     maintainer_chat_id: Optional[int] = None
 
 
+PLUGIN_SURFACE_CATALOG = "catalog"
+PLUGIN_SURFACE_MAIN_MENU = "main_menu"
+PluginSurface = Literal["catalog", "main_menu"]
+
+
+@dataclass(frozen=True)
+class PluginMenuEntry:
+    """Declarative menu placement metadata for one plugin launcher."""
+
+    label: str
+    surfaces: tuple[PluginSurface, ...] = (PLUGIN_SURFACE_CATALOG,)
+    priority: int = 100
+    default_promoted: bool = False
+
+    def supports(self, surface: PluginSurface) -> bool:
+        """Return whether this entry should appear on one UI surface."""
+        return surface in self.surfaces
+
+
 class Plugin(ABC):
     """플러그인 기본 클래스."""
 
@@ -57,6 +77,7 @@ class Plugin(ABC):
     description: str = "Base plugin"
     display_name: str = ""  # Human-readable label for AI Work UI (default: name.capitalize())
     usage: str = "Usage not defined."
+    MENU_ENTRY: PluginMenuEntry | None = None
 
     CALLBACK_PREFIX: str = ""  # 빈 문자열이면 콜백 미지원
     FORCE_REPLY_MARKER: str = ""  # 빈 문자열이면 ForceReply 미지원
@@ -100,6 +121,10 @@ class Plugin(ABC):
         """메시지 처리."""
         pass
 
+    async def open_launcher(self, chat_id: int) -> PluginResult:
+        """Open the plugin's root launcher screen."""
+        return await self.handle(self.name, chat_id)
+
     def handle_callback(self, callback_data: str, chat_id: int) -> dict:
         """콜백 처리. 오버라이드하여 사용."""
         raise NotImplementedError
@@ -125,6 +150,14 @@ class Plugin(ABC):
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         """스케줄 가능한 액션 목록. 오버라이드하여 사용."""
         return []
+
+    def get_menu_entry(self) -> PluginMenuEntry:
+        """Return menu placement metadata for launcher surfaces."""
+        if self.MENU_ENTRY is not None:
+            return self.MENU_ENTRY
+
+        label = self.display_name or self.name.replace("_", " ").title()
+        return PluginMenuEntry(label=label)
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict | None:
         """스케줄된 액션 실행. str(HTML), dict(text, reply_markup), 또는 None(전송 스킵) 반환."""
@@ -164,6 +197,8 @@ class Plugin(ABC):
 
 class PluginLoader:
     """안전한 플러그인 로더."""
+
+    MAIN_MENU_OVERRIDE_ENV = "BOT_MAIN_MENU_PLUGINS"
 
     def __init__(self, base_dir: Path, repository: any = None):
         logger.trace(f"PluginLoader.__init__() - base_dir={base_dir}")
@@ -538,6 +573,49 @@ class PluginLoader:
             {"name": p.name, "description": p.description}
             for p in self.plugins
         ]
+
+    @classmethod
+    def _parse_main_menu_override(cls) -> list[str] | None:
+        """Return one ordered main-menu override list from env, if configured."""
+        raw = os.getenv(cls.MAIN_MENU_OVERRIDE_ENV)
+        if raw is None:
+            return None
+        return [name.strip() for name in raw.split(",") if name.strip()]
+
+    def get_plugins_for_surface(self, surface: PluginSurface) -> list[Plugin]:
+        """Return plugins eligible for one launcher surface."""
+        eligible = [plugin for plugin in self.plugins if plugin.get_menu_entry().supports(surface)]
+
+        if surface == PLUGIN_SURFACE_MAIN_MENU:
+            override_names = self._parse_main_menu_override()
+            if override_names is not None:
+                by_name = {plugin.name: plugin for plugin in eligible}
+                ordered: list[Plugin] = []
+                missing: list[str] = []
+                seen: set[str] = set()
+
+                for name in override_names:
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    plugin = by_name.get(name)
+                    if plugin is None:
+                        missing.append(name)
+                        continue
+                    ordered.append(plugin)
+
+                if missing:
+                    logger.warning(
+                        f"{self.MAIN_MENU_OVERRIDE_ENV} ignored unknown/ineligible plugins: {', '.join(missing)}"
+                    )
+                return ordered
+
+            eligible = [plugin for plugin in eligible if plugin.get_menu_entry().default_promoted]
+
+        return sorted(
+            eligible,
+            key=lambda plugin: (plugin.get_menu_entry().priority, plugin.name),
+        )
 
     def get_plugin_for_callback(self, callback_data: str) -> Optional[Plugin]:
         """callback_data의 prefix로 플러그인 찾기."""

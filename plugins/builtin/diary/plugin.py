@@ -7,7 +7,15 @@ from typing import Optional, cast
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
 from src.bot.formatters import escape_html
-from src.plugins.loader import Plugin, PluginInteraction, PluginResult, ScheduledAction
+from src.plugins.loader import (
+    PLUGIN_SURFACE_CATALOG,
+    PLUGIN_SURFACE_MAIN_MENU,
+    Plugin,
+    PluginInteraction,
+    PluginMenuEntry,
+    PluginResult,
+    ScheduledAction,
+)
 from src.plugins.storage import DiaryStore
 from src.repository.adapters import RepositoryDiaryStore
 from src.time_utils import app_today
@@ -35,6 +43,12 @@ class DiaryPlugin(Plugin):
     name = "diary"
     description = "Daily diary management"
     display_name = "Diary"
+    MENU_ENTRY = PluginMenuEntry(
+        label="📓 Diary",
+        surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU),
+        priority=40,
+        default_promoted=True,
+    )
     usage = (
         "📓 <b>Diary Plugin</b>\n\n"
         "<code>일기</code> or <code>/diary</code> - Open diary\n\n"

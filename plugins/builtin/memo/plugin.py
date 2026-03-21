@@ -5,7 +5,13 @@ from typing import Optional, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
-from src.plugins.loader import Plugin, PluginResult
+from src.plugins.loader import (
+    PLUGIN_SURFACE_CATALOG,
+    PLUGIN_SURFACE_MAIN_MENU,
+    Plugin,
+    PluginMenuEntry,
+    PluginResult,
+)
 from src.plugins.storage import MemoStore
 from src.repository.adapters import RepositoryMemoStore
 
@@ -16,6 +22,12 @@ class MemoPlugin(Plugin):
     name = "memo"
     description = "Save, view, and delete memos"
     display_name = "Memo"
+    MENU_ENTRY = PluginMenuEntry(
+        label="📝 Memo",
+        surfaces=(PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU),
+        priority=50,
+        default_promoted=False,
+    )
     usage = (
         "📝 <b>Memo Plugin</b>\n\n"
         "<code>memo</code> or <code>/memo</code>"

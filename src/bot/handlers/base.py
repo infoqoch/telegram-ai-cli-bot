@@ -21,6 +21,7 @@ from src.ai import (
     normalize_model,
 )
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
+from src.plugins.loader import PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU, PluginInteraction
 from src.ui_emoji import (
     BUTTON_BACK,
     BUTTON_CANCEL,
@@ -40,7 +41,6 @@ from ..command_catalog import build_menu_specs
 from ..constants import get_model_badge
 from ..formatters import escape_html, split_message
 from ..runtime import DetachedJobManager, PendingRequestStore
-from src.plugins.loader import PluginInteraction
 from src.services.local_session_discovery import LocalSessionDiscoveryService
 
 if TYPE_CHECKING:
@@ -299,11 +299,59 @@ class BaseHandler:
             return f"Auth: <b>✅ Authenticated</b> ({remaining}m left)"
         return "Auth: <b>🔒 Authentication required</b>"
 
+    def _get_plugins_for_surface(self, surface: str) -> list:
+        """Return plugins for one launcher surface with test-friendly fallback."""
+        if not self.plugins:
+            return []
+
+        getter = getattr(self.plugins, "get_plugins_for_surface", None)
+        if callable(getter):
+            plugins = getter(surface)
+            if isinstance(plugins, list):
+                return plugins
+            if plugins is None:
+                return []
+
+        plugins = getattr(self.plugins, "plugins", None)
+        return list(plugins) if isinstance(plugins, list) else []
+
+    @staticmethod
+    def _get_plugin_menu_label(plugin) -> str:
+        """Return one plugin label for launcher buttons."""
+        get_menu_entry = getattr(plugin, "get_menu_entry", None)
+        if callable(get_menu_entry):
+            return get_menu_entry().label
+
+        display_name = getattr(plugin, "display_name", "") or getattr(plugin, "name", "")
+        return display_name.replace("_", " ").title() if display_name else "Plugin"
+
+    def _build_featured_plugin_rows(self) -> list[list[InlineKeyboardButton]]:
+        """Build promoted plugin buttons for the main launcher."""
+        buttons: list[list[InlineKeyboardButton]] = []
+        row: list[InlineKeyboardButton] = []
+
+        for plugin in self._get_plugins_for_surface(PLUGIN_SURFACE_MAIN_MENU):
+            row.append(
+                InlineKeyboardButton(
+                    self._get_plugin_menu_label(plugin),
+                    callback_data=f"plug:open:{plugin.name}:menu_open",
+                )
+            )
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+
+        if row:
+            buttons.append(row)
+
+        return buttons
+
     def _build_menu_text(self, chat_id: int) -> str:
         """Render the `/menu` launcher body."""
         user_id = str(chat_id)
         provider = self._get_selected_ai_provider(user_id)
-        has_plugins = bool(self.plugins and self.plugins.plugins)
+        featured_plugins = self._get_plugins_for_surface(PLUGIN_SURFACE_MAIN_MENU)
+        catalog_plugins = self._get_plugins_for_surface(PLUGIN_SURFACE_CATALOG)
 
         lines = [
             "<b>Main Menu</b>",
@@ -314,14 +362,17 @@ class BaseHandler:
             "• Sessions and AI controls",
             "• Workspace and scheduler hubs",
         ]
-        if has_plugins:
+        if featured_plugins:
+            labels = ", ".join(escape_html(self._get_plugin_menu_label(plugin)) for plugin in featured_plugins)
+            lines.append(f"• Featured tools: {labels}")
+        if catalog_plugins:
             lines.append("• Plugin catalog")
         return "\n".join(lines)
 
     def _find_menu_spec(self, name: str, *, chat_id: int):
         """Return one launcher spec by name."""
         specs = build_menu_specs(
-            has_plugins=bool(self.plugins and self.plugins.plugins),
+            has_plugins=bool(self._get_plugins_for_surface(PLUGIN_SURFACE_CATALOG)),
             is_admin=self._is_admin_chat(chat_id),
         )
         return next((spec for spec in specs if spec.name == name), None)
@@ -341,6 +392,7 @@ class BaseHandler:
 
         add_row("new", "sl")
         add_row("workspace", "scheduler")
+        buttons.extend(self._build_featured_plugin_rows())
         add_row("plugins", "tasks")
         add_row("select_ai")
         buttons.append([InlineKeyboardButton("❓ Help", callback_data="menu:help")])

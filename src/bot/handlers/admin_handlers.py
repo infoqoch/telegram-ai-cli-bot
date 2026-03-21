@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from src.ai import get_provider_label
 from src.logging_config import logger, clear_context
+from src.plugins.loader import PLUGIN_SURFACE_CATALOG
 from src.ui_emoji import BUTTON_BACK, BUTTON_REFRESH, BUTTON_SESSION_LIST
 from ..constants import MAX_LOCK_STATUS_PREVIEW
 from ..middleware import authorized_only, authenticated_only
@@ -288,11 +289,12 @@ class AdminHandlers(BaseHandler):
     def _group_plugins(self) -> dict[str, list]:
         """Return plugins grouped by builtin/custom for launcher UIs."""
         grouped_plugins = {"builtin": [], "custom": []}
-        if not self.plugins or not self.plugins.plugins:
+        catalog_plugins = self._get_plugins_for_surface(PLUGIN_SURFACE_CATALOG)
+        if not catalog_plugins:
             return grouped_plugins
 
         for plugin in sorted(
-            self.plugins.plugins,
+            catalog_plugins,
             key=lambda item: (self._get_plugin_source_group(item), item.name),
         ):
             grouped_plugins[self._get_plugin_source_group(plugin)].append(plugin)
@@ -301,10 +303,11 @@ class AdminHandlers(BaseHandler):
 
     def _build_plugins_text(self) -> str:
         """Render a compact plugin hub summary."""
-        if not self.plugins or not self.plugins.plugins:
+        catalog_plugins = self._get_plugins_for_surface(PLUGIN_SURFACE_CATALOG)
+        if not catalog_plugins:
             return "No plugins loaded."
 
-        logger.trace(f"Building plugin list - {len(self.plugins.plugins)}")
+        logger.trace(f"Building plugin list - {len(catalog_plugins)}")
         grouped_plugins = self._group_plugins()
 
         lines = ["<b>Plugins</b>\n"]
