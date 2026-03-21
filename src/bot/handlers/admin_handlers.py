@@ -164,6 +164,22 @@ class AdminHandlers(BaseHandler):
             return
 
         if context.args:
+            # 스케줄러 리로드: /reload schedules
+            if context.args[0] in ("schedules", "scheduler"):
+                if not self._schedule_manager:
+                    await update.message.reply_text("No schedule manager available.")
+                    clear_context()
+                    return
+                removed, added = self._schedule_manager.sync_from_db()
+                await update.message.reply_text(
+                    f"<b>Schedule Reload</b>\n\n"
+                    f"Removed: {removed}\n"
+                    f"Registered: {added}",
+                    parse_mode="HTML"
+                )
+                clear_context()
+                return
+
             # 특정 플러그인 리로드: /reload memo
             plugin_name = context.args[0]
             success = self.plugins.reload_plugin(plugin_name)

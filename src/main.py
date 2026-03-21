@@ -256,6 +256,14 @@ def main() -> None:
 
     app = create_app(settings)
 
+    # SIGUSR1 → DB에서 스케줄 핫리로드
+    def _handle_schedule_reload(*_):
+        if _schedule_manager:
+            removed, added = _schedule_manager.sync_from_db()
+            logger.info(f"SIGUSR1: schedule reload - {removed} removed, {added} added")
+
+    signal.signal(signal.SIGUSR1, _handle_schedule_reload)
+
     logger.info("=" * 60)
     logger.info("Bot started - polling mode")
     logger.info("  Press Ctrl+C to stop")

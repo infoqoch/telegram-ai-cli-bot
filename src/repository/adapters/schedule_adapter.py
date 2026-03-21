@@ -220,6 +220,27 @@ class ScheduleManagerAdapter:
         logger.info(f"Registered {count} schedules to scheduler")
         return count
 
+    def sync_from_db(self) -> tuple[int, int]:
+        """Sync runtime scheduler with DB state: unregister stale jobs, register new ones.
+
+        Returns (unregistered_count, registered_count).
+        """
+        if not self._scheduler_manager or not self._executor:
+            logger.warning("Scheduler manager or executor not set")
+            return 0, 0
+
+        # 1. Unregister all ScheduleAdapter-owned jobs
+        unregistered = self._scheduler_manager.unregister_by_owner("ScheduleAdapter")
+
+        # 2. Re-register all enabled schedules from DB
+        registered = 0
+        for schedule in self._repo.list_enabled_schedules():
+            if self._register_schedule(schedule):
+                registered += 1
+
+        logger.info(f"Schedule sync: {unregistered} removed, {registered} registered")
+        return unregistered, registered
+
     def get_schedule_summary(self, user_id: str) -> str:
         """Build the `/scheduler` list body for one user."""
         schedules = self.list_by_user(user_id)
