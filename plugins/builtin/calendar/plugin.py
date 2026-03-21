@@ -13,16 +13,35 @@ from src.logging_config import logger
 from src.plugins.loader import Plugin, PluginInteraction, PluginResult, ScheduledAction
 from src.time_utils import app_today, get_app_timezone
 
-from .google_client import CalendarEvent, GoogleCalendarClient
-from .ui import (
-    build_calendar_grid,
-    build_date_quick_select,
-    build_hour_keyboard,
-    build_hub_nav,
-    build_minute_keyboard,
-    format_date_display,
-    format_date_full,
-)
+import importlib.util
+from pathlib import Path
+
+def _load_sibling(name: str):
+    """Load a sibling module from the same directory (plugin loader workaround)."""
+    import sys
+    mod_name = f"_calendar_plugin_{name}"
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
+    sibling = Path(__file__).parent / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(mod_name, sibling)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+_gclient = _load_sibling("google_client")
+_ui = _load_sibling("ui")
+
+CalendarEvent = _gclient.CalendarEvent
+GoogleCalendarClient = _gclient.GoogleCalendarClient
+
+build_calendar_grid = _ui.build_calendar_grid
+build_date_quick_select = _ui.build_date_quick_select
+build_hour_keyboard = _ui.build_hour_keyboard
+build_hub_nav = _ui.build_hub_nav
+build_minute_keyboard = _ui.build_minute_keyboard
+format_date_display = _ui.format_date_display
+format_date_full = _ui.format_date_full
 
 WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
 
