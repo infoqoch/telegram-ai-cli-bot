@@ -8,7 +8,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
+
 from src.logging_config import logger
+
+load_dotenv()
 
 try:
     from google.oauth2.service_account import Credentials
