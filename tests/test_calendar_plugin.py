@@ -424,14 +424,14 @@ class TestCalendarScheduledActions:
 
         # Second call - same event should be skipped
         r2 = await plugin.execute_scheduled_action("reminder_10m", 1)
-        assert r2 == ""  # Empty = no message
+        assert r2 is None  # Intentional silence
 
     @pytest.mark.asyncio
     async def test_reminder_no_events(self):
         plugin, mock_gcal = _make_plugin()
         mock_gcal.list_events.return_value = []
         result = await plugin.execute_scheduled_action("reminder_10m", 1)
-        assert result == ""
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_reminder_1h(self):

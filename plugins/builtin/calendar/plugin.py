@@ -782,7 +782,7 @@ class CalendarPlugin(Plugin):
             self._sent_reminders.clear()
 
         if not to_remind:
-            return ""  # Empty = no message sent
+            return None  # Intentional silence - no upcoming events
 
         lines = [f"🔔 <b>Upcoming in {label}</b>", "─" * 20]
         for ev in to_remind:

@@ -47,6 +47,12 @@ class ScheduleExecutionService:
                 logger.info(f"Schedule {schedule.id} executed successfully (plugin rich response)")
                 return
 
+            # None = intentional silence (e.g., reminder with no upcoming events)
+            if response is None:
+                self._schedule_manager.update_run(schedule.id)
+                logger.info(f"Schedule {schedule.id} executed (no notification needed)")
+                return
+
             if self._bot and schedule.chat_id and not response:
                 logger.warning(
                     f"Schedule {schedule.id} ({schedule.name}) returned empty response, sending fallback"
