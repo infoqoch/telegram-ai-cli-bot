@@ -388,16 +388,20 @@ plugins/
 │   ├── todo/
 │   │   ├── __init__.py
 │   │   ├── plugin.py      # Callback, ForceReply, schedule implementation
+│   │   ├── ai_context.md  # AI context document
 │   │   └── scheduler.py   # Todo-specific schedule actions
 │   ├── memo/
 │   │   ├── __init__.py
-│   │   └── plugin.py
+│   │   ├── plugin.py
+│   │   └── ai_context.md  # AI context document
 │   ├── weather/
 │   │   ├── __init__.py
-│   │   └── plugin.py
+│   │   ├── plugin.py
+│   │   └── ai_context.md  # AI context document
 │   └── diary/
 │       ├── __init__.py
-│       └── plugin.py      # Diary CRUD, callbacks, ForceReply, schedule
+│       ├── plugin.py      # Diary CRUD, callbacks, ForceReply, schedule
+│       └── ai_context.md  # AI context document
 └── custom/                # Git-ignored (personal use)
     └── hourly_ping/
         ├── __init__.py
@@ -434,6 +438,11 @@ class MyPlugin(Plugin):
     # get_scheduled_actions() → list[ScheduledAction]           # List of scheduled actions
     # execute_scheduled_action(action_name, chat_id) → str      # Execute scheduled action
     # register_system_jobs(context: PluginSystemJobContext)      # Register background jobs
+
+    # --- AI Context API ---
+    # ai_context_file = "ai_context.md"                            # AI context markdown file (relative to plugin dir)
+    # get_ai_context(chat_id) → str                                # Full context (static md + dynamic data)
+    # get_ai_dynamic_context(chat_id) → str                        # Override for dynamic data from DB
 ```
 
 Reference implementations: `plugins/builtin/todo/` (callbacks+ForceReply+schedule), `plugins/builtin/memo/` (simple CRUD), `plugins/builtin/diary/` (callbacks+ForceReply+schedule+monthly list)
@@ -446,6 +455,7 @@ Reference implementations: `plugins/builtin/todo/` (callbacks+ForceReply+schedul
 3. **Data storage**: `self.repository` (Repository instance, injected by PluginLoader)
 4. **Validate before deployment**: `python -m py_compile plugins/custom/my.py`
 5. **Scheduled response is required**: `execute_scheduled_action()` must not return an empty string (`""`). Even when there is no data, it must return a message informing the user of the "empty" state. Once a schedule is set, its execution result must always reach the user.
+6. **AI context is required**: Every plugin must provide `ai_context.md` describing its feature, DB schema, available operations, and AI assistance scope. Override `get_ai_dynamic_context()` to provide current data from DB.
 
 ### Plugin Data Storage Extension
 
@@ -531,10 +541,30 @@ Every sub-menu (one level deep from the main menu) provides a "✨ AI와 작업�
 - ForceReply marker: `aiwork:{domain}` (detected in `message_handlers.py`)
 - UI constant: `BUTTON_AI_WORK` in `src/ui_emoji.py`
 
-**Rules for new domains:**
-1. Add domain to `DOMAIN_LABELS` dict in `ai_work_handlers.py`
-2. Add context gatherer method `_ctx_{domain}()`
-3. Add "✨ AI와 작업하기" button with `callback_data="aiwork:{domain}"` to the sub-menu keyboard
+**AI Context System (2-tier):**
+
+| 영역 | 정적 컨텍스트 (md) | 동적 데이터 | 제공 방식 |
+|------|-------------------|------------|----------|
+| 플러그인 | `plugins/builtin/{name}/ai_context.md` | `plugin.get_ai_dynamic_context()` | `Plugin.get_ai_context()` 인터페이스 |
+| 코어 기능 | `src/bot/ai_contexts/{domain}.md` | `_ctx_{domain}()` 메서드 | `_load_core_context()` + 동적 수집 |
+
+컨텍스트 = 정적 설명(기능, DB 스키마, 가능한 작업) + 동적 데이터(현재 DB 상태)
+
+**플러그인 AI 컨텍스트 규칙:**
+1. `plugins/builtin/{name}/ai_context.md` 작성 (기능 설명, DB 스키마, 가능한 작업, AI 도움 범위)
+2. `get_ai_dynamic_context(chat_id)` 오버라이드하여 현재 데이터 제공
+3. `Plugin.get_ai_context()` 가 정적 + 동적을 자동 결합
+
+**코어 기능 AI 컨텍스트 규칙:**
+1. `src/bot/ai_contexts/{domain}.md` 작성
+2. `ai_work_handlers.py`에 `_ctx_{domain}()` 동적 수집 메서드 추가
+3. `CORE_DOMAINS` set에 도메인 등록
+
+**새 플러그인 추가 시:**
+1. `ai_context.md` 파일 작성
+2. `get_ai_dynamic_context()` 구현
+3. 서브메뉴에 "✨ AI와 작업하기" 버튼 추가 (`callback_data="aiwork:{name}"`)
+4. `DOMAIN_LABELS`에 도메인 레이블 추가
 
 ## Message Processing Flow
 

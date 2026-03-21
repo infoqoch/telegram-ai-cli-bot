@@ -118,6 +118,15 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
         else:
             return {"text": "❌ Unknown command.", "edit": True}
 
+    async def get_ai_dynamic_context(self, chat_id: int) -> str:
+        memos = self.store.list_by_chat(chat_id)
+        if not memos:
+            return "저장된 메모가 없습니다."
+        lines = [f"저장된 메모 {len(memos)}개:"]
+        for m in memos:
+            lines.append(f"  - #{m.id}: {m.content[:200]}")
+        return "\n".join(lines)
+
     def _clear_selection(self, chat_id: int) -> None:
         """Clear selection."""
         self._selected.pop(chat_id, None)
