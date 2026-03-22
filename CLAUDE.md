@@ -229,7 +229,8 @@ src/
 │   ├── ai_contexts/               # Core domain AI context markdown files
 │   │   ├── scheduler.md
 │   │   ├── workspace.md
-│   │   └── tasks.md
+│   │   ├── tasks.md
+│   │   └── sessions.md
 │   ├── constants.py           # UI constants (emoji, limits)
 │   └── prompts/               # System prompts
 │
@@ -286,6 +287,8 @@ src/
 | `ADMIN_CHAT_ID` | `0` | Admin notification/report recipient chat ID |
 | `AI_COMMAND` | `claude` | AI CLI command |
 | `SESSION_TIMEOUT_HOURS` | `24` | Session expiry time |
+| `DEFAULT_MODEL_CLAUDE` | (empty) | Default Claude model profile key (opus/sonnet/haiku) |
+| `DEFAULT_MODEL_CODEX` | (empty) | Default Codex model profile key |
 | `APP_TIMEZONE` | `Asia/Seoul` | App timezone |
 | `REQUIRE_AUTH` | `true` | Whether authentication is required |
 | `AUTH_SECRET_KEY` | (conditionally required) | Auth key (required when `REQUIRE_AUTH=true`) |

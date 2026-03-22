@@ -1,44 +1,54 @@
-# 세션 관리 - AI 작업 컨텍스트
+# Session Management
 
-## 기능 개요
-봇의 대화 세션을 관리합니다. 세션은 AI 대화 히스토리를 유지하며, 여러 세션을 동시에 보관하고 전환할 수 있습니다.
+## Overview
+Manages bot conversation sessions. Sessions maintain AI conversation history and allow multiple sessions to be stored and switched between.
 
-## 관련 DB 테이블
+## DB Tables
 
 ### sessions
-| 컬럼 | 설명 |
-|------|------|
-| id | 세션 고유 ID (UUID) |
-| chat_id | Telegram 채팅 ID |
-| ai_provider | AI 제공자 (claude / codex) |
-| provider_session_id | 외부 CLI 세션 ID |
-| model | 사용 모델 프로파일 키 |
-| name | 세션 이름 |
-| is_current | 현재 활성 세션 여부 (0/1) |
-| recycled | 비활성 아카이브 상태 (0/1) |
-| deleted | 소프트 삭제 여부 (0/1) |
-| created_at | 생성 시각 |
-| last_activity_at | 마지막 활동 시각 |
+| Column | Description |
+|--------|-------------|
+| id | Session ID (UUID) |
+| user_id | Telegram user ID |
+| ai_provider | AI provider (claude / codex) |
+| provider_session_id | External CLI session ID |
+| model | Model profile key |
+| name | Session name |
+| workspace_path | Workspace path (NULL if none) |
+| recycled | Inactive archive flag (0/1) |
+| deleted | Soft-delete flag (0/1) |
+| created_at | Creation time |
+| last_used | Last activity time |
 
-## 세션 생애주기
+### user_provider_state
+The current active session is managed via this table, not the `sessions` table directly.
 
-| 상태 | 조건 | 설명 |
-|------|------|------|
-| 활성 | recycled=0, deleted=0 | 기본 상태, /sl에 표시됨 |
-| 리사이클됨 | recycled=1 | 24시간 비활성 시 자동 보관 |
-| 삭제됨 | deleted=1 | 7일 후 소프트 삭제 |
+| Column | Description |
+|--------|-------------|
+| user_id | Telegram user ID |
+| ai_provider | AI provider (claude / codex) |
+| current_session_id | Currently active session ID |
+| previous_session_id | Previous session ID |
 
-## AI 도움 가능 영역
-- 현재 세션 목록 조회 및 분석
-- 오래된 세션 정리 제안
-- 세션 사용 패턴 분석
-- 특정 세션 찾기 및 정보 조회
+## Session Lifecycle
 
-## MCP 도구
+| State | Condition | Description |
+|-------|-----------|-------------|
+| Active | recycled=0, deleted=0 | Default state, shown in /sl |
+| Recycled | recycled=1 | Auto-archived after 24h inactivity |
+| Deleted | deleted=1 | Soft-deleted after 7 days |
 
-데이터 조회가 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+## AI Assistance Scope
+- Query and analyze current session list
+- Suggest cleanup of old sessions
+- Analyze session usage patterns
+- Find and inspect specific sessions
 
-- 활성 세션 목록: `query_db("SELECT id, name, ai_provider, model, is_current, last_activity_at FROM sessions WHERE chat_id = {chat_id} AND recycled = 0 AND deleted = 0 ORDER BY last_activity_at DESC LIMIT 30")`
-- 리사이클된 세션: `query_db("SELECT id, name, ai_provider, last_activity_at FROM sessions WHERE chat_id = {chat_id} AND recycled = 1 AND deleted = 0 ORDER BY last_activity_at DESC")`
-- 현재 세션: `query_db("SELECT id, name, ai_provider, model FROM sessions WHERE chat_id = {chat_id} AND is_current = 1 AND deleted = 0")`
-- 세션 메시지 수: `query_db("SELECT s.name, COUNT(m.id) as msg_count FROM sessions s LEFT JOIN message_log m ON s.id = m.session_id WHERE s.chat_id = {chat_id} AND s.deleted = 0 GROUP BY s.id ORDER BY msg_count DESC")`
+## MCP Tools
+
+Use `query_db` to access data. `{chat_id}` placeholder is auto-replaced.
+
+- Active sessions: `query_db("SELECT id, name, ai_provider, model, last_used FROM sessions WHERE user_id = '{chat_id}' AND recycled = 0 AND deleted = 0 ORDER BY last_used DESC LIMIT 30")`
+- Recycled sessions: `query_db("SELECT id, name, ai_provider, last_used FROM sessions WHERE user_id = '{chat_id}' AND recycled = 1 AND deleted = 0 ORDER BY last_used DESC")`
+- Current session: `query_db("SELECT s.id, s.name, s.ai_provider, s.model FROM sessions s JOIN user_provider_state ups ON s.id = ups.current_session_id WHERE ups.user_id = '{chat_id}' AND s.deleted = 0")`
+- Session message counts: `query_db("SELECT s.name, COUNT(m.id) as msg_count FROM sessions s LEFT JOIN message_log m ON s.id = m.session_id WHERE s.user_id = '{chat_id}' AND s.deleted = 0 GROUP BY s.id ORDER BY msg_count DESC")`
