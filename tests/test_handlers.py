@@ -515,7 +515,7 @@ class TestHandleMessage:
             mock_session_service.create_session.assert_called_once_with(
                 user_id="12345",
                 ai_provider="claude",
-                model="sonnet",
+                model="opus",
                 first_message="(new session)",
             )
 

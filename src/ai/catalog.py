@@ -114,10 +114,16 @@ MODEL_PROFILES = {
 }
 
 
-DEFAULT_MODEL_BY_PROVIDER = {
-    "claude": "sonnet",
-    "codex": "gpt54_high",
-}
+def _get_default_model_overrides() -> dict[str, str]:
+    """Read per-provider default model overrides from settings."""
+    from src.config import get_settings
+    settings = get_settings()
+    overrides = {}
+    if settings.default_model_claude:
+        overrides["claude"] = settings.default_model_claude
+    if settings.default_model_codex:
+        overrides["codex"] = settings.default_model_codex
+    return overrides
 
 
 MODEL_KEY_INDEX = {
@@ -156,8 +162,17 @@ def get_provider_profiles(provider: str) -> list[ModelProfile]:
 
 
 def get_default_model(provider: str) -> str:
-    """Return default model profile key for a provider."""
-    return DEFAULT_MODEL_BY_PROVIDER.get(provider, DEFAULT_MODEL_BY_PROVIDER[DEFAULT_PROVIDER])
+    """Return default model profile key for a provider.
+
+    Priority: env var override > first (highest) model in MODEL_PROFILES.
+    """
+    overrides = _get_default_model_overrides()
+    override = overrides.get(provider)
+    if override and override in MODEL_KEY_INDEX:
+        return override
+    # First profile = highest tier model
+    profiles = MODEL_PROFILES.get(provider, MODEL_PROFILES[DEFAULT_PROVIDER])
+    return profiles[0].key
 
 
 def get_profile(provider: str, model: str | None) -> ModelProfile:
