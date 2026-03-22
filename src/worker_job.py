@@ -29,6 +29,7 @@ async def _run(job_id: int) -> int:
     session_service = SessionService(
         repo=repo,
         session_timeout_hours=settings.session_timeout_hours,
+        session_purge_days=settings.session_purge_days,
     )
     ai_registry = build_default_registry(settings)
     job_service = JobService(

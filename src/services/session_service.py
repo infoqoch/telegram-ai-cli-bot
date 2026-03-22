@@ -27,9 +27,10 @@ class SessionService:
     - History management
     """
 
-    def __init__(self, repo: Repository, session_timeout_hours: int = 24):
+    def __init__(self, repo: Repository, session_timeout_hours: int = 24, session_purge_days: int = 7):
         self._repo = repo
         self._timeout_hours = session_timeout_hours
+        self._purge_days = session_purge_days
 
     def _is_expired(self, last_used: str) -> bool:
         """Check if session is expired."""
@@ -267,8 +268,8 @@ class SessionService:
         Returns:
             (recycled_count, purged_count)
         """
-        recycled = self._repo.recycle_stale_sessions(user_id, stale_hours=24)
-        purged = self._repo.purge_old_recycled_sessions(user_id, purge_days=7)
+        recycled = self._repo.recycle_stale_sessions(user_id, stale_hours=self._timeout_hours)
+        purged = self._repo.purge_old_recycled_sessions(user_id, purge_days=self._purge_days)
         return recycled, purged
 
     def list_recycled_sessions(

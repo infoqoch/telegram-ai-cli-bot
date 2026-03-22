@@ -39,6 +39,7 @@ def build_bot_runtime(settings) -> BotRuntime:
     session_service = SessionService(
         repo=repo,
         session_timeout_hours=settings.session_timeout_hours,
+        session_purge_days=settings.session_purge_days,
     )
     logger.trace("SessionService initialized")
 

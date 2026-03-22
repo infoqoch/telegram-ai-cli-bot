@@ -27,7 +27,8 @@ class Settings(BaseSettings):
 
     # AI
     ai_command: str = Field(default="claude", alias="AI_COMMAND", description="Claude CLI command")
-    session_timeout_hours: int = Field(default=24)
+    session_timeout_hours: int = Field(default=24, description="Hours before idle session is recycled")
+    session_purge_days: int = Field(default=7, description="Days before recycled session is deleted")
     default_model_claude: str = Field(default="", alias="DEFAULT_MODEL_CLAUDE", description="Default Claude model (opus/sonnet/haiku)")
     default_model_codex: str = Field(default="", alias="DEFAULT_MODEL_CODEX", description="Default Codex model")
     
