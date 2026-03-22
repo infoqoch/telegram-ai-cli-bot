@@ -16,5 +16,6 @@ paths:
 - `docs/DEVELOPMENT.md` owns deeper maintainer reference material and intentionally lives under `docs/`, not `.claude/`, so it is not always-loaded context.
 - `CLAUDE.md` is always-loaded guidance for Claude Code. Keep it compact and high signal.
 - `.claude/rules/*.md` are for path-scoped auto-loaded guidance only. Use them for focused editing rules, not for dumping general reference material.
+- This repo is UX-contract-driven. For meaningful user-visible flow changes, update the relevant spec before coding or in the same change.
 - If a UX change is user-visible, update the relevant spec document instead of relying on code/tests alone.
 - Prefer deleting stale detail over preserving duplicate documents that drift away from code.

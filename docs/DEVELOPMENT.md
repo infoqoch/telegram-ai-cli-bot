@@ -38,6 +38,14 @@ It is intentionally separate from the root `CLAUDE.md` so the always-loaded Clau
 - Therefore [`docs/SPEC.md`](./SPEC.md), [`docs/SPEC_PLUGINS_BUILTIN.md`](./SPEC_PLUGINS_BUILTIN.md), and [`docs/UI_EMOJI_SYSTEM.md`](./UI_EMOJI_SYSTEM.md) are allowed to stay long and specific.
 - The right optimization target is the always-loaded Claude context, not the UX contract docs.
 
+### Development Style: UX Contract First
+
+- This project is closer to spec-first development than code-first development.
+- For meaningful Telegram UI/UX changes, define or update the intended contract in `SPEC` before implementation, or in the same change at minimum.
+- The reason is practical: this product has many stateful flows, callback transitions, queue/restart edge cases, and compact mobile screens. Letting code invent those ad hoc is how drift starts.
+- Internal refactors can stay code-first when user-visible behavior is unchanged.
+- But if the user's experience changes, the spec is part of the change itself, not cleanup afterward.
+
 ### Update Rules
 
 - Change Telegram-visible behavior: update [`docs/SPEC.md`](./SPEC.md)
@@ -223,4 +231,5 @@ What to test first:
 - Do not mirror code line-for-line in docs.
 - Do not move detailed UI transcripts out of `SPEC` when they are serving as the intended UX contract.
 - Do keep giant UI transcripts out of `CLAUDE.md` and out of general maintainer guidance unless they are truly needed there.
+- Do not treat `SPEC` updates as optional polish after user-visible flow changes.
 - Do not duplicate the same rule across README, SPEC, DEVELOPMENT, and CLAUDE unless it truly belongs in all of them.
