@@ -545,7 +545,7 @@ Reference implementations: `plugins/builtin/todo/` (callbacks+ForceReply+schedul
 1. **Exclude patterns are required**: Natural language commands can conflict with AI questions
    - "What is memo?" → AI should answer, not the memo plugin
 2. **Safe loading**: If a plugin fails to load, the bot continues to operate (try-catch isolation)
-3. **Data storage**: `self.repository` (Repository instance, injected by PluginLoader)
+3. **Data storage**: The runtime injects a repository, but plugin source should use a bounded storage adapter via `build_storage(repository)` and `self.storage` rather than calling `self.repository` directly
 4. **Validate before deployment**: `python -m py_compile plugins/custom/my.py`
 5. **Scheduled response rules**: `execute_scheduled_action()` returns `str`, `dict`, or `None`.
    - `str` (non-empty): sent as plain text. Empty string `""` triggers a fallback message — avoid returning `""`.
@@ -557,8 +557,10 @@ Reference implementations: `plugins/builtin/todo/` (callbacks+ForceReply+schedul
 
 For a plugin to store new data:
 1. Return `CREATE TABLE IF NOT EXISTS` DDL from the plugin class's `get_schema()` method
-2. Add CRUD methods to `src/repository/repository.py`
-3. Call `self.repository.xxx()` from the plugin
+2. Implement a plugin-facing storage adapter (see `src/repository/adapters/plugin_storage.py` and built-in plugin examples)
+3. Return that adapter from `build_storage(repository)`
+4. Use `self.storage` from the plugin, ideally through a typed `store` property
+5. Do not call `self.repository.xxx()` directly from plugin source
 
 7. **Plugin-core isolation (CRITICAL)**: Plugins must not leak into core code. Adding a new plugin must NOT require modifying any core file (`src/` directory). Specifically:
    - Do not hardcode plugin names, callback prefixes, or labels in core handlers
