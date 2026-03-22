@@ -122,8 +122,8 @@ class ScheduleExecutionService:
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
         """Send a possibly long response with HTML fallback."""
-        header_html = f"📅 <b>{escape_html(schedule_name)}</b>\n\n"
-        header_plain = f"📅 {schedule_name}\n\n"
+        header_html = f"⏰ <b>{escape_html(schedule_name)}</b>\n\n"
+        header_plain = f"⏰ {schedule_name}\n\n"
         max_len = 4000
         chunks = [response[offset:offset + max_len] for offset in range(0, len(response), max_len)]
 
@@ -151,7 +151,7 @@ class ScheduleExecutionService:
         result: dict,
     ) -> None:
         """Send a plugin rich response (text + reply_markup) with schedule header."""
-        header = f"📅 <b>{escape_html(schedule_name)}</b>\n\n"
+        header = f"⏰ <b>{escape_html(schedule_name)}</b>\n\n"
         text = result.get("text", "")
         reply_markup = result.get("reply_markup")
 
@@ -165,7 +165,7 @@ class ScheduleExecutionService:
         except Exception:
             await self._bot.send_message(
                 chat_id=chat_id,
-                text=f"📅 {schedule_name}\n\n{text}",
+                text=f"⏰ {schedule_name}\n\n{text}",
                 reply_markup=reply_markup,
             )
 
