@@ -227,9 +227,13 @@ class AdminHandlers(BaseHandler):
         try:
             result = await plugin.open_launcher(chat_id)
             if result and result.response:
+                # Append menu back button like the menu launcher does
+                reply_markup = self._append_plugin_launcher_back(
+                    result.reply_markup, "menu:open"
+                )
                 await update.message.reply_text(
                     result.response,
-                    reply_markup=result.reply_markup,
+                    reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
             else:
