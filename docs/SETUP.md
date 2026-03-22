@@ -31,6 +31,7 @@ claude
 ```
 
 Claude reads the project's `CLAUDE.md` and can guide the full setup flow.
+That compact guide points Claude back to this document for the full operational details.
 
 #### Option B: Manual setup
 

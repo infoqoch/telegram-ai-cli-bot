@@ -455,7 +455,7 @@ Tasks that run automatically at a specified time. Three types: Chat (general con
 - Plugin schedules are independent of the AI provider.
 - Complex recurrence patterns are not created directly in the basic UI; instead, the `cron` value is updated later via AI/admin routes.
 
-**Add a Workspace schedule:** `+ Workspace` → select workspace → hour → minute → `Daily` or `One-time` → model → message → register.
+**Add a Workspace schedule:** `+ Workspace` → select workspace → hour → minute → `Daily` or `One-time` → model → message → registration complete.
 
 **Add a Plugin schedule:** `+ Plugin` → select plugin → select action → hour → minute → `Daily` or `One-time` → register. (No model/message required)
 

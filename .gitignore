@@ -27,6 +27,10 @@ bot.db
 *.swp
 *.swo
 
+# Claude Code local-only overrides
+CLAUDE.local.md
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

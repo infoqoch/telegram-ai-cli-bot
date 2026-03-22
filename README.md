@@ -47,9 +47,11 @@ This workflow is not just a pitch. The bot has been actively developed through T
 
 Todo, Memo, Diary, Calendar, and Weather ship by default.
 
-Treat them as both useful defaults and reference implementations for extension. Detailed behavior belongs in the plugin spec, not in this README:
+Treat them as both useful defaults and reference implementations for extension. Keep detailed UX in the plugin spec, and deeper implementation notes in the maintainer reference:
 
-- Built-in plugin spec: [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md)
+- Built-in plugin UX spec: [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md)
+- Maintainer reference: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+- Built-in implementations: [plugins/builtin](plugins/builtin)
 - Extension rules and plugin interfaces: [CLAUDE.md](CLAUDE.md)
 
 ---
@@ -89,12 +91,12 @@ For manual setup, runtime commands, security controls, and environment variables
 
 | Doc | Content |
 |-----|---------|
-| [docs/README.md](docs/README.md) | Documentation map and reading order |
-| [CLAUDE.md](CLAUDE.md) | Development rules, architecture contracts, extension interfaces |
+| [CLAUDE.md](CLAUDE.md) | Compact always-loaded Claude Code guidance |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Deep maintainer reference: runtime, plugins, MCP, sessions |
 | [docs/SETUP.md](docs/SETUP.md) | User-facing setup, runtime commands, security, and environment variables |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Runtime boundaries and code ownership |
-| [docs/SPEC.md](docs/SPEC.md) | UI/UX specification, session/schedule/restart scenarios |
-| [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md) | Builtin plugin UI/UX specifications |
+| [docs/SPEC.md](docs/SPEC.md) | Stable Telegram-visible behavior and UX rules |
+| [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md) | Detailed built-in plugin UI/UX specs |
+| [docs/UI_EMOJI_SYSTEM.md](docs/UI_EMOJI_SYSTEM.md) | Canonical emoji and label system for Telegram UI |
 
 ---
 
