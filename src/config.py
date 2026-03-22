@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     default_model_codex: str = Field(default="", alias="DEFAULT_MODEL_CODEX", description="Default Codex model")
     
     # Authentication
-    require_auth: bool = Field(default=True)
+    require_auth: bool = Field(default=False)
     auth_secret_key: str = Field(default="")
     auth_timeout_minutes: int = Field(default=30)
     

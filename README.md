@@ -2,6 +2,8 @@
 
 Control local AI coding agents (Claude Code, Codex CLI) from your phone via Telegram.
 
+Single-user, Telegram-first, and intentionally narrow: this is a remote control surface for your local coding agents, not a general-purpose personal assistant platform.
+
 ---
 
 ## Why This Project?
@@ -18,9 +20,23 @@ Control local AI coding agents (Claude Code, Codex CLI) from your phone via Tele
 
 ---
 
+## Best Fit
+
+- You already use Claude Code and/or Codex CLI locally.
+- You want to continue or monitor coding sessions from your phone.
+- You prefer a small local control plane over a broader hosted assistant product.
+
+## Non-Goals
+
+- Multi-user team collaboration
+- A voice-first or multi-channel personal assistant
+- A general consumer assistant with broad lifestyle integrations
+
+---
+
 ## Architecture
 
-The bot has three layers working in concert:
+The bot is a thin Telegram control plane over your existing local AI CLI setup:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -143,6 +159,8 @@ Five built-in plugins handle common tasks instantly without touching the AI:
 
 Each plugin also provides a "✨ AI Work" button for contextual AI assistance with full MCP data access.
 
+Direct plugin slash commands such as `/memo` or `/todo` open usage docs first. The interactive launcher lives under `/plugins` and the menu UI.
+
 **Adding custom plugins:** Drop a `plugin.py` into `plugins/custom/` — no core code changes required.
 
 ### Session Management
@@ -252,6 +270,14 @@ Bind a session to a local directory. The AI operates with that project's `CLAUDE
 | [CLAUDE.md](CLAUDE.md) | Development rules, architecture contracts, extension interfaces |
 | [docs/SPEC.md](docs/SPEC.md) | UI/UX specification, session/schedule/restart scenarios |
 | [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md) | Builtin plugin UI/UX specifications |
+
+---
+
+## Positioning
+
+If you want a broad personal-assistant platform with many channels, voice, and consumer integrations, this repository is probably too narrow.
+
+If you want a practical way to reuse your existing Claude Code / Codex CLI login, keep coding sessions on your own machine, and steer them from Telegram, that narrowness is the point.
 
 ---
 

@@ -51,11 +51,15 @@ def main() -> None:
     args = _parse_args()
     logger.info(f"Detached worker start - pid={os.getpid()}, job_id={args.job_id}")
 
+    run_coro = _run(args.job_id)
     try:
-        raise_code = asyncio.run(_run(args.job_id))
+        raise_code = asyncio.run(run_coro)
     except Exception:
         logger.exception(f"Detached worker crashed - job_id={args.job_id}")
         raise_code = 1
+    finally:
+        # Defensive close for mocked asyncio.run paths in tests.
+        run_coro.close()
 
     logger.info(f"Detached worker exit - pid={os.getpid()}, job_id={args.job_id}, code={raise_code}")
     sys.exit(raise_code)

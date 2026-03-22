@@ -91,9 +91,9 @@ class TestTodoPlugin:
         update, context = create_message_update("할일 보여줘")
 
         await handlers.handle_message(update, context)
+        await wait_for_handlers(handlers)
 
-        reply = await get_reply_text(update)
-        assert reply or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_todo_english_trigger(self, handlers, repository):

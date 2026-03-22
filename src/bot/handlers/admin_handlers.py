@@ -211,7 +211,7 @@ class AdminHandlers(BaseHandler):
     @authorized_only
     @authenticated_only
     async def plugin_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /{plugin_name} command - open plugin launcher."""
+        """Handle /{plugin_name} command - redirect to canonical plugin docs."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
 
@@ -224,23 +224,16 @@ class AdminHandlers(BaseHandler):
             clear_context()
             return
 
-        try:
-            result = await plugin.open_launcher(chat_id)
-            if result and result.response:
-                # Append menu back button like the menu launcher does
-                reply_markup = self._append_plugin_launcher_back(
-                    result.reply_markup, "menu:open"
-                )
-                await update.message.reply_text(
-                    result.response,
-                    reply_markup=reply_markup,
-                    parse_mode="HTML",
-                )
-            else:
-                await update.message.reply_text(plugin.usage, parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"Plugin open error ({plugin_name}): {e}", exc_info=True)
-            await update.message.reply_text(f"Error opening {plugin_name}.")
+        display_name = plugin.display_name or plugin.name.title()
+        await update.message.reply_text(
+            (
+                f"<b>{display_name}</b>\n\n"
+                f"Usage: <code>/help_{plugin.name}</code>\n"
+                f"Launcher: <code>/plugins</code>\n\n"
+                "Plugin slash commands open docs first so the interactive launcher stays discoverable."
+            ),
+            parse_mode="HTML",
+        )
 
         clear_context()
 
