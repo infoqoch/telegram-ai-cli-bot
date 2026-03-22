@@ -286,7 +286,7 @@ Current AI: Claude
 [Back]                              ← only shown when entered from `/menu -> Sessions`
 ```
 
-- Maximum 10 sessions shown
+- Maximum 30 sessions shown
 - Session names truncated to 10 characters on buttons
 - Claude and Codex sessions are shown together on one screen
 - Only the current session of the currently selected AI is highlighted with `●`

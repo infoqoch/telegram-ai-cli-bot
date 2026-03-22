@@ -26,6 +26,8 @@ A read-only monitoring feature for checking the real-time status of in-progress 
 |--------|-------------|
 | id | Queue item ID |
 | session_id | Target session ID |
+| user_id | User ID |
+| chat_id | Telegram chat ID |
 | message | Queued message content |
 | model | Model used |
 | created_at | Queue registration time |
@@ -54,6 +56,6 @@ A read-only monitoring feature for checking the real-time status of in-progress 
 Use the `query_db` tool when you need to query data. The `{chat_id}` placeholder is substituted automatically.
 
 - In-progress tasks: `query_db("SELECT * FROM message_log WHERE chat_id = {chat_id} AND processed = 1 ORDER BY request_at DESC LIMIT 10")`
-- Queued messages: `query_db("SELECT * FROM queued_messages WHERE chat_id = {chat_id}")`
+- Queued messages: `query_db("SELECT * FROM queued_messages WHERE chat_id = {chat_id} ORDER BY created_at ASC")`
 - Session lock status: `query_db("SELECT * FROM session_locks")`
 - Inspect table structure: `db_schema("message_log")`

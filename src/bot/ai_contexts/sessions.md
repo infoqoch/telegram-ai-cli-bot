@@ -29,6 +29,7 @@ The current active session is managed via this table, not the `sessions` table d
 | ai_provider | AI provider (claude / codex) |
 | current_session_id | Currently active session ID |
 | previous_session_id | Previous session ID |
+| updated_at | Last update time |
 
 ## Session Lifecycle
 

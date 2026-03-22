@@ -60,4 +60,6 @@ Use the `query_db` tool when you need to query or modify data. The `{chat_id}` p
 
 ### reload_schedules
 
+**Important:** After modifying schedule data via `query_db`, call `reload_schedules()` to apply changes to the running scheduler.
+
 After adding, modifying, or deleting schedules via `query_db`, you must call `reload_schedules()` for the changes to take effect in the runtime scheduler. Modifying the DB alone will not affect actual behavior until the bot is restarted.
