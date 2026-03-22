@@ -229,6 +229,54 @@ class SessionService:
             for s, count in rows
         ]
 
+    def apply_session_recycling(self, user_id: str) -> tuple[int, int]:
+        """Apply recycling rules: stale→recycled, old recycled→deleted.
+
+        Returns:
+            (recycled_count, purged_count)
+        """
+        recycled = self._repo.recycle_stale_sessions(user_id, stale_hours=24)
+        purged = self._repo.purge_old_recycled_sessions(user_id, purge_days=7)
+        return recycled, purged
+
+    def list_recycled_sessions(
+        self,
+        user_id: str,
+        limit: Optional[int] = None,
+    ) -> list[dict]:
+        """List recycled sessions across all providers."""
+        rows = self._repo.list_sessions_with_counts(
+            user_id,
+            ai_provider=None,
+            only_recycled=True,
+            limit=limit,
+        )
+        current_ids = {
+            provider: self._repo.get_current_session_id(user_id, provider)
+            for provider in SUPPORTED_PROVIDERS
+        }
+        return [
+            {
+                "id": s.id,
+                "full_session_id": s.id,
+                "session_id": s.id[:8],
+                "created_at": s.created_at,
+                "last_used": s.last_used,
+                "history_count": count,
+                "model": s.model,
+                "ai_provider": s.ai_provider,
+                "name": s.name,
+                "workspace_path": s.workspace_path,
+                "deleted": s.deleted,
+                "is_current": s.id == current_ids.get(s.ai_provider),
+            }
+            for s, count in rows
+        ]
+
+    def unrecycle_session(self, session_id: str) -> bool:
+        """Restore a recycled session back to active."""
+        return self._repo.unrecycle_session(session_id)
+
     def get_session_info(self, session_id: str) -> str:
         """Get formatted session info."""
         if not session_id:

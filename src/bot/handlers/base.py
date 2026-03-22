@@ -192,8 +192,11 @@ class BaseHandler:
         launcher_context: Optional[str] = None,
     ) -> tuple[str, list[list[InlineKeyboardButton]]]:
         """Build the mixed-provider `/sl` view."""
+        # Apply recycling rules on every list view
+        self.sessions.apply_session_recycling(user_id)
+
         provider = self._get_selected_ai_provider(user_id)
-        sessions = self.sessions.list_sessions_for_all_providers(user_id, limit=10)
+        sessions = self.sessions.list_sessions_for_all_providers(user_id, limit=30)
         selected_current_id = self.sessions.get_current_session_id(user_id, provider)
 
         header = f"{prefix}<b>Session List</b>"
@@ -235,15 +238,20 @@ class BaseHandler:
                     InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sess:delete:{sid}"),
                 ])
 
+        recycled_sessions = self.sessions.list_recycled_sessions(user_id, limit=1)
+        recycle_btn = []
+        if recycled_sessions:
+            recycle_btn = [InlineKeyboardButton("🗂 Recycled", callback_data="sess:recycled")]
+
         if len(sessions) >= 2:
             buttons.append([
                 InlineKeyboardButton(BUTTON_IMPORT_LOCAL, callback_data="sess:import"),
                 InlineKeyboardButton(BUTTON_MULTI_DELETE, callback_data="sess:multi"),
-            ])
+            ] + recycle_btn)
         else:
             buttons.append([
                 InlineKeyboardButton(BUTTON_IMPORT_LOCAL, callback_data="sess:import"),
-            ])
+            ] + recycle_btn)
 
         if launcher_context == "menu":
             buttons.append([

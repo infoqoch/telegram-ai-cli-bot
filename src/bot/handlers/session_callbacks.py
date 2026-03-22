@@ -180,6 +180,13 @@ class SessionCallbackHandlers(BaseHandler):
             elif action == "list":
                 await self._handle_session_list_callback(query, chat_id)
 
+            elif action == "recycled":
+                await self._handle_recycled_list_callback(query, chat_id)
+
+            elif action == "restore":
+                session_id = parts[2] if len(parts) > 2 else ""
+                await self._handle_restore_session_callback(query, chat_id, session_id)
+
             elif action == "import":
                 try:
                     offset = int(parts[2]) if len(parts) > 2 else 0
@@ -601,6 +608,66 @@ class SessionCallbackHandlers(BaseHandler):
         if path.startswith(home):
             return "~" + path[len(home):]
         return path
+
+    async def _handle_recycled_list_callback(self, query, chat_id: int) -> None:
+        """Show recycled sessions."""
+        user_id = str(chat_id)
+        sessions = self.sessions.list_recycled_sessions(user_id, limit=30)
+
+        if not sessions:
+            await query.edit_message_text(
+                text="🗂 <b>Recycled Sessions</b>\n\nNo recycled sessions.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("◀ Back", callback_data="sess:list")],
+                ]),
+                parse_mode="HTML",
+            )
+            return
+
+        provider = self._get_selected_ai_provider(user_id)
+        lines = ["🗂 <b>Recycled Sessions</b>", ""]
+        buttons: list[list[InlineKeyboardButton]] = []
+
+        for session in sessions:
+            sid = session["full_session_id"]
+            name = session.get("name") or f"Session {session['session_id']}"
+            session_provider = session.get("ai_provider", provider)
+            provider_icon = self._get_provider_icon(session_provider)
+            model_badge = get_model_badge(session.get("model", ""))
+
+            lines.append(
+                f"{provider_icon} {model_badge} "
+                f"{escape_html(name)}"
+            )
+
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{provider_icon} {name[:15]}",
+                    callback_data=f"sess:restore:{sid}",
+                ),
+                InlineKeyboardButton(BUTTON_HISTORY, callback_data=f"sess:history:{sid}"),
+                InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sess:delete:{sid}"),
+            ])
+
+        buttons.append([
+            InlineKeyboardButton("◀ Back", callback_data="sess:list"),
+        ])
+
+        await query.edit_message_text(
+            text="\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+
+    async def _handle_restore_session_callback(self, query, chat_id: int, session_id: str) -> None:
+        """Restore a recycled session back to active."""
+        user_id = str(chat_id)
+        success = self.sessions.unrecycle_session(session_id)
+
+        if success:
+            await self._handle_session_list_callback(query, chat_id, prefix="✅ Session restored\n\n")
+        else:
+            await query.answer("Failed to restore session.", show_alert=True)
 
     async def _handle_import_local_list_callback(self, query, chat_id: int, offset: int = 0) -> None:
         """Show recent provider-native sessions discovered on the local machine."""

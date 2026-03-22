@@ -73,6 +73,7 @@ class SessionData:
     created_at: str
     last_used: str
     deleted: bool
+    recycled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -491,7 +492,8 @@ class Repository:
             workspace_path=row["workspace_path"],
             created_at=row["created_at"],
             last_used=row["last_used"],
-            deleted=bool(row["deleted"])
+            deleted=bool(row["deleted"]),
+            recycled=bool(row["recycled"]),
         )
 
     def get_session_model(self, session_id: str) -> Optional[str]:
@@ -633,7 +635,8 @@ class Repository:
                 workspace_path=row["workspace_path"],
                 created_at=row["created_at"],
                 last_used=row["last_used"],
-                deleted=bool(row["deleted"])
+                deleted=bool(row["deleted"]),
+                recycled=bool(row["recycled"]),
             )
             for row in cursor.fetchall()
         ]
@@ -745,6 +748,8 @@ class Repository:
         user_id: str,
         ai_provider: Optional[str] = None,
         include_deleted: bool = False,
+        include_recycled: bool = False,
+        only_recycled: bool = False,
         limit: Optional[int] = None,
     ) -> list[tuple[SessionData, int]]:
         """List sessions with history counts in a single query."""
@@ -755,6 +760,10 @@ class Repository:
             params.append(ai_provider)
         if not include_deleted:
             conditions.append("s.deleted = 0")
+        if only_recycled:
+            conditions.append("s.recycled = 1")
+        elif not include_recycled:
+            conditions.append("s.recycled = 0")
         where = " AND ".join(conditions)
         query = f"""
             SELECT s.*, COALESCE(h.cnt, 0) AS history_count
@@ -784,11 +793,49 @@ class Repository:
                     created_at=row["created_at"],
                     last_used=row["last_used"],
                     deleted=bool(row["deleted"]),
+                    recycled=bool(row["recycled"]),
                 ),
                 row["history_count"],
             )
             for row in rows
         ]
+
+    def recycle_stale_sessions(self, user_id: str, stale_hours: int = 24) -> int:
+        """Mark sessions as recycled if inactive for more than stale_hours."""
+        cursor = self._conn.execute(
+            """
+            UPDATE sessions
+            SET recycled = 1
+            WHERE user_id = ? AND deleted = 0 AND recycled = 0
+              AND last_used < datetime('now', ? || ' hours')
+            """,
+            (user_id, f"-{stale_hours}"),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def purge_old_recycled_sessions(self, user_id: str, purge_days: int = 7) -> int:
+        """Soft-delete recycled sessions older than purge_days."""
+        cursor = self._conn.execute(
+            """
+            UPDATE sessions
+            SET deleted = 1
+            WHERE user_id = ? AND recycled = 1 AND deleted = 0
+              AND last_used < datetime('now', ? || ' days')
+            """,
+            (user_id, f"-{purge_days}"),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def unrecycle_session(self, session_id: str) -> bool:
+        """Restore a recycled session back to active."""
+        cursor = self._conn.execute(
+            "UPDATE sessions SET recycled = 0 WHERE id = ? AND recycled = 1",
+            (session_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def get_session_by_id_prefix(self, user_id: str, prefix: str) -> Optional[tuple[SessionData, int]]:
         """Find a session by ID prefix with server-side filtering."""
@@ -820,6 +867,7 @@ class Repository:
                     created_at=row["created_at"],
                     last_used=row["last_used"],
                     deleted=bool(row["deleted"]),
+                    recycled=bool(row["recycled"]),
                 ),
                 row["history_count"],
             )
@@ -864,6 +912,7 @@ class Repository:
                 created_at=row["created_at"],
                 last_used=row["last_used"],
                 deleted=bool(row["deleted"]),
+                recycled=bool(row["recycled"]),
             ),
             row["history_count"],
         )

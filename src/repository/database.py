@@ -97,6 +97,7 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
     if _table_exists(conn, "sessions"):
         _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
         _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
+        _ensure_column(conn, "sessions", "recycled", "INTEGER NOT NULL DEFAULT 0")
     if _table_exists(conn, "schedules"):
         _ensure_column(conn, "schedules", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
         _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_used TEXT NOT NULL DEFAULT (datetime('now')),
     deleted INTEGER NOT NULL DEFAULT 0,
+    recycled INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -34,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_ai_provider ON sessions(ai_provider);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_used ON sessions(last_used DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_deleted ON sessions(deleted);
+CREATE INDEX IF NOT EXISTS idx_sessions_recycled ON sessions(recycled);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_workspace_unique
     ON sessions(user_id, ai_provider, workspace_path) WHERE workspace_path IS NOT NULL AND deleted = 0;
 
