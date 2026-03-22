@@ -116,6 +116,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "users", "selected_ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
     _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
     _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
+    _ensure_column(conn, "sessions", "recycled", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "schedules", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
     _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
     _ensure_column(conn, "schedules", "cron_expr", "TEXT")

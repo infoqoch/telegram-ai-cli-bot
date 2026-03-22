@@ -1,6 +1,5 @@
 """Todo plugin - Repository-based todo management."""
 
-import re
 from datetime import date, timedelta
 from typing import cast
 

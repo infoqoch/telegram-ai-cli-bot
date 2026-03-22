@@ -1,6 +1,5 @@
 """Memo plugin - button-based single entry point."""
 
-import re
 from typing import Optional, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply

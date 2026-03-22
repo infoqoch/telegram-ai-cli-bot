@@ -808,8 +808,12 @@ class Repository:
             SET recycled = 1
             WHERE user_id = ? AND deleted = 0 AND recycled = 0
               AND last_used < datetime('now', ? || ' hours')
+              AND id NOT IN (
+                SELECT current_session_id FROM user_provider_state
+                WHERE user_id = ? AND current_session_id IS NOT NULL
+              )
             """,
-            (user_id, f"-{stale_hours}"),
+            (user_id, f"-{stale_hours}", user_id),
         )
         self._conn.commit()
         return cursor.rowcount

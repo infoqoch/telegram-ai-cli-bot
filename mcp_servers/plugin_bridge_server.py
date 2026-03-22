@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import re
 import sqlite3
 import sys
 import os
@@ -18,6 +19,8 @@ load_dotenv(_PROJECT_ROOT / ".env")
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("bot-plugins")
+
+_SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 _TYPE_MAP = {
     "string": str,
@@ -62,6 +65,9 @@ def query_db(sql: str) -> str:
     if normalized.startswith("DROP") or normalized.startswith("ALTER"):
         return "ERROR: DROP/ALTER는 허용되지 않습니다."
 
+    if ";" in sql.strip().rstrip(";"):
+        return "ERROR: Multi-statement SQL is not allowed."
+
     # Replace {chat_id} placeholder
     chat_id = _get_chat_id()
     resolved_sql = sql.replace("{chat_id}", chat_id)
@@ -95,6 +101,9 @@ def query_db(sql: str) -> str:
 )
 def db_schema(table_name: str = "") -> str:
     """Show database schema information."""
+    if table_name and not _SAFE_IDENTIFIER.match(table_name):
+        return f"ERROR: Invalid table name '{table_name}'"
+
     conn = _get_db()
 
     if table_name:

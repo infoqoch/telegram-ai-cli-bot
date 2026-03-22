@@ -69,7 +69,7 @@ class WeatherPlugin(Plugin):
         "<b>날씨 확인</b>\n"
         "• <code>날씨</code> - 도시 선택 후 날씨 확인\n\n"
         "<b>위치 설정</b>\n"
-        "• <code>위치 설정: 서울</code>"
+        "• 날씨 화면의 버튼으로 도시를 선택하세요"
     )
 
     CALLBACK_PREFIX = "weather:"

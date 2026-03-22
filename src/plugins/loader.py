@@ -615,27 +615,6 @@ class PluginLoader:
         logger.trace("no plugin match - passing to Claude")
         return None
 
-    def match_plugin_keyword(self, message: str) -> "tuple[Plugin, str] | None":
-        """Match a plugin keyword with additional content.
-
-        Returns (plugin, user_query) if message starts with a keyword followed by text.
-        Returns None if no match or exact keyword match (handled by can_handle).
-        """
-        msg = message.strip().lower()
-        for plugin in self.plugins:
-            for keyword in plugin.TRIGGER_KEYWORDS:
-                if msg.startswith(keyword + " ") and len(msg) > len(keyword) + 1:
-                    # Check exclude patterns first
-                    excluded = False
-                    for pattern in plugin.EXCLUDE_PATTERNS:
-                        if re.search(pattern, msg, re.IGNORECASE):
-                            excluded = True
-                            break
-                    if not excluded:
-                        user_query = message.strip()[len(keyword):].strip()
-                        return plugin, user_query
-        return None
-
     def get_plugin_list(self) -> list[dict]:
         """로드된 플러그인 목록 반환."""
         logger.trace("get_plugin_list()")
@@ -736,7 +715,7 @@ class PluginLoader:
                 # Check exclude patterns - if matched, pass to AI without context
                 exclude_patterns = getattr(plugin, "EXCLUDE_PATTERNS", [])
                 excluded = any(
-                    re.search(pattern, user_query)
+                    re.search(pattern, user_query, re.IGNORECASE)
                     for pattern in exclude_patterns
                 )
                 if excluded:

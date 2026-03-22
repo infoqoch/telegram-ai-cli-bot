@@ -199,6 +199,7 @@ src/
 ├── time_utils.py              # Timezone configuration
 ├── ui_emoji.py                # UI emoji constants
 ├── runtime_exit_codes.py      # Process exit code constants
+├── runtime_paths.py               # Runtime filesystem paths
 ├── logging_config.py          # Logging configuration
 │
 ├── ai/
@@ -217,6 +218,7 @@ src/
 │   │   ├── session_handlers.py   # Session commands (/new, /sl, /session, etc.)
 │   │   ├── message_handlers.py   # Message processing + AI dispatch
 │   │   ├── workspace_handlers.py # Workspace commands/callbacks
+│   │   ├── ai_work_handlers.py       # AI Work contextual assistance (✨ AI와 작업하기)
 │   │   └── admin_handlers.py     # Admin commands (/tasks, /scheduler, etc.)
 │   ├── command_catalog.py     # Shared command metadata (CommandSpec)
 │   ├── middleware.py           # Authentication/authorization decorators
@@ -224,6 +226,10 @@ src/
 │   ├── runtime/               # Runtime components
 │   │   ├── detached_job_manager.py  # Detached worker lifecycle management
 │   │   └── pending_request_store.py # Pending request DB persistence
+│   ├── ai_contexts/               # Core domain AI context markdown files
+│   │   ├── scheduler.md
+│   │   ├── workspace.md
+│   │   └── tasks.md
 │   ├── constants.py           # UI constants (emoji, limits)
 │   └── prompts/               # System prompts
 │
@@ -290,6 +296,7 @@ src/
 | `GOOGLE_CALENDAR_ID` | `primary` | Google Calendar ID (e.g., `user@gmail.com`) |
 | `BOT_DATA_DIR` | `.data/` | Runtime files root (locks, pid, symlink logs) |
 | `BOT_LOG_DIR` | `.data/logs/` | Runtime log directory |
+| `BOT_MAIN_MENU_PLUGINS` | (none) | Comma-separated plugin names promoted to main menu (overrides default) |
 
 ## Process Management (CRITICAL)
 
@@ -430,6 +437,12 @@ plugins/
 │   │   ├── __init__.py
 │   │   ├── plugin.py
 │   │   └── ai_context.md  # AI context document
+│   ├── calendar/
+│   │   ├── __init__.py
+│   │   ├── plugin.py      # Calendar CRUD, callbacks, MCP tools, schedule
+│   │   ├── google_client.py # Google Calendar API wrapper
+│   │   ├── ui.py          # Calendar grid and navigation UI
+│   │   └── ai_context.md  # AI context document
 │   └── diary/
 │       ├── __init__.py
 │       ├── plugin.py      # Diary CRUD, callbacks, ForceReply, schedule
@@ -525,10 +538,10 @@ For a plugin to use inline buttons:
 | `ai:` | AI provider selection | `callback_handlers.py` |
 | `resp:` | AI response follow-up buttons | `callback_handlers.py` → `session_callbacks.py` |
 | `plug:` | Plugin hub navigation | `callback_handlers.py` |
-| `td:` | Todo plugin | `callback_handlers.py` |
-| `memo:` | Memo plugin | `callback_handlers.py` |
-| `weather:` | Weather plugin | `callback_handlers.py` |
-| `diary:` | Diary plugin | `callback_handlers.py` |
+| `td:` | Todo plugin | Plugin auto-routing |
+| `memo:` | Memo plugin | Plugin auto-routing |
+| `weather:` | Weather plugin | Plugin auto-routing |
+| `diary:` | Diary plugin | Plugin auto-routing |
 | `sess:` | Session management | `callback_handlers.py` |
 | `sched:` | Scheduler | `callback_handlers.py` |
 | `ws:` | Workspace | `callback_handlers.py` |
@@ -742,7 +755,7 @@ The Telegram Bot API only allows **alphanumeric characters (a-z, 0-9) and unders
 | Non-ASCII command | `/할일` | Telegram does not recognize it as a command |
 | Korean natural language | `할일`, `메모` | Plugin `can_handle()` pattern matching |
 
-**Conclusion:** Korean triggers must be handled via the plugin's natural language patterns (`TRIGGER_KEYWORDS`, `PATTERNS`). Do not register them as `/` commands.
+**Conclusion:** Korean triggers must be handled via the plugin's `TRIGGER_KEYWORDS`. Do not register them as `/` commands.
 
 ### Underscore (_) Rules (CRITICAL)
 
