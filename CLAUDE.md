@@ -600,7 +600,7 @@ Every sub-menu (one level deep from the main menu) provides a "✨ AI와 작업�
 
 ### MCP Tool Integration (Plugin ↔ AI Agent)
 
-When AI Work needs to invoke bot-side functionality (e.g., querying a calendar for a custom date range), the bot exposes plugin capabilities as MCP tools that Claude CLI can call autonomously.
+The bot exposes data access capabilities as MCP tools that Claude CLI can call autonomously. MCP tools are available for all AI conversations, not just AI Work. Dynamic context (`get_ai_dynamic_context()`) is deprecated — all live data access goes through MCP.
 
 **Architecture:**
 
@@ -655,14 +655,25 @@ class Plugin(ABC):
 | SQLite read (memos, todos) | Yes | Same DB file accessed from separate process |
 | SQLite write | Caution | Concurrent writes may cause SQLite locking |
 | Bot in-memory state | No | Separate process — no access to session locks, caches, etc. |
-| Claude only | Yes | Codex does not support MCP — falls back to `get_ai_dynamic_context()` |
+| Claude only | Yes | Codex does not support MCP |
+
+**Built-in MCP Tools:**
+
+| Tool | Purpose |
+|------|---------|
+| `query_db(sql)` | Read-only SQL against bot SQLite. Use `{chat_id}` placeholder for auto-replacement with `ADMIN_CHAT_ID`. SELECT only. |
+| `db_schema(table_name?)` | List all tables, or show columns for a specific table |
+| `calendar_list_events(start_date, end_date)` | Google Calendar event query (plugin ToolSpec) |
+| `calendar_create_event(summary, start, all_day?)` | Google Calendar event creation (plugin ToolSpec) |
+
+`query_db` and `db_schema` cover all DB-backed features (todo, memo, diary, sessions, schedules, workspaces) without needing per-plugin MCP tools.
 
 **File Structure:**
 
 ```
 mcp_servers/
 ├── plugin_mcp.json              # MCP config (read by Claude CLI)
-└── plugin_bridge_server.py      # Bridge server (plugins → MCP tools)
+└── plugin_bridge_server.py      # Bridge server (DB tools + plugin ToolSpecs)
 ```
 
 **Activation:** Auto-enabled when `mcp_servers/plugin_mcp.json` exists. No flag or config needed — file presence is the switch.
@@ -671,6 +682,7 @@ mcp_servers/
 1. Implement `get_tool_specs()` returning `list[ToolSpec]`
 2. Each `ToolSpec.handler` should use existing plugin internals (e.g., `self._gcal.list_events()`)
 3. No changes to `plugin_bridge_server.py` — tools are auto-registered
+4. For DB-only queries, `query_db` is sufficient — no plugin ToolSpec needed
 
 ## Message Processing Flow
 
