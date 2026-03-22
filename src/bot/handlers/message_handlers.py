@@ -18,6 +18,27 @@ from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
 
+# Core feature keyword → handler method name mapping
+_CORE_KEYWORDS: dict[str, str] = {
+    "session": "session_list_command",
+    "세션": "session_list_command",
+    "scheduler": "scheduler_command",
+    "스케줄": "scheduler_command",
+    "workspace": "workspace_command",
+    "워크스페이스": "workspace_command",
+}
+
+# Core feature keyword → AI context domain mapping (for keyword+content)
+_CORE_KEYWORD_DOMAINS: dict[str, str] = {
+    "session": "sessions",
+    "세션": "sessions",
+    "scheduler": "scheduler",
+    "스케줄": "scheduler",
+    "workspace": "workspace",
+    "워크스페이스": "workspace",
+}
+
+
 class MessageHandlers(BaseHandler):
     """Message processing handlers."""
 
@@ -177,6 +198,31 @@ class MessageHandlers(BaseHandler):
                 logger.error(f"[PLUGIN] Error: {e}", exc_info=True)
         else:
             logger.debug("[PLUGIN] No plugin loader")
+
+        # Core feature keyword matching (exact or keyword+content)
+        msg_lower = message.strip().lower()
+        for keyword, handler_name in _CORE_KEYWORDS.items():
+            if msg_lower == keyword:
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    logger.info(f"[CORE] Keyword match: '{keyword}' → {handler_name}")
+                    await handler(update, context)
+                    return
+            elif msg_lower.startswith(keyword + " ") and len(msg_lower) > len(keyword) + 1:
+                domain = _CORE_KEYWORD_DOMAINS.get(keyword)
+                if domain:
+                    user_query = message.strip()[len(keyword):].strip()
+                    static_context = self._load_core_context(domain)
+                    augmented = (
+                        f"[Context - {domain.capitalize()}]\n"
+                        f"{static_context}\n\n"
+                        f"Based on the above context, answer the following request:\n"
+                        f"{user_query}"
+                    )
+                    logger.info(f"[CORE] Keyword+content: '{keyword}' → AI with {domain} context")
+                    await self._dispatch_to_ai(update, chat_id, user_id, augmented)
+                    clear_context()
+                    return
 
         # Keyword + content → AI with plugin context
         # e.g. "할일 오늘 뭐 해야돼?" → AI gets plugin context + "오늘 뭐 해야돼?"

@@ -789,6 +789,16 @@ No special command needed — just type `{keyword} {your request}` and AI handle
 | Calendar | `/calendar` | `캘린더`, `일정`, `달력` | `calendar`, `cal` |
 | Weather | `/weather` | `날씨`, `기온` | `weather` |
 
+**Core Feature Keywords (hardcoded in message_handlers.py):**
+
+| Feature | `/command` | Korean Keywords | English Keywords |
+|---------|-----------|-----------------|------------------|
+| Sessions | `/sl` | `세션` | `session` |
+| Scheduler | `/scheduler` | `스케줄` | `scheduler` |
+| Workspace | `/workspace` | `워크스페이스` | `workspace` |
+
+Same routing rules apply: exact keyword → open UI, keyword + content → AI with domain context.
+
 ## Telegram Command Rules
 
 ### Non-ASCII Command Limitation
