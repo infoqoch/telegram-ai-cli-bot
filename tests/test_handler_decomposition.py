@@ -366,12 +366,12 @@ class TestSessionCallbackMultiStep:
         handlers.sessions.rename_session.assert_called_with("abc12345-full", "NewName")
 
     @pytest.mark.asyncio
-    async def test_delete_flow_prevents_current_session(self, handlers):
-        """현재 세션 삭제 방지."""
+    async def test_delete_flow_allows_current_session(self, handlers):
+        """현재 세션도 삭제 확인 표시."""
         q = make_query()
         await handlers._handle_delete_session_confirm(q, 12345, "abc12345-full")
         text = get_text(q)
-        assert "Cannot Delete" in text
+        assert "Delete Session Confirmation" in text or "Are you sure" in text
 
     @pytest.mark.asyncio
     async def test_delete_flow_allows_non_current(self, handlers):

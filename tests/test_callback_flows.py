@@ -809,8 +809,8 @@ class TestSessionCallbackFlows:
         assert query.edit_message_text.called or handlers.sessions.delete_session.called
 
     @pytest.mark.asyncio
-    async def test_sess_delete_blocks_current_session_for_its_provider(self, handlers):
-        """selected AI가 달라도 해당 provider의 current session은 삭제 금지."""
+    async def test_sess_delete_allows_current_session_for_its_provider(self, handlers):
+        """selected AI가 달라도 해당 provider의 current session도 삭제 가능."""
         handlers.sessions.get_current_session_id.side_effect = (
             lambda user_id, provider=None: "def67890-full" if provider == "codex" else "abc12345-full"
         )
@@ -818,7 +818,8 @@ class TestSessionCallbackFlows:
         query = make_query()
         await handlers._handle_session_callback(query, 12345, "sess:delete:def67890")
 
-        assert "Cannot Delete" in get_text(query)
+        text = get_text(query)
+        assert "Delete Session Confirmation" in text or "Are you sure" in text
 
     @pytest.mark.asyncio
     async def test_sess_import_lists_recent_local_sessions(self, handlers):
@@ -909,13 +910,14 @@ class TestSessionCallbackFlows:
         assert "already attached" in get_text(query)
 
     @pytest.mark.asyncio
-    async def test_sess_multi_delete_blocks_current_session_selection(self, handlers):
-        """current session은 멀티 삭제 대상에 넣을 수 없다."""
+    async def test_sess_multi_delete_allows_current_session_selection(self, handlers):
+        """current session도 멀티 삭제 대상에 넣을 수 있다."""
         query = make_query()
         await handlers._handle_session_callback(query, 12345, "sess:multi_toggle:abc12345-full")
 
         query.answer.assert_called()
-        assert "Current session cannot be deleted" in query.answer.call_args[0][0]
+        answer_text = query.answer.call_args[0][0]
+        assert "selected" in answer_text
 
     @pytest.mark.asyncio
     async def test_sess_multi_delete_executes_for_selected_sessions(self, handlers):

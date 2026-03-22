@@ -801,19 +801,19 @@ class Repository:
         ]
 
     def recycle_stale_sessions(self, user_id: str, stale_hours: int = 24) -> int:
-        """Mark sessions as recycled if inactive for more than stale_hours."""
+        """Mark sessions as recycled if inactive for more than stale_hours.
+
+        Includes current session — if inactive for 24h+, it should be recycled too.
+        A new session will be created automatically when the user sends a message.
+        """
         cursor = self._conn.execute(
             """
             UPDATE sessions
             SET recycled = 1
             WHERE user_id = ? AND deleted = 0 AND recycled = 0
               AND last_used < datetime('now', ? || ' hours')
-              AND id NOT IN (
-                SELECT current_session_id FROM user_provider_state
-                WHERE user_id = ? AND current_session_id IS NOT NULL
-              )
             """,
-            (user_id, f"-{stale_hours}", user_id),
+            (user_id, f"-{stale_hours}"),
         )
         self._conn.commit()
         return cursor.rowcount

@@ -668,18 +668,6 @@ class SessionHandlers(BaseHandler):
         full_session_id = target_info["full_session_id"]
         session_name = target_info.get("name", "")
 
-        current_session_id = self.sessions.get_current_session_id(user_id)
-        if current_session_id == full_session_id:
-            name_info = f" ({session_name})" if session_name else ""
-            await update.message.reply_text(
-                f"❌ Cannot delete the current session.\n\n"
-                f"- ID: <code>{target_info['session_id']}</code>{name_info}\n\n"
-                f"Switch to another session or create a new one first.",
-                parse_mode="HTML"
-            )
-            clear_context()
-            return
-
         if self.sessions.delete_session(user_id, full_session_id):
             name_info = f" ({session_name})" if session_name else ""
             await update.message.reply_text(

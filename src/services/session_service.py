@@ -9,6 +9,13 @@ from src.logging_config import logger
 from src.repository import Repository
 from src.ui_emoji import ENTITY_AI, ENTITY_SESSION_CURRENT, ENTITY_WORKSPACE, ENTITY_WORKSPACE_INACTIVE
 
+_RANDOM_NAMES = [
+    "돌돌이", "덜덜이", "돌쇠", "뭉치", "뽀삐", "콩이", "몽실이", "두부", "꼬미", "보리",
+    "초코", "모찌", "호떡", "구름이", "별이", "달이", "해피", "럭키", "토리", "나비",
+    "도토리", "밤톨이", "솜이", "풍이", "도담이", "하늘이", "바람이", "새별이", "온이", "한이",
+    "누리", "다솜이", "아름이", "미르", "가온이", "라온이", "이슬이", "나래", "다온이", "하루",
+]
+
 
 class SessionService:
     """Session management service.
@@ -36,6 +43,29 @@ class SessionService:
             return (now - last_used_dt) > timedelta(hours=self._timeout_hours)
         except (ValueError, TypeError):
             return False
+
+    def _generate_session_name(self, user_id: str, ai_provider: str) -> str:
+        """Generate a unique random Korean nickname for a session."""
+        import random
+        from src.ui_emoji import PROVIDER_ICON_CLAUDE, PROVIDER_ICON_CODEX
+
+        provider_icon = PROVIDER_ICON_CLAUDE if ai_provider == "claude" else PROVIDER_ICON_CODEX
+
+        existing_names = {
+            s.name for s in self._repo.list_sessions(user_id)
+            if s.name and not s.deleted and not s.recycled
+        }
+
+        available = [n for n in _RANDOM_NAMES if f"{n}{provider_icon}" not in existing_names]
+        if not available:
+            base = random.choice(_RANDOM_NAMES)
+            for i in range(2, 100):
+                candidate = f"{base}{i}"
+                if f"{candidate}{provider_icon}" not in existing_names:
+                    return f"{candidate}{provider_icon}"
+            return f"{base}{random.randint(100, 999)}{provider_icon}"
+
+        return f"{random.choice(available)}{provider_icon}"
 
     def get_current_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
         """Get current session ID with expiration check."""
@@ -82,6 +112,8 @@ class SessionService:
         provider = ai_provider or self.get_selected_ai_provider(user_id) or DEFAULT_PROVIDER
         session_id = session_id or uuid4().hex
         model = normalize_model(provider, model or get_default_model(provider))
+        if not name:
+            name = self._generate_session_name(user_id, provider)
         self._repo.create_session(
             user_id=user_id,
             session_id=session_id,

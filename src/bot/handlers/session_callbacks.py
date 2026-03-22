@@ -507,17 +507,6 @@ class SessionCallbackHandlers(BaseHandler):
         name = session.get("name") or f"Session {short_id}"
         provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
 
-        if self._is_current_provider_session(user_id, full_session_id, provider):
-            keyboard = [[InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")]]
-            await query.edit_message_text(
-                text=f"<b>Cannot Delete</b>\n\n"
-                     f"<b>{escape_html(name)}</b> is currently in use.\n\n"
-                     f"Switch to another session before deleting.",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="HTML"
-            )
-            return
-
         keyboard = [
             [
                 InlineKeyboardButton(BUTTON_DELETE, callback_data=f"sess:confirm_del:{full_session_id}"),
@@ -545,18 +534,6 @@ class SessionCallbackHandlers(BaseHandler):
         full_session_id = session.get("full_session_id", session_id)
         short_id = full_session_id[:8]
         name = session.get("name") or f"Session {short_id}"
-        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
-
-        if self._is_current_provider_session(user_id, full_session_id, provider):
-            keyboard = [[InlineKeyboardButton(BUTTON_BACK, callback_data="sess:list")]]
-            await query.edit_message_text(
-                text=f"<b>Cannot Delete</b>\n\n"
-                     f"<b>{escape_html(name)}</b> is currently in use.\n\n"
-                     f"Switch to another session before deleting.",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="HTML"
-            )
-            return
 
         self.sessions.delete_session(user_id, full_session_id)
 
@@ -868,12 +845,6 @@ class SessionCallbackHandlers(BaseHandler):
             await query.answer("Session not found")
             return
 
-        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
-        if self._is_current_provider_session(user_id, full_session_id, provider):
-            await query.answer("Current session cannot be deleted")
-            await self._handle_multi_delete_list_callback(query, chat_id)
-            return
-
         selected = self._get_multi_delete_selection(user_id)
         if full_session_id in selected:
             selected.discard(full_session_id)
@@ -893,15 +864,11 @@ class SessionCallbackHandlers(BaseHandler):
             return
 
         deletable: list[tuple[str, str, str]] = []
-        skipped = 0
         for full_session_id in selected:
             session = self.sessions.get_session(full_session_id)
             if not session:
                 continue
             provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
-            if self._is_current_provider_session(user_id, full_session_id, provider):
-                skipped += 1
-                continue
             name = session.get("name") or f"Session {full_session_id[:8]}"
             deletable.append((full_session_id, provider, name))
 
@@ -918,8 +885,6 @@ class SessionCallbackHandlers(BaseHandler):
         lines = [f"<b>Delete {len(deletable)} Sessions?</b>", ""]
         for _, provider, name in deletable:
             lines.append(f"• {self._get_provider_icon(provider)} {escape_html(name)}")
-        if skipped:
-            lines.extend(["", f"{skipped} current session(s) will be skipped."])
 
         await query.edit_message_text(
             text="\n".join(lines),
@@ -933,19 +898,14 @@ class SessionCallbackHandlers(BaseHandler):
         )
 
     async def _handle_multi_delete_execute_callback(self, query, chat_id: int) -> None:
-        """Delete every selected non-current session."""
+        """Delete every selected session."""
         user_id = str(chat_id)
         selected = list(self._get_multi_delete_selection(user_id))
         deleted = 0
-        skipped = 0
 
         for full_session_id in selected:
             session = self.sessions.get_session(full_session_id)
             if not session:
-                continue
-            provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
-            if self._is_current_provider_session(user_id, full_session_id, provider):
-                skipped += 1
                 continue
             if self.sessions.delete_session(user_id, full_session_id):
                 deleted += 1
@@ -953,8 +913,6 @@ class SessionCallbackHandlers(BaseHandler):
         self._clear_multi_delete_selection(user_id)
 
         prefix = f"{deleted} session(s) deleted.\n\n"
-        if skipped:
-            prefix = f"{deleted} session(s) deleted, {skipped} skipped.\n\n"
         await self._handle_session_list_callback(query, chat_id, prefix)
 
     async def _handle_model_change_callback(self, query, chat_id: int, model: str, session_id: str) -> None:
