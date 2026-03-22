@@ -327,11 +327,12 @@ src/
 | `ALLOWED_CHAT_IDS` | (empty) | Allowed chat IDs (comma-separated) |
 | `ADMIN_CHAT_ID` | `0` | Admin notification/report recipient chat ID |
 | `AI_COMMAND` | `claude` | AI CLI command |
-| `SESSION_TIMEOUT_HOURS` | `24` | Session expiry time |
+| `SESSION_TIMEOUT_HOURS` | `24` | Hours before idle session is recycled |
+| `SESSION_PURGE_DAYS` | `7` | Days before recycled session is deleted |
 | `DEFAULT_MODEL_CLAUDE` | (empty) | Default Claude model profile key (opus/sonnet/haiku) |
 | `DEFAULT_MODEL_CODEX` | (empty) | Default Codex model profile key |
 | `APP_TIMEZONE` | `Asia/Seoul` | App timezone |
-| `REQUIRE_AUTH` | `true` | Whether authentication is required |
+| `REQUIRE_AUTH` | `false` | Set to true to enable authentication |
 | `AUTH_SECRET_KEY` | (conditionally required) | Auth key (required when `REQUIRE_AUTH=true`) |
 | `AUTH_TIMEOUT_MINUTES` | `30` | Auth validity duration |
 | `WORKING_DIR` | (none) | Bot working directory (defaults to project root if unset) |

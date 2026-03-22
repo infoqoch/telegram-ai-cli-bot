@@ -228,8 +228,9 @@ Bind a session to a local directory. The AI operates with that project's `CLAUDE
 | `ADMIN_CHAT_ID` | `0` | Chat ID for admin notifications and dev reports |
 | `AI_COMMAND` | `claude` | AI CLI command to invoke |
 | `SESSION_TIMEOUT_HOURS` | `24` | Hours before an idle session is recycled |
+| `SESSION_PURGE_DAYS` | `7` | Days before recycled sessions are deleted |
 | `APP_TIMEZONE` | `Asia/Seoul` | Timezone for schedules and date display |
-| `REQUIRE_AUTH` | `true` | Require authentication before bot access |
+| `REQUIRE_AUTH` | `false` | Set to true to enable authentication |
 | `AUTH_SECRET_KEY` | (required if REQUIRE_AUTH=true) | Secret key for authentication |
 | `AUTH_TIMEOUT_MINUTES` | `30` | How long an authenticated session stays valid |
 | `WORKING_DIR` | (project root) | Bot working directory |
