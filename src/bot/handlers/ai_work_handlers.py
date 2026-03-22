@@ -14,10 +14,11 @@ CORE_DOMAIN_LABELS = {
     "scheduler": "Scheduler",
     "workspace": "Workspace",
     "tasks": "Tasks",
+    "sessions": "Sessions",
 }
 
 # Core domains with static md context files
-CORE_DOMAINS = {"scheduler", "workspace", "tasks"}
+CORE_DOMAINS = {"scheduler", "workspace", "tasks", "sessions"}
 
 
 class AiWorkHandlers(BaseHandler):

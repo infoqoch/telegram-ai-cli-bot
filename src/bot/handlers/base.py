@@ -23,6 +23,7 @@ from src.ai import (
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
 from src.plugins.loader import PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU, PluginInteraction
 from src.ui_emoji import (
+    BUTTON_AI_WORK,
     BUTTON_BACK,
     BUTTON_CANCEL,
     BUTTON_DELETE,
@@ -261,6 +262,7 @@ class BaseHandler:
             ])
             buttons.append([
                 InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="menu:ai"),
+                InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:sessions"),
             ])
             buttons.append([
                 InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open"),
@@ -273,6 +275,7 @@ class BaseHandler:
             ])
             buttons.append([
                 InlineKeyboardButton(BUTTON_SWITCH_AI, callback_data="ai:open"),
+                InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:sessions"),
             ])
 
         return "\n".join(lines), buttons
