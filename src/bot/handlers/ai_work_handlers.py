@@ -83,7 +83,7 @@ class AiWorkHandlers(BaseHandler):
         )
 
         # Gather context and dispatch
-        context_text = await self._gather_domain_context(chat_id, domain)
+        context_text = await self._get_static_context(domain)
 
         augmented_message = (
             f"[Context - {label}]\n"
@@ -94,80 +94,9 @@ class AiWorkHandlers(BaseHandler):
 
         await self._dispatch_to_ai(update, chat_id, user_id, augmented_message)
 
-    async def _gather_domain_context(self, chat_id: int, domain: str) -> str:
-        """Gather context: try plugin first, then core domains."""
-        try:
-            # Try plugin first (dynamic - no hardcoded plugin list)
-            if self.plugins:
-                plugin = self.plugins.get_plugin_by_name(domain)
-                if plugin:
-                    return await plugin.get_ai_context(chat_id)
-            # Core domains
-            if domain in CORE_DOMAINS:
-                return await self._gather_core_context(chat_id, domain)
-            return "(unknown domain)"
-        except Exception as e:
-            logger.error(f"Context gathering error for {domain}: {e}", exc_info=True)
-            return f"(context gathering error: {e})"
-
-    async def _gather_core_context(self, chat_id: int, domain: str) -> str:
-        """Load core context: static md file + dynamic data."""
-        static = self._load_core_context(domain)
-
-        dynamic_gatherers = {
-            "scheduler": self._ctx_scheduler,
-            "workspace": self._ctx_workspace,
-            "tasks": self._ctx_tasks,
-        }
-        gatherer = dynamic_gatherers.get(domain)
-        dynamic = await gatherer(chat_id) if gatherer else ""
-
-        if dynamic:
-            return f"{static}\n\n[Current Data]\n{dynamic}"
-        return static
-
-    # --- Core domain dynamic data gatherers ---
-
-    async def _ctx_scheduler(self, chat_id: int) -> str:
-        repo = self._repository
-        if not repo:
-            return "(no data)"
-        schedules = repo.list_schedules_by_user(str(chat_id))
-        if not schedules:
-            return "No schedules registered."
-        lines = []
-        for s in schedules:
-            status = "ON" if s.enabled else "OFF"
-            lines.append(f"- [{status}] {s.name} (type: {s.schedule_type}, time: {s.trigger_summary})")
-        return "\n".join(lines)
-
-    async def _ctx_workspace(self, chat_id: int) -> str:
-        repo = self._repository
-        if not repo:
-            return "(no data)"
-        workspaces = repo.list_workspaces_by_user(str(chat_id))
-        if not workspaces:
-            return "No workspaces registered."
-        lines = []
-        for ws in workspaces:
-            lines.append(f"- {ws.name} ({ws.short_path})")
-        return "\n".join(lines)
-
-    async def _ctx_tasks(self, chat_id: int) -> str:
-        repo = self._repository
-        if not repo:
-            return "(no data)"
-        processing = repo.list_processing_messages_by_user(str(chat_id))
-        queued = repo.list_queued_messages_by_user(str(chat_id))
-        lines = []
-        if processing:
-            lines.append(f"Processing: {len(processing)} job(s)")
-            for msg in processing:
-                lines.append(f"  - {msg.get('request', '')[:50]}")
-        else:
-            lines.append("No jobs processing")
-        if queued:
-            lines.append(f"Queued: {len(queued)} message(s)")
-        else:
-            lines.append("No queued messages")
-        return "\n".join(lines)
+    async def _get_static_context(self, domain: str) -> str:
+        """Load static context description for a domain."""
+        plugin = self.plugins.get_plugin_by_name(domain) if self.plugins else None
+        if plugin:
+            return plugin._load_ai_context_file()
+        return self._load_core_context(domain)

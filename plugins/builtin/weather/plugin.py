@@ -127,12 +127,6 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         """Bind weather persistence through a bounded adapter."""
         return RepositoryWeatherLocationStore(repository)
 
-    async def get_ai_dynamic_context(self, chat_id: int) -> str:
-        location = self._load_location(chat_id)
-        if location:
-            return f"마지막 조회 지역: {location['name']}"
-        return "최근 조회한 날씨 지역이 없습니다."
-
     async def can_handle(self, message: str, chat_id: int) -> bool:
         msg = message.strip()
 

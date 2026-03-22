@@ -149,28 +149,6 @@ class CalendarPlugin(Plugin):
             return f"일정 생성 실패: {self._gcal.last_error}"
         return f"일정 생성됨: {event.summary} ({event.start.strftime('%m/%d %H:%M')})"
 
-    # ==================== AI Context ====================
-
-    async def get_ai_dynamic_context(self, chat_id: int) -> str:
-        from src.time_utils import app_now
-        from datetime import timedelta
-        if not self._gcal or not self._gcal.available:
-            return "(캘린더 연결 안됨)"
-        try:
-            today = app_now()
-            start = today.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = start + timedelta(days=7)
-            events = self._gcal.list_events(start, end)
-            if not events:
-                return "향후 7일간 일정이 없습니다."
-            lines = ["향후 7일 일정:"]
-            for ev in events:
-                date_str = ev.start.strftime("%m/%d %H:%M") if not ev.all_day else ev.start.strftime("%m/%d") + " 종일"
-                lines.append(f"  - {date_str}: {ev.summary}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"(캘린더 조회 실패: {e})"
-
     async def can_handle(self, message: str, chat_id: int) -> bool:
         msg = message.strip()
         for pattern in self.EXCLUDE_PATTERNS:

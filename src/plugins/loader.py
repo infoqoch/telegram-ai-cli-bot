@@ -196,18 +196,11 @@ class Plugin(ABC):
         return ""
 
     async def get_ai_context(self, chat_id: int) -> str:
-        """Return full AI context: static description + dynamic data.
-
-        Override get_ai_dynamic_context() to provide live data.
-        """
-        static = self._load_ai_context_file()
-        dynamic = await self.get_ai_dynamic_context(chat_id)
-        if dynamic:
-            return f"{static}\n\n[현재 데이터]\n{dynamic}"
-        return static
+        """Return static AI context description from markdown file."""
+        return self._load_ai_context_file()
 
     async def get_ai_dynamic_context(self, chat_id: int) -> str:
-        """Override to provide dynamic context data from DB. Default: empty."""
+        """Deprecated: use get_tool_specs() instead. Kept for backward compatibility."""
         return ""
 
     def get_tool_specs(self) -> list[ToolSpec]:

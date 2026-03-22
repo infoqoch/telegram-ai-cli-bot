@@ -98,17 +98,6 @@ END;
         """Bind diary persistence through a bounded adapter."""
         return RepositoryDiaryStore(repository)
 
-    async def get_ai_dynamic_context(self, chat_id: int) -> str:
-        from src.time_utils import app_now
-        today = app_now()
-        entries = self.store.list_by_month(chat_id, today.year, today.month)
-        if not entries:
-            return f"{today.year}년 {today.month}월에 작성된 일기가 없습니다."
-        lines = [f"{today.year}년 {today.month}월 일기 ({len(entries)}개):"]
-        for d in entries:
-            lines.append(f"  - {d.date}: {d.content[:200]}")
-        return "\n".join(lines)
-
     async def can_handle(self, message: str, chat_id: int) -> bool:
         msg = message.strip()
 

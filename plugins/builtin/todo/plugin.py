@@ -150,20 +150,6 @@ END;
             return handler()
         return {"text": "❌ Unknown command.", "edit": True}
 
-    async def get_ai_dynamic_context(self, chat_id: int) -> str:
-        from src.time_utils import app_now
-        today_str = app_now().strftime("%Y-%m-%d")
-        todos = self.store.list_by_date(chat_id, today_str)
-        if not todos:
-            return f"오늘({today_str}) 등록된 할일이 없습니다."
-        lines = [f"오늘({today_str}) 할일 목록:"]
-        for t in todos:
-            status = "완료" if t.done else "미완료"
-            lines.append(f"  - [{status}] {t.text}")
-        done_count = sum(1 for t in todos if t.done)
-        lines.append(f"\n통계: 전체 {len(todos)}개, 완료 {done_count}개, 미완료 {len(todos) - done_count}개")
-        return "\n".join(lines)
-
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         """List of schedulable actions."""
         return [
