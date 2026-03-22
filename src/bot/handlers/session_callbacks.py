@@ -25,7 +25,7 @@ from src.ui_emoji import (
     BUTTON_SWITCH,
     BUTTON_SWITCH_AI,
 )
-from ..constants import get_model_emoji
+from ..constants import get_model_badge, get_model_emoji
 from ..formatters import escape_html, truncate_message
 from .base import BaseHandler
 
