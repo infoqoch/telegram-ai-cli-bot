@@ -2,37 +2,35 @@
 
 Control local AI coding agents (Claude Code, Codex CLI) from your phone via Telegram.
 
-Use the sessions that already live on your machine, work across multiple projects, automate recurring jobs, and extend the bot with your own plugins.
+Use your existing Claude Code / Codex CLI login from Telegram, create new sessions remotely, continue the sessions you already have on your machine, and keep longer-running work stable.
 
 ---
 
-## What You Get
+## Why It Is Practical
 
-- Convenient access to the local Claude Code / Codex CLI sessions you already use
+- Use the CLI subscriptions and logins you already have; no separate API-first setup is required
+- Chat with Claude Code or Codex from Telegram wherever you are
+- Create new sessions from Telegram when you want fresh work
 - Import local CLI sessions and continue them from Telegram without starting over
+
+## Why Sessions Matter
+
 - Multi-session workflow across providers, projects, and tasks
-- Scheduler-driven work for chat, workspace, folder, and plugin actions
 - Workspace and folder aware execution that applies each project's `CLAUDE.md`
-- MCP-backed access to live bot data during AI work
-- Detached workers that keep long-running jobs alive across soft restarts
-- Persistent queueing and delivery retry so in-flight work is less likely to disappear on restarts or send failures
-- An extension surface for custom plugins, using the built-ins as reference implementations
-
-## Why It Feels Fast
-
-The bot does not send every request to AI.
-
-Common actions can go through plugins first, then fall through to AI only when needed. That keeps latency low and avoids unnecessary CLI runs.
+- Session switching, queueing, and session-level isolation for safer long-running work
+- Fast-path plugin handling so simple actions do not always pay the AI latency cost
 
 ## Why It Feels Stable
 
-The bot keeps operational state in SQLite instead of memory-only flow.
+- Long-running work runs in detached workers instead of living only in the main bot process
+- SQLite-backed state adds persistence for locks, queued work, and delivery tracking
+- Delivery retry and persistent queueing make responses less likely to disappear on restarts or send failures
 
-That matters when:
+## Why It Extends
 
-- you restart the bot while a long-running worker is still active
-- Telegram delivery fails and needs retry
-- you want to adopt a session that already exists in your local CLI history
+- Scheduler-driven work for chat, workspace, folder, and plugin actions
+- MCP-backed access to live bot data during AI work
+- An extension surface for custom plugins, using the built-ins as reference implementations
 
 ## Built-In Plugins
 
