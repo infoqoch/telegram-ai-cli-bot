@@ -49,16 +49,18 @@ def _get_chat_id() -> str:
 @mcp.tool(
     name="query_db",
     description=(
-        "봇 SQLite DB에 읽기 전용 SQL을 실행한다. "
-        "SELECT만 허용. chat_id가 필요한 테이블에서는 {chat_id}를 사용하면 자동 치환된다. "
-        "예: SELECT * FROM todos WHERE chat_id = {chat_id} AND date = '2026-03-22'"
+        "봇 SQLite DB에 SQL을 실행한다. SELECT, INSERT, UPDATE, DELETE 모두 가능. "
+        "chat_id가 필요한 테이블에서는 {chat_id}를 사용하면 자동 치환된다. "
+        "예: SELECT * FROM todos WHERE chat_id = {chat_id} AND date = '2026-03-22' "
+        "예: DELETE FROM memos WHERE id = 5 AND chat_id = {chat_id}"
     ),
 )
 def query_db(sql: str) -> str:
-    """Execute read-only SQL against the bot database."""
+    """Execute SQL against the bot database."""
+    # Block dangerous operations
     normalized = sql.strip().upper()
-    if not normalized.startswith("SELECT"):
-        return "ERROR: 읽기 전용입니다. SELECT 쿼리만 허용됩니다."
+    if normalized.startswith("DROP") or normalized.startswith("ALTER"):
+        return "ERROR: DROP/ALTER는 허용되지 않습니다."
 
     # Replace {chat_id} placeholder
     chat_id = _get_chat_id()
@@ -67,22 +69,22 @@ def query_db(sql: str) -> str:
     try:
         conn = _get_db()
         cursor = conn.execute(resolved_sql)
-        rows = cursor.fetchall()
 
-        if not rows:
-            return "결과 없음."
-
-        # Format as readable text
-        columns = [desc[0] for desc in cursor.description]
-        lines = [" | ".join(columns)]
-        lines.append("-" * len(lines[0]))
-        for row in rows[:100]:  # limit 100 rows
-            lines.append(" | ".join(str(v) for v in row))
-
-        if len(rows) > 100:
-            lines.append(f"... ({len(rows)}건 중 100건만 표시)")
-
-        return "\n".join(lines)
+        if normalized.startswith("SELECT"):
+            rows = cursor.fetchall()
+            if not rows:
+                return "결과 없음."
+            columns = [desc[0] for desc in cursor.description]
+            lines = [" | ".join(columns)]
+            lines.append("-" * len(lines[0]))
+            for row in rows[:100]:
+                lines.append(" | ".join(str(v) for v in row))
+            if len(rows) > 100:
+                lines.append(f"... ({len(rows)}건 중 100건만 표시)")
+            return "\n".join(lines)
+        else:
+            conn.commit()
+            return f"OK: {cursor.rowcount}건 처리됨."
     except Exception as e:
         return f"SQL 실행 오류: {e}"
 
