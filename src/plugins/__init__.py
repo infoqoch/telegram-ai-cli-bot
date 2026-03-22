@@ -1,4 +1,4 @@
-"""Plugin system for Telegram Agent Relay."""
+"""Plugin system for Telegram AI CLI Bot."""
 
 from .loader import PluginLoader, Plugin
 

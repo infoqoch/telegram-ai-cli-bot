@@ -1,4 +1,4 @@
-# Telegram Agent Relay
+# Telegram AI CLI Bot
 
 Control local AI coding agents (Claude Code, Codex CLI) from your phone via Telegram.
 
@@ -68,8 +68,8 @@ The bot has three layers working in concert:
 ### 3. Install and Run
 
 ```bash
-git clone https://github.com/infoqoch/telegram-claude-bot.git
-cd telegram-claude-bot
+git clone https://github.com/infoqoch/telegram-ai-cli-bot.git
+cd telegram-ai-cli-bot
 python -m venv venv && source venv/bin/activate
 pip install -e .
 

@@ -12,14 +12,14 @@
 
 ### Composition Root
 
-- [`src/main.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/main.py): Telegram `Application` wiring and process lifecycle.
-- [`src/bootstrap.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/bootstrap.py): builds the runtime dependency graph.
+- [`src/main.py`](../src/main.py): Telegram `Application` wiring and process lifecycle.
+- [`src/bootstrap.py`](../src/bootstrap.py): builds the runtime dependency graph.
 
 `main.py` should not own business logic. It should wire services, handlers, schedulers, and transport.
 
 ### Process Supervision
 
-- [`src/supervisor.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/supervisor.py): thin process manager for [`src/main.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/main.py)
+- [`src/supervisor.py`](../src/supervisor.py): thin process manager for [`src/main.py`](../src/main.py)
 
 Rules:
 
@@ -30,9 +30,9 @@ Rules:
 
 ### Handler Layer
 
-- [`src/bot/handlers/`](/Users/bae/AiSandbox/telegram-claude-bot/src/bot/handlers): Telegram command/callback/message entrypoints.
-- [`src/bot/handlers/base.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/bot/handlers/base.py): shared transport-facing helpers only.
-- [`src/bot/runtime/`](/Users/bae/AiSandbox/telegram-claude-bot/src/bot/runtime): handler collaborators for runtime-only concerns.
+- [`src/bot/handlers/`](../src/bot/handlers): Telegram command/callback/message entrypoints.
+- [`src/bot/handlers/base.py`](../src/bot/handlers/base.py): shared transport-facing helpers only.
+- [`src/bot/runtime/`](../src/bot/runtime): handler collaborators for runtime-only concerns.
 
 Rules:
 
@@ -49,9 +49,9 @@ Callback interaction rule:
 
 ### Service Layer
 
-- [`src/services/session_service.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/session_service.py): session business rules.
-- [`src/services/job_service.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/job_service.py): detached AI job lifecycle.
-- [`src/services/schedule_execution_service.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/schedule_execution_service.py): scheduled execution delivery.
+- [`src/services/session_service.py`](../src/services/session_service.py): session business rules.
+- [`src/services/job_service.py`](../src/services/job_service.py): detached AI job lifecycle.
+- [`src/services/schedule_execution_service.py`](../src/services/schedule_execution_service.py): scheduled execution delivery.
 
 Rules:
 
@@ -61,9 +61,9 @@ Rules:
 
 ### Infrastructure Layer
 
-- [`src/repository/`](/Users/bae/AiSandbox/telegram-claude-bot/src/repository): SQLite persistence and adapters.
-- [`src/ai/`](/Users/bae/AiSandbox/telegram-claude-bot/src/ai): provider registry and clients.
-- [`src/plugins/`](/Users/bae/AiSandbox/telegram-claude-bot/src/plugins): plugin discovery and plugin runtime.
+- [`src/repository/`](../src/repository): SQLite persistence and adapters.
+- [`src/ai/`](../src/ai): provider registry and clients.
+- [`src/plugins/`](../src/plugins): plugin discovery and plugin runtime.
 
 Rules:
 
@@ -81,14 +81,14 @@ Rules:
 2. If the session is busy, show Session Queue UI.
 3. If idle, create `message_log` row and reserve `session_locks`.
 4. Spawn detached worker.
-5. Detached worker runs [`JobService`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/job_service.py), sends the final Telegram response, drains persistent queue, then releases the lock.
+5. Detached worker runs [`JobService`](../src/services/job_service.py), sends the final Telegram response, drains persistent queue, then releases the lock.
 
 UX details for this flow belong in [`SPEC.md`](./SPEC.md).
 
 ### Temp Pending Flow
 
 - Session conflict UI uses short-lived pending state.
-- Runtime owner: [`PendingRequestStore`](/Users/bae/AiSandbox/telegram-claude-bot/src/bot/runtime/pending_request_store.py)
+- Runtime owner: [`PendingRequestStore`](../src/bot/runtime/pending_request_store.py)
 - Lifetime: 5 minutes
 - Purpose: preserve callback context, not durable user intent
 
@@ -101,11 +101,11 @@ UX details for this flow belong in [`SPEC.md`](./SPEC.md).
 ### Schedule Flow
 
 - Scheduler decides when to run.
-- [`ScheduleExecutionService`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/schedule_execution_service.py) decides how to execute and deliver.
+- [`ScheduleExecutionService`](../src/services/schedule_execution_service.py) decides how to execute and deliver.
 - Schedule registration/storage belongs to repository adapters, not `main.py`.
 - Canonical trigger model is `cron | once`.
 - User-facing `Daily` / `One-time` buttons are UI sugar over that storage model.
-- Global scheduler time is owned by [`src/time_utils.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/time_utils.py) and configured through `APP_TIMEZONE`.
+- Global scheduler time is owned by [`src/time_utils.py`](../src/time_utils.py) and configured through `APP_TIMEZONE`.
 - Schedule list ordering belongs to adapter/view logic and should be based on `next run`, not legacy `hour/minute` sorting.
 
 ## SQLite Rules

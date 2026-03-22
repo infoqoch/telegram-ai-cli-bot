@@ -1,4 +1,4 @@
-"""Main entry point for Telegram Agent Relay."""
+"""Main entry point for Telegram AI CLI Bot."""
 
 import atexit
 import os
@@ -64,7 +64,7 @@ def create_app(settings) -> Application:
     configure_app_timezone(app_timezone)
 
     logger.info("=" * 60)
-    logger.info("Telegram Agent Relay initialization started")
+    logger.info("Telegram AI CLI Bot initialization started")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info(f"  base_dir: {settings.base_dir}")
     logger.info(f"  working_dir: {settings.effective_working_dir}")
@@ -253,7 +253,7 @@ def main() -> None:
         logger.error("TELEGRAM_TOKEN is not set")
         sys.exit(int(RuntimeExitCode.CONFIG_ERROR))
 
-    logger.info("Starting Telegram Agent Relay...")
+    logger.info("Starting Telegram AI CLI Bot...")
 
     app = create_app(settings)
 

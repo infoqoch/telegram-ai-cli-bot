@@ -1,7 +1,7 @@
 [project]
-name = "telegram-agent-relay"
+name = "telegram-ai-cli-bot"
 version = "1.0.0"
-description = "Telegram interface for local AI coding agents like Claude Code and Codex CLI"
+description = "Control local AI coding agents (Claude Code, Codex CLI) from Telegram"
 requires-python = ">=3.11"
 dependencies = [
     "python-telegram-bot[job-queue]>=21.0",
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-telegram-agent-relay = "src.main:main"
+telegram-ai-cli-bot = "src.main:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
