@@ -1,4 +1,45 @@
-# AI Bot - Project Rules
+# Telegram AI CLI Bot - Project Rules
+
+## Quick Setup (for new users)
+
+If the user says "setup", "help me set up", or this is a fresh clone without `.env`, guide them through the setup process:
+
+1. **Check prerequisites:**
+   - Python 3.11+ installed
+   - Claude Code (`claude --version`) or Codex CLI (`codex --version`) installed and logged in
+   - A Telegram bot token from [@BotFather](https://t.me/BotFather)
+
+2. **Create `.env` from template:**
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Walk through required variables** (ask the user for each value):
+   | Variable | Required | How to get it |
+   |----------|----------|---------------|
+   | `TELEGRAM_TOKEN` | Yes | BotFather → `/newbot` → copy token |
+   | `ALLOWED_CHAT_IDS` | Yes | Start bot, send `/chatid`, copy the number |
+   | `ADMIN_CHAT_ID` | Yes | Same as ALLOWED_CHAT_IDS for single user |
+   | `AUTH_SECRET_KEY` | If REQUIRE_AUTH=true | Any random string (e.g., `openssl rand -hex 16`) |
+
+4. **Optional variables** (skip if user doesn't need):
+   | Variable | For what |
+   |----------|----------|
+   | `GOOGLE_SERVICE_ACCOUNT_FILE` | Calendar plugin |
+   | `GOOGLE_CALENDAR_ID` | Calendar plugin |
+   | `DEFAULT_MODEL_CLAUDE` | Override default Claude model |
+   | `DEFAULT_MODEL_CODEX` | Override default Codex model |
+
+5. **Install and start:**
+   ```bash
+   python -m venv venv && source venv/bin/activate
+   pip install -e .
+   ./run.sh start
+   ```
+
+6. **Verify:** Ask user to send `/chatid` to the bot, then add the ID to `ALLOWED_CHAT_IDS` in `.env` and `./run.sh restart-soft`.
+
+---
 
 ## Document Architecture
 

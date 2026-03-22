@@ -72,10 +72,30 @@ git clone https://github.com/infoqoch/telegram-ai-cli-bot.git
 cd telegram-ai-cli-bot
 python -m venv venv && source venv/bin/activate
 pip install -e .
-
-cp .env.example .env
-# Edit .env: set TELEGRAM_TOKEN and ALLOWED_CHAT_IDS
 ```
+
+#### Option A: Setup with Claude Code (recommended)
+
+If you have [Claude Code](https://claude.ai/claude-code) installed, let it guide you through setup interactively:
+
+```bash
+claude
+# Then say: "help me set up"
+```
+
+Claude reads the project's `CLAUDE.md` automatically and walks you through creating `.env`, configuring tokens, and starting the bot.
+
+#### Option B: Manual setup
+
+```bash
+cp .env.example .env
+# Edit .env: set TELEGRAM_TOKEN, ALLOWED_CHAT_IDS, ADMIN_CHAT_ID
+./run.sh start
+```
+
+> **Find your chat ID:** Start the bot temporarily, send `/chatid`, then add the ID to `.env`.
+
+### Run Commands
 
 ```bash
 ./run.sh start            # Start the bot
@@ -88,8 +108,6 @@ cp .env.example .env
 ./run.sh test             # Run unit tests
 ./run.sh test-integration # Run integration tests
 ```
-
-> **Find your chat ID:** Start the bot and send `/chatid`
 
 ---
 
