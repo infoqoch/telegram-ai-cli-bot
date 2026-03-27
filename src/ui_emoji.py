@@ -7,9 +7,11 @@ Keep chat-facing emoji choices here so new features reuse the same semantics.
 
 PROVIDER_ICON_CLAUDE = "📚"
 PROVIDER_ICON_CODEX = "🤖"
+PROVIDER_ICON_GEMINI = "♊"
 
 PROVIDER_BUTTON_CLAUDE = f"{PROVIDER_ICON_CLAUDE} Claude"
 PROVIDER_BUTTON_CODEX = f"{PROVIDER_ICON_CODEX} Codex"
+PROVIDER_BUTTON_GEMINI = f"{PROVIDER_ICON_GEMINI} Gemini"
 
 MODEL_BADGE_TOP = "🧠"
 MODEL_BADGE_MID = "🚀"

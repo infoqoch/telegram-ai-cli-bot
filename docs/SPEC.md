@@ -63,7 +63,7 @@ All other commands are accessed via button hubs or direct input.
 | `/help_{plugin}` | Detailed help for individual plugins |
 | `/auth <key>` | Authentication (when `REQUIRE_AUTH=true`) |
 | `/status` | Check authentication status |
-| `/select_ai` | Select current AI provider (`Claude` / `Codex`) |
+| `/select_ai` | Select current AI provider (`Claude` / `Codex` / `Gemini`) |
 | `/model [model]` | Change or view the current session model |
 | `/model_opus`, `/model_sonnet`, `/model_haiku` | Model change shortcuts |
 | `/new_opus`, `/new_sonnet`, `/new_haiku` | Quick session creation by model |
@@ -186,13 +186,14 @@ The user activates one AI provider at a time.
 |----------|-----------|------------------------|
 | `Claude` | Conversational coding assistant | `opus`, `sonnet`, `haiku` |
 | `Codex` | ChatGPT login-based CLI coding agent | `GPT-5.4 High`, `GPT-5.4 XHigh`, `GPT-5.3 Codex Medium` |
+| `Gemini` | Google Gemini CLI agent | `Pro`, `Flash`, `Flash Lite` |
 
 ### `/select_ai`
 
 ```
 Current AI: Claude
 
-[Claude] [Codex]
+[Claude] [Codex] [Gemini]
 [Cancel]
 ```
 
@@ -242,7 +243,7 @@ Session list → [Import Local]
     │
     ▼
 Import Local Session
-Recent local sessions across 📚 Claude and 🤖 Codex.
+Recent local sessions across 📚 Claude, 🤖 Codex, and ♊ Gemini.
 
 Showing 1-10 recent sessions.
 
@@ -272,7 +273,7 @@ Showing 1-10 recent sessions.
 
 - After import, the bot history starts from the point of import (prior provider-side conversations are preserved but not shown in the bot UI)
 - Sorted by `updated_at` descending (most recently used first)
-- 10 sessions per page; Claude/Codex sessions are shown mixed together
+- 10 sessions per page; Claude/Codex/Gemini sessions are shown mixed together
 - Since only local files are scanned (independent of the bot DB), sessions deleted from the bot may reappear
 
 ### Session List Screen
@@ -328,6 +329,9 @@ Users do not need to know the underlying CLI flags. The UI only shows human-read
 | Codex | `GPT-5.4 High` | `model=gpt-5.4`, `reasoning=high` |
 | Codex | `GPT-5.4 XHigh` | `model=gpt-5.4`, `reasoning=xhigh` |
 | Codex | `GPT-5.3 Codex Medium` | `model=gpt-5.3-codex`, `reasoning=medium` |
+| Gemini | `Pro` | `gemini-2.5-pro` |
+| Gemini | `Flash` | `gemini-2.5-flash` |
+| Gemini | `Flash Lite` | `gemini-2.5-flash-lite` |
 
 - The profile key is stored in the DB; the actual per-provider CLI flags are interpreted internally.
 - Only UI labels are shown in buttons, session list, `/session`, and `/tasks`.

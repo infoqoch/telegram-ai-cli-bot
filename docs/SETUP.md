@@ -9,7 +9,7 @@ For the product overview and value proposition, see [README.md](../README.md).
 ### Prerequisites
 
 - Python 3.11+
-- Claude Code and/or Codex CLI installed and logged in
+- Claude Code and/or Codex CLI and/or Gemini CLI installed and logged in
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 
 ### Install
@@ -91,3 +91,26 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 | `BOT_MAIN_MENU_PLUGINS` | (none) | Comma-separated plugin names to promote to the main menu |
 | `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
 | `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (overrides built-in default) |
+| `DEFAULT_MODEL_GEMINI` | (none) | Default Gemini model profile (gemini-pro/gemini-flash/gemini-flash-lite) |
+
+## Gemini Setup
+
+Gemini is auto-detected at startup if the `gemini` CLI is on `PATH`. No extra env var is needed to enable it.
+
+### MCP plugin tools (one-time, per project)
+
+Run this once from the project root so the plugin bridge (calendar, memo, todo, etc.) is available during Gemini AI calls:
+
+```bash
+gemini mcp add bot-plugins ./venv/bin/python ./mcp_servers/plugin_bridge_server.py
+```
+
+This creates `.gemini/settings.json` in the project directory. The file is gitignored (contains machine-specific paths).
+
+For workspace sessions, the bot writes `.gemini/settings.json` automatically the first time a Gemini workspace session is created.
+
+### System prompt (GEMINI.md)
+
+The bot writes the Telegram formatting prompt to `GEMINI.md` at the project root on startup. This file is gitignored and regenerated each run.
+
+For workspace sessions, the bot also writes `GEMINI.md` to the workspace directory on first use. If the workspace already has a `GEMINI.md`, the bot will not overwrite it.

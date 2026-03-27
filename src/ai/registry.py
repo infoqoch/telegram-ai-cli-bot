@@ -23,21 +23,30 @@ class AIRegistry:
 
 
 def build_default_registry(settings) -> AIRegistry:
-    """Build the standard Claude/Codex registry from settings."""
+    """Build the standard Claude/Codex/Gemini registry from settings."""
+    import shutil
     from src.claude.client import ClaudeClient
     from src.codex.client import CodexClient
 
-    return AIRegistry(
-        {
-            "claude": ClaudeClient(
-                command=settings.ai_command,
-                system_prompt_file=settings.telegram_prompt_file,
-                timeout=None,
-            ),
-            "codex": CodexClient(
-                command="codex",
-                system_prompt_file=settings.telegram_prompt_file,
-                timeout=None,
-            ),
-        }
-    )
+    clients = {
+        "claude": ClaudeClient(
+            command=settings.ai_command,
+            system_prompt_file=settings.telegram_prompt_file,
+            timeout=None,
+        ),
+        "codex": CodexClient(
+            command="codex",
+            system_prompt_file=settings.telegram_prompt_file,
+            timeout=None,
+        ),
+    }
+
+    if shutil.which("gemini"):
+        from src.gemini.client import GeminiClient
+        clients["gemini"] = GeminiClient(
+            command="gemini",
+            system_prompt_file=settings.telegram_prompt_file,
+            timeout=None,
+        )
+
+    return AIRegistry(clients)

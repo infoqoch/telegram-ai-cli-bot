@@ -8,12 +8,14 @@ from src.ui_emoji import (
     MODEL_BADGE_TOP,
     PROVIDER_BUTTON_CLAUDE,
     PROVIDER_BUTTON_CODEX,
+    PROVIDER_BUTTON_GEMINI,
     PROVIDER_ICON_CLAUDE,
     PROVIDER_ICON_CODEX,
+    PROVIDER_ICON_GEMINI,
 )
 
 
-SUPPORTED_PROVIDERS = ["claude", "codex"]
+SUPPORTED_PROVIDERS = ["claude", "codex", "gemini"]
 DEFAULT_PROVIDER = "claude"
 
 
@@ -34,18 +36,21 @@ class ModelProfile:
 PROVIDER_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
+    "gemini": "Gemini",
 }
 
 
 PROVIDER_ICONS = {
     "claude": PROVIDER_ICON_CLAUDE,
     "codex": PROVIDER_ICON_CODEX,
+    "gemini": PROVIDER_ICON_GEMINI,
 }
 
 
 PROVIDER_BUTTONS = {
     "claude": PROVIDER_BUTTON_CLAUDE,
     "codex": PROVIDER_BUTTON_CODEX,
+    "gemini": PROVIDER_BUTTON_GEMINI,
 }
 
 
@@ -111,6 +116,35 @@ MODEL_PROFILES = {
             reasoning_effort="medium",
         ),
     ],
+    "gemini": [
+        ModelProfile(
+            key="gemini-pro",
+            provider="gemini",
+            label="Pro",
+            short_label="Pro",
+            button_label="Pro",
+            badge=MODEL_BADGE_TOP,
+            provider_model="gemini-2.5-pro",
+        ),
+        ModelProfile(
+            key="gemini-flash",
+            provider="gemini",
+            label="Flash",
+            short_label="Flash",
+            button_label="Flash",
+            badge=MODEL_BADGE_MID,
+            provider_model="gemini-2.5-flash",
+        ),
+        ModelProfile(
+            key="gemini-flash-lite",
+            provider="gemini",
+            label="Flash Lite",
+            short_label="Lite",
+            button_label="Flash Lite",
+            badge=MODEL_BADGE_LIGHT,
+            provider_model="gemini-2.5-flash-lite",
+        ),
+    ],
 }
 
 
@@ -123,6 +157,8 @@ def _get_default_model_overrides() -> dict[str, str]:
         overrides["claude"] = settings.default_model_claude
     if settings.default_model_codex:
         overrides["codex"] = settings.default_model_codex
+    if settings.default_model_gemini:
+        overrides["gemini"] = settings.default_model_gemini
     return overrides
 
 

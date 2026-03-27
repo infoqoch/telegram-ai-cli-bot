@@ -48,6 +48,7 @@ class LocalSessionDiscoveryService:
         self._claude_projects_root = self._home / ".claude" / "projects"
         self._codex_index_path = self._home / ".codex" / "session_index.jsonl"
         self._codex_sessions_root = self._home / ".codex" / "sessions"
+        self._gemini_tmp_root = self._home / ".gemini" / "tmp"
 
     def list_recent(
         self,
@@ -79,7 +80,7 @@ class LocalSessionDiscoveryService:
             return self._load_provider_sessions(provider)
 
         sessions: list[DiscoveredSession] = []
-        for provider_name in ("claude", "codex"):
+        for provider_name in ("claude", "codex", "gemini"):
             sessions.extend(self._load_provider_sessions(provider_name))
         return sessions
 
@@ -88,6 +89,8 @@ class LocalSessionDiscoveryService:
             return self._load_claude_sessions()
         if provider == "codex":
             return self._load_codex_sessions()
+        if provider == "gemini":
+            return self._load_gemini_sessions()
         return []
 
     def _load_claude_sessions(self) -> list[DiscoveredSession]:
@@ -290,6 +293,46 @@ class LocalSessionDiscoveryService:
             message_count=None,
         )
 
+    def _load_gemini_sessions(self) -> list[DiscoveredSession]:
+        """Scan ~/.gemini/tmp/*/chats/*.json for Gemini session files."""
+        sessions_by_id: dict[str, DiscoveredSession] = {}
+        if not self._gemini_tmp_root.exists():
+            return []
+
+        for session_file in self._gemini_tmp_root.glob("*/chats/*.json"):
+            try:
+                data = json.loads(session_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+
+            session_id = data.get("sessionId")
+            if not session_id or not _UUID_RE.fullmatch(session_id):
+                continue
+
+            messages = data.get("messages", [])
+            title = ""
+            for msg in messages:
+                if msg.get("type") == "user":
+                    title = self._clean_text(msg.get("content", ""))
+                    if title:
+                        break
+
+            updated_at = data.get("lastUpdated") or self._path_mtime_to_iso(session_file)
+            user_count = sum(1 for m in messages if m.get("type") == "user")
+
+            discovered = DiscoveredSession(
+                provider="gemini",
+                provider_session_id=session_id,
+                title=title or self._default_title("gemini", session_id),
+                updated_at=updated_at,
+                workspace_path=None,
+                preview=title,
+                message_count=user_count or None,
+            )
+            self._store_discovered_session(sessions_by_id, discovered)
+
+        return list(sessions_by_id.values())
+
     def _store_discovered_session(
         self,
         sessions_by_id: dict[str, DiscoveredSession],
@@ -373,7 +416,7 @@ class LocalSessionDiscoveryService:
 
     @staticmethod
     def _default_title(provider: str, session_id: str) -> str:
-        prefix = "Claude" if provider == "claude" else "Codex"
+        prefix = {"claude": "Claude", "codex": "Codex", "gemini": "Gemini"}.get(provider, provider.title())
         return f"{prefix} {session_id[:8]}"
 
     @classmethod
