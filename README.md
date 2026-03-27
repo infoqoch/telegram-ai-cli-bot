@@ -1,8 +1,8 @@
 # Telegram AI CLI Bot
 
-Turn Claude Code and Codex CLI on your machine into a Telegram-accessible remote coding workspace.
+Turn Claude Code, Codex CLI, and Gemini CLI on your machine into a Telegram-accessible remote coding workspace.
 
-Use Claude Code and Codex CLI from Telegram without changing the workflow you already use on your machine.
+Use Claude Code, Codex CLI, and Gemini CLI from Telegram without changing the workflow you already use on your machine.
 
 Reuse the subscriptions and logins you already have. Start fresh sessions remotely, pick up sessions that already exist locally, switch across projects, schedule recurring work, and keep longer-running jobs stable.
 
@@ -10,9 +10,9 @@ Reuse the subscriptions and logins you already have. Start fresh sessions remote
 
 ## Why Use It
 
-- Use the Claude Code / Codex CLI subscriptions and logins you already have; no separate provider API key workflow is required
+- Use the Claude Code / Codex / Gemini CLI subscriptions and logins you already have; no separate provider API key workflow is required
 - Chat with your local coding agents from Telegram wherever you are
-- Create new Claude or Codex sessions from Telegram when you want a clean start
+- Create new Claude, Codex, or Gemini sessions from Telegram when you want a clean start
 - Import local CLI sessions and continue them from Telegram without starting over
 - Keep multiple sessions across providers, projects, and tasks without collapsing everything into one thread
 - Schedule recurring work for chat, workspace, folder, and plugin actions
@@ -21,7 +21,7 @@ Reuse the subscriptions and logins you already have. Start fresh sessions remote
 ## Typical Uses
 
 - **Fresh remote start:** create a new debugging, review, or refactor session from your phone while away from the desk
-- **Desk -> phone handoff:** import a Claude/Codex session you already started locally and continue it in Telegram
+- **Desk -> phone handoff:** import a Claude/Codex/Gemini session you already started locally and continue it in Telegram
 - **Multi-project flow:** keep separate sessions per repo, task, or provider and switch between them quickly
 - **Scheduled project work:** run recurring workspace prompts against a specific project and its `CLAUDE.md`
 - **Fast-path utility work:** use plugins for common actions so simple requests do not always pay full AI latency
@@ -102,7 +102,7 @@ For manual setup, runtime commands, security controls, and environment variables
 
 ## Built With
 
-Developed with [Claude Code](https://claude.ai/claude-code) and [Codex CLI](https://github.com/openai/codex).
+Developed with [Claude Code](https://claude.ai/claude-code), [Codex CLI](https://github.com/openai/codex), and [Gemini CLI](https://github.com/google-gemini/gemini-cli).
 
 ## License
 
