@@ -275,7 +275,9 @@ class JobService:
         if error == "USAGE_LIMIT":
             detail = (response or "Claude usage limit reached").strip()
             return self._escape_html(detail), "usage_limit"
-        if error and error != "SESSION_NOT_FOUND":
+        if error == "SESSION_NOT_FOUND":
+            return "⚠️ Provider session expired (no conversation found).\nPlease send again or create a new session.", "session_not_found"
+        if error:
             detail = (response or "").strip()
             if detail and detail != error:
                 return self._escape_html(detail), error
