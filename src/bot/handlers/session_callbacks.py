@@ -365,12 +365,20 @@ class SessionCallbackHandlers(BaseHandler):
         model = log_entry.get("model") or "sonnet"
         workspace_path = log_entry.get("workspace_path")
 
+        # If workspace already has an active session, create without workspace_path
+        # to avoid UNIQUE constraint. --resume uses provider_session_id so cwd is not needed.
+        effective_workspace = workspace_path
+        if workspace_path:
+            existing_ws = repo.find_session_by_workspace(user_id, ai_provider, workspace_path)
+            if existing_ws:
+                effective_workspace = None
+
         session_id = self.sessions.create_session(
             user_id=user_id,
             ai_provider=ai_provider,
             provider_session_id=provider_session_id,
             model=model,
-            workspace_path=workspace_path,
+            workspace_path=effective_workspace,
             first_message=log_entry.get("request", ""),
         )
 

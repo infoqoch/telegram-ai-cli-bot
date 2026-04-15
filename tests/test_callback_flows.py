@@ -1126,6 +1126,7 @@ class TestScheduleToSessionCallbackFlows:
         schedule_mock.ai_provider = "claude"
         repo.get_schedule.return_value = schedule_mock
         repo.find_session_by_provider_session_id.return_value = None
+        repo.find_session_by_workspace.return_value = None
         repo.update_message_log_session.return_value = True
         h.sessions._repo = repo
         h.sessions.create_session.return_value = "new-session-id"
@@ -1179,6 +1180,27 @@ class TestScheduleToSessionCallbackFlows:
 
         handlers.sessions.switch_session.assert_called_once_with("12345", "existing-session-id")
         handlers.sessions.create_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resp_sched_workspace_conflict_creates_without_workspace(self, handlers):
+        """같은 workspace에 세션이 이미 있으면 workspace_path 없이 새 세션을 만든다."""
+        repo = handlers.sessions._repo
+        repo.find_session_by_workspace.return_value = {"id": "existing-ws-session"}
+
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:sched:42")
+
+        reply_text = query.message.reply_text.call_args.kwargs["text"]
+        assert "Session created from schedule" in reply_text
+
+        handlers.sessions.create_session.assert_called_once_with(
+            user_id="12345",
+            ai_provider="claude",
+            provider_session_id="cli-uuid-1234",
+            model="sonnet",
+            workspace_path=None,
+            first_message="매일 코드 리뷰",
+        )
 
     @pytest.mark.asyncio
     async def test_resp_sched_invalid_log_id(self, handlers):
