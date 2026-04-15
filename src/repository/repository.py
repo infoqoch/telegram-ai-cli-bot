@@ -519,8 +519,12 @@ class Repository:
         ).fetchone()
         return dict(row) if row else None
 
-    def find_session_by_workspace(self, user_id: str, ai_provider: str, workspace_path: str) -> Optional[dict]:
+    def find_session_by_workspace(
+        self, user_id: str, ai_provider: str, workspace_path: Optional[str]
+    ) -> Optional[dict]:
         """Find an active session by workspace path (for UNIQUE constraint avoidance)."""
+        if not workspace_path:
+            return None
         row = self._conn.execute(
             "SELECT * FROM sessions WHERE user_id = ? AND ai_provider = ? AND workspace_path = ? AND deleted = 0",
             (user_id, ai_provider, workspace_path),

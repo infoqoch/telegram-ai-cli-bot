@@ -186,6 +186,30 @@ class TestSessionOperations:
         assert repo.is_workspace_session("sess1") is True
         assert repo.get_session_workspace_path("sess1") == "/path/to/project"
 
+    def test_find_session_by_workspace(self, repo):
+        """워크스페이스 경로로 활성 세션 조회."""
+        repo.create_session(
+            "user1", "sess1",
+            ai_provider="claude",
+            workspace_path="/path/to/project",
+        )
+
+        found = repo.find_session_by_workspace("user1", "claude", "/path/to/project")
+        assert found is not None
+        assert found["id"] == "sess1"
+
+        # 다른 provider/경로는 매치 안 됨
+        assert repo.find_session_by_workspace("user1", "claude", "/other") is None
+        assert repo.find_session_by_workspace("user1", "codex", "/path/to/project") is None
+
+        # None/빈 문자열 가드
+        assert repo.find_session_by_workspace("user1", "claude", None) is None
+        assert repo.find_session_by_workspace("user1", "claude", "") is None
+
+        # 소프트 삭제된 세션은 제외
+        repo.soft_delete_session("sess1")
+        assert repo.find_session_by_workspace("user1", "claude", "/path/to/project") is None
+
     def test_get_session_by_provider_session_id(self, repo):
         """provider-native session id로 기존 bot session 조회."""
         repo.create_session(
