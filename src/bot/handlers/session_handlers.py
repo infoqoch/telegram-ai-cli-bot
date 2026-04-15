@@ -259,6 +259,18 @@ class SessionHandlers(BaseHandler):
         workspace_name = Path(expanded_path).name
         display_name = session_name or f"[ws]{workspace_name}"
 
+        # Duplicate workspace session → switch to existing (same UX as ws:sess_model button).
+        existing = self.sessions._repo.find_session_by_workspace(user_id, provider, expanded_path)
+        if existing:
+            self.sessions.switch_session(user_id, existing["id"])
+            await update.message.reply_text(
+                f"📁 <b>Workspace session already exists</b>\n\n"
+                f"Switched to existing session: <b>{escape_html(existing.get('name') or display_name)}</b>\n"
+                f"- Path: <code>{escape_html(expanded_path)}</code>",
+                parse_mode="HTML",
+            )
+            return
+
         logger.info(f"/new_workspace - path={expanded_path}, model={model}, name={display_name}")
         session_id = self.sessions.create_session(
             user_id=user_id,

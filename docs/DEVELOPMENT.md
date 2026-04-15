@@ -146,6 +146,24 @@ Each provider CLI has a different mechanism for system prompts, MCP, and session
 - The workspace's own `CLAUDE.md` can then shape coding behavior for that project.
 - Telegram-specific response formatting is layered on top through the bot prompt.
 
+#### One Session Per Workspace Invariant
+
+Only one active session may exist for a given `(user_id, ai_provider, workspace_path)` tuple. This is enforced by a partial `UNIQUE` index (`idx_sessions_workspace_unique`) with predicate `workspace_path IS NOT NULL AND deleted = 0 AND recycled = 0` in [`src/repository/schema.sql`](../src/repository/schema.sql).
+
+`recycled` is in the predicate so a stale-but-not-yet-purged session does NOT block creating a new workspace session. `deleted` is in the predicate so soft-deleted rows never block new inserts.
+
+Path normalization: `Repository.create_session` and `Repository.find_session_by_workspace` both route through `normalize_workspace_path()` (expands `~`, resolves relative segments and symlinks). Callers should not need to canonicalize the path themselves, but doing so upstream (e.g., in handlers that echo the path back to the user) is still encouraged for display consistency.
+
+**Collision handling by call site:**
+
+| Call site | Strategy | Rationale |
+|-----------|----------|-----------|
+| `/new_workspace <path>` (`session_handlers.py`) | pre-check via `find_session_by_workspace` → `switch_session` + message | User explicitly asked for the workspace session — adopt existing matches intent. |
+| `/workspace` → `Session` button (`workspace_handlers.py`) | pre-check over `list_sessions` → `switch_session` + message | Same intent as `/new_workspace` — user-explicit creation. |
+| Schedule log → `resp:sched:` (`session_callbacks.py`) | pre-check → create new session with `workspace_path=None` | User clicked a specific log entry; silently adopting the existing workspace session would overwrite its `provider_session_id` and lose the user's in-progress conversation. The schedule-originated provider session still works via `--resume`; only the workspace tag is dropped. |
+
+When adding a new `create_session(workspace_path=...)` call site, pick the strategy that matches the caller's intent — do NOT centralize into a single "silent drop" policy at the service layer.
+
 ### Schedule Types
 
 - `chat`: regular AI schedule using the selected provider/model.

@@ -403,9 +403,23 @@ An AI agent during self-development may execute `./run.sh restart-soft`. The UX 
 
 A session bound to a local directory. Responds in Telegram format while following the CLAUDE.md rules of that directory. The purpose is to use a per-project AI assistant in Telegram.
 
+### One Session Per Workspace Per AI
+
+Only one active session can exist for a given (user, AI provider, workspace path). Paths are normalized (`~` expanded, relative segments resolved) before comparison so different textual forms of the same directory are treated as equal.
+
+**What happens on collision:**
+
+| Flow | Collision behavior |
+|------|--------------------|
+| `/new_workspace <path>` (manual) | Auto-switches to the existing session. Message: `📁 Workspace session already exists — Switched to existing session: <name>`. |
+| `/workspace` → `Session` button (`ws:sess_model`) | Auto-switches to the existing session. Message: `A workspace session already exists. Switched to existing session: <name>`. |
+| Schedule log → `Create session from log` (`resp:sched:`) | Creates a new session without the workspace tag (workspace_path dropped) to avoid overwriting the existing workspace session's `provider_session_id`. The new session resumes from the log's `provider_session_id`; the user's existing workspace session is untouched. |
+
+Recycled sessions (inactive 24h+) are NOT counted as collisions — creating a new workspace session while an old one is recycled succeeds; the recycled session remains archived until purged.
+
 ### User Scenarios
 
-**Quick workspace session:** `/new_workspace ~/AiSandbox/my-app opus` → created immediately. Path/model/name in one line.
+**Quick workspace session:** `/new_workspace ~/AiSandbox/my-app opus` → created immediately. If a session for the same workspace already exists, auto-switches instead of creating.
 
 **Workspace registration + management:** `/workspace` (= `/ws`) → list screen → `+ Add New` → AI recommendation or manual input.
 
