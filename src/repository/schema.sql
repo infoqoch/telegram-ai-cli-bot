@@ -37,7 +37,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_last_used ON sessions(last_used DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_deleted ON sessions(deleted);
 CREATE INDEX IF NOT EXISTS idx_sessions_recycled ON sessions(recycled);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_workspace_unique
-    ON sessions(user_id, ai_provider, workspace_path) WHERE workspace_path IS NOT NULL AND deleted = 0;
+    ON sessions(user_id, ai_provider, workspace_path)
+    WHERE workspace_path IS NOT NULL AND deleted = 0 AND recycled = 0;
 
 -- user_provider_state: provider별 current/previous session 분리 관리
 CREATE TABLE IF NOT EXISTS user_provider_state (

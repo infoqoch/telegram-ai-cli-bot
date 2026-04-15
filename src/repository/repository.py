@@ -5,8 +5,22 @@ import sqlite3
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+
+
+def normalize_workspace_path(workspace_path: Optional[str]) -> Optional[str]:
+    """Canonicalize a workspace path for storage and equality comparison.
+
+    Returns None for falsy input. Otherwise expands ``~`` and resolves relative
+    segments and symlinks without requiring the path to exist on disk. This keeps
+    the partial UNIQUE index on ``sessions.workspace_path`` effective across
+    callers that may pass the same directory in different textual forms.
+    """
+    if not workspace_path:
+        return None
+    return str(Path(workspace_path).expanduser().resolve(strict=False))
 
 from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS
 from src.schedule_utils import (
@@ -423,6 +437,7 @@ class Repository:
         """Create a new session."""
         now = self._now()
         self.get_or_create_user(user_id)
+        workspace_path = normalize_workspace_path(workspace_path)
 
         self._conn.execute(
             """INSERT INTO sessions
@@ -522,12 +537,20 @@ class Repository:
     def find_session_by_workspace(
         self, user_id: str, ai_provider: str, workspace_path: Optional[str]
     ) -> Optional[dict]:
-        """Find an active session by workspace path (for UNIQUE constraint avoidance)."""
-        if not workspace_path:
+        """Find an active (non-recycled, non-deleted) session by workspace path.
+
+        Mirrors the partial UNIQUE index predicate so lookup matches what the DB
+        would actually block on INSERT. Applies the same path normalization as
+        ``create_session`` so callers can pass any equivalent textual form.
+        """
+        normalized = normalize_workspace_path(workspace_path)
+        if not normalized:
             return None
         row = self._conn.execute(
-            "SELECT * FROM sessions WHERE user_id = ? AND ai_provider = ? AND workspace_path = ? AND deleted = 0",
-            (user_id, ai_provider, workspace_path),
+            """SELECT * FROM sessions
+               WHERE user_id = ? AND ai_provider = ? AND workspace_path = ?
+                 AND deleted = 0 AND recycled = 0""",
+            (user_id, ai_provider, normalized),
         ).fetchone()
         return dict(row) if row else None
 

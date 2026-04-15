@@ -210,6 +210,85 @@ class TestSessionOperations:
         repo.soft_delete_session("sess1")
         assert repo.find_session_by_workspace("user1", "claude", "/path/to/project") is None
 
+    def test_find_session_by_workspace_excludes_recycled(self, repo):
+        """Recycled 세션은 find 결과에서 제외되어야 한다 (UNIQUE predicate와 일치)."""
+        repo.create_session(
+            "user1", "sess1",
+            ai_provider="claude",
+            workspace_path="/path/to/project",
+        )
+        # 세션을 recycled 상태로 만든다
+        repo._conn.execute("UPDATE sessions SET recycled = 1 WHERE id = ?", ("sess1",))
+        repo._conn.commit()
+
+        # Recycled는 매치되지 않아야 함
+        assert repo.find_session_by_workspace("user1", "claude", "/path/to/project") is None
+
+    def test_find_session_by_workspace_normalizes_path(self, repo, tmp_path):
+        """다른 텍스트 표현(~, 상대 경로 등)이어도 같은 세션으로 매치되어야 한다."""
+        import os
+        workspace = tmp_path / "proj"
+        workspace.mkdir()
+        canonical = str(workspace.resolve())
+
+        repo.create_session(
+            "user1", "sess1",
+            ai_provider="claude",
+            workspace_path=str(workspace),
+        )
+
+        # 상대/중복 슬래시/끝 슬래시 표현도 매치되어야 함
+        variants = [
+            canonical,
+            canonical + "/",
+            str(workspace) + "/.",
+            os.path.join(str(workspace), "sub", ".."),
+        ]
+        for variant in variants:
+            assert repo.find_session_by_workspace("user1", "claude", variant) is not None, f"failed to match {variant}"
+
+    def test_create_session_normalizes_workspace_path(self, repo, tmp_path):
+        """INSERT 시 정규화되어 저장되어야 한다."""
+        workspace = tmp_path / "proj"
+        workspace.mkdir()
+        canonical = str(workspace.resolve())
+
+        session = repo.create_session(
+            "user1", "sess1",
+            ai_provider="claude",
+            workspace_path=str(workspace) + "/",  # 끝 슬래시 포함
+        )
+
+        assert session.workspace_path == canonical
+        stored = repo._conn.execute(
+            "SELECT workspace_path FROM sessions WHERE id = ?", ("sess1",)
+        ).fetchone()
+        assert stored["workspace_path"] == canonical
+
+    def test_create_session_allowed_when_only_recycled_exists(self, repo):
+        """Recycled 세션이 있어도 같은 워크스페이스에 새 세션 생성은 허용되어야 한다."""
+        repo.create_session(
+            "user1", "sess1",
+            ai_provider="claude",
+            workspace_path="/path/to/project",
+        )
+        repo._conn.execute("UPDATE sessions SET recycled = 1 WHERE id = ?", ("sess1",))
+        repo._conn.commit()
+
+        # 크래시 없이 생성되어야 함 (이전에는 IntegrityError)
+        repo.create_session(
+            "user1", "sess2",
+            ai_provider="claude",
+            workspace_path="/path/to/project",
+        )
+
+        sessions = repo._conn.execute(
+            "SELECT id, recycled FROM sessions WHERE user_id = ? AND workspace_path = ? AND deleted = 0 ORDER BY id",
+            ("user1", "/path/to/project"),
+        ).fetchall()
+        assert len(sessions) == 2
+        assert {s["id"] for s in sessions} == {"sess1", "sess2"}
+
     def test_get_session_by_provider_session_id(self, repo):
         """provider-native session id로 기존 bot session 조회."""
         repo.create_session(

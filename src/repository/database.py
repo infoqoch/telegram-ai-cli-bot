@@ -127,12 +127,13 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "message_log", "delivery_error", "TEXT")
     _ensure_column(conn, "message_log", "delivered_at", "TEXT")
 
-    # Workspace uniqueness must be provider-aware.
+    # Workspace uniqueness must be provider-aware and exclude recycled rows,
+    # otherwise recycled-but-not-purged sessions block new workspace session creation.
     conn.execute("DROP INDEX IF EXISTS idx_sessions_workspace_unique")
     conn.execute(
         """CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_workspace_unique
            ON sessions(user_id, ai_provider, workspace_path)
-           WHERE workspace_path IS NOT NULL AND deleted = 0"""
+           WHERE workspace_path IS NOT NULL AND deleted = 0 AND recycled = 0"""
     )
 
     conn.execute(
