@@ -529,7 +529,7 @@ class Repository:
     def find_session_by_provider_session_id(self, provider_session_id: str) -> Optional[dict]:
         """Find a session by its provider-native session ID."""
         row = self._conn.execute(
-            "SELECT * FROM sessions WHERE provider_session_id = ? AND deleted = 0",
+            "SELECT * FROM sessions WHERE provider_session_id = ? AND deleted = 0 AND recycled = 0",
             (provider_session_id,),
         ).fetchone()
         return dict(row) if row else None
@@ -866,6 +866,15 @@ class Repository:
         )
         self._conn.commit()
         return cursor.rowcount
+
+    def recycle_session(self, session_id: str) -> bool:
+        """Mark a single session as recycled."""
+        cursor = self._conn.execute(
+            "UPDATE sessions SET recycled = 1 WHERE id = ? AND deleted = 0 AND recycled = 0",
+            (session_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def unrecycle_session(self, session_id: str) -> bool:
         """Restore a recycled session back to active."""
