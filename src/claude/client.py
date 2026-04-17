@@ -95,7 +95,7 @@ class ClaudeClient(BaseCLIClient):
         logger.trace(f"chat() start - msg='{short_msg}'")
         logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or 'none'}")
 
-        normalized_model = get_profile("claude", model).key if model else None
+        normalized_model = get_profile("claude", model).provider_model if model else None
         cmd = self._build_command(message, session_id, normalized_model, workspace_path)
         logger.trace(f"command built - {len(cmd)} parts")
 

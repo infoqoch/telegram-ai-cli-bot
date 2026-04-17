@@ -63,7 +63,7 @@ MODEL_PROFILES = {
             short_label="Opus",
             button_label="Opus",
             badge=MODEL_BADGE_TOP,
-            provider_model="opus",
+            provider_model="claude-opus-4-7",
         ),
         ModelProfile(
             key="sonnet",
