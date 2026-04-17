@@ -365,20 +365,20 @@ class SessionCallbackHandlers(BaseHandler):
         model = log_entry.get("model") or "sonnet"
         workspace_path = log_entry.get("workspace_path")
 
-        # If workspace already has an active session, create without workspace_path
-        # to avoid UNIQUE constraint. --resume uses provider_session_id so cwd is not needed.
-        effective_workspace = workspace_path
+        # If workspace already has an active session, recycle it so the new
+        # schedule-derived session can take the workspace slot.  Keeping
+        # workspace_path is essential: Claude CLI scopes --resume by cwd.
         if workspace_path:
             existing_ws = repo.find_session_by_workspace(user_id, ai_provider, workspace_path)
             if existing_ws:
-                effective_workspace = None
+                repo.recycle_session(existing_ws["id"])
 
         session_id = self.sessions.create_session(
             user_id=user_id,
             ai_provider=ai_provider,
             provider_session_id=provider_session_id,
             model=model,
-            workspace_path=effective_workspace,
+            workspace_path=workspace_path,
             first_message=log_entry.get("request", ""),
         )
 
@@ -762,6 +762,16 @@ class SessionCallbackHandlers(BaseHandler):
         workspace_path = discovered.workspace_path
         if workspace_path and not Path(workspace_path).exists():
             workspace_path = None
+
+        # If workspace already has an active session, recycle it so the newly
+        # imported session can take the workspace slot.  Keeping workspace_path
+        # is essential: Claude CLI scopes --resume by cwd.
+        if workspace_path and self._repository:
+            existing_ws = self._repository.find_session_by_workspace(
+                user_id, provider, workspace_path
+            )
+            if existing_ws:
+                self._repository.recycle_session(existing_ws["id"])
 
         session_id = self.sessions.create_session(
             user_id=user_id,

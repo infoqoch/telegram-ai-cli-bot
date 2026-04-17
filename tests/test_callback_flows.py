@@ -1182,13 +1182,15 @@ class TestScheduleToSessionCallbackFlows:
         handlers.sessions.create_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_resp_sched_workspace_conflict_creates_without_workspace(self, handlers):
-        """같은 workspace에 세션이 이미 있으면 workspace_path 없이 새 세션을 만든다."""
+    async def test_resp_sched_workspace_conflict_recycles_existing(self, handlers):
+        """같은 workspace에 세션이 이미 있으면 기존 세션을 recycle하고 workspace_path를 유지한다."""
         repo = handlers.sessions._repo
         repo.find_session_by_workspace.return_value = {"id": "existing-ws-session"}
 
         query = make_query()
         await handlers._handle_response_session_callback(query, 12345, "resp:sched:42")
+
+        repo.recycle_session.assert_called_once_with("existing-ws-session")
 
         reply_text = query.message.reply_text.call_args.kwargs["text"]
         assert "Session created from schedule" in reply_text
@@ -1198,7 +1200,7 @@ class TestScheduleToSessionCallbackFlows:
             ai_provider="claude",
             provider_session_id="cli-uuid-1234",
             model="sonnet",
-            workspace_path=None,
+            workspace_path="/Users/test/project",
             first_message="매일 코드 리뷰",
         )
 
