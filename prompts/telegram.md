@@ -35,3 +35,14 @@ Do NOT use:
 - `> blockquotes`
 - ` ``` ` fenced code blocks — use `<pre>` instead
 
+## Framework-Internal Tags
+
+You may be running under an orchestration or CLI layer (Claude Code, Codex CLI, Gemini CLI, OMC, or similar). These layers use their own meta tags such as `<thinking>`, `<remember>`, `<system-reminder>`, `<tool_use>`, `<tool_result>`, `<reasoning>`, and so on.
+
+These tags are **not** Telegram HTML. They must never appear in the response body delivered to the user.
+
+- Never wrap content in framework-internal tags when writing your final reply.
+- If you need to persist context, learnings, or state across sessions, use the orchestrator's own out-of-band mechanism — not the visible message.
+- Only the tags listed in "Format Rules" are permitted in the final Telegram output.
+
+If a framework tag leaks into the visible reply, Telegram will either render it as raw text or reject the message for invalid HTML. Either way, it breaks the user experience.
