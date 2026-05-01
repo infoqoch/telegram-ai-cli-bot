@@ -287,6 +287,66 @@ class WeatherLocation:
     lon: float
 
 
+@dataclass
+class QuestionBank:
+    """Question bank collection."""
+    id: int
+    chat_id: int
+    title: str
+    description: str
+    archived: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class QuestionBankQuestion:
+    """Question bank question."""
+    id: int
+    bank_id: int
+    chat_id: int
+    type: str
+    prompt: str
+    answer_text: Optional[str]
+    correct_option_no: Optional[int]
+    model_answer: Optional[str]
+    grading_rubric: Optional[str]
+    explanation: str
+    points: float
+    pass_score: float
+    match_policy: str
+    active: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class QuestionBankOption:
+    """Multiple-choice option for one question."""
+    id: int
+    question_id: int
+    option_no: int
+    text: str
+
+
+@dataclass
+class QuestionBankAttempt:
+    """One submitted answer and grading result."""
+    id: int
+    chat_id: int
+    question_id: int
+    answer_text: str
+    selected_option_no: Optional[int]
+    is_correct: Optional[bool]
+    score: Optional[float]
+    feedback: str
+    ai_status: str
+    ai_model: Optional[str]
+    ai_raw_response: Optional[str]
+    submitted_at: str
+    evaluated_at: Optional[str]
+
+
 class Repository:
     """Unified repository for all data operations."""
 

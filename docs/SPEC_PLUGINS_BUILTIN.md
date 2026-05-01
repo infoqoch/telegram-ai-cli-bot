@@ -658,3 +658,158 @@ Are you sure?
 ```
 
 After deletion: `🗑️ N memos deleted` + list refreshed.
+
+---
+
+## Question Bank Plugin
+
+### Concept
+
+AI-authored question bank with lightweight practice. MVP storage has only four tables: banks, questions, options, and attempts. There is no manual question-add UI; users create or edit questions by using AI Work, and the AI writes directly to the plugin tables through MCP `query_db`.
+
+### Triggers
+
+- Natural language: `문제은행`, `퀴즈`, `문제`, `question_bank`, `quiz` (exact match)
+- Keyword + content: routed to AI with Question Bank context so the AI can insert/update rows
+- Excluded: question patterns like “문제은행이 뭐야” → passed to regular AI
+
+### Main Screen
+
+```
+📚 Question Bank
+
+문제집: 1
+문제: 24
+풀이: 12
+정답률: 75%
+
+문제 생성/수정은 AI와 대화해서 처리합니다.
+
+[▶️ 문제 풀기]
+[❌ 오답 보기] [📊 통계]
+[✨ AI로 문제 만들기]
+[🔄 Refresh]
+```
+
+`[✨ AI로 문제 만들기]` opens `aiwork:question_bank`. The static AI context explains `qb_banks`, `qb_questions`, `qb_options`, and `qb_attempts` plus safe INSERT/UPDATE examples.
+
+### Practice Flow
+
+Practice picks one active random question. MVP has no quiz-session table.
+
+Multiple-choice:
+
+```
+📝 문제 #12
+객관식
+
+HTTP 성공 상태 코드는?
+1. 404
+2. 200
+3. 500
+
+[1] [2] [3]
+[⏭️ 다른 문제] [⬅️ 메인]
+```
+
+Short-answer:
+
+```
+📝 문제 #7
+단답식
+
+대한민국의 수도는?
+
+[✍️ 답 입력]
+[⏭️ 다른 문제] [⬅️ 메인]
+```
+
+Subjective:
+
+```
+📝 문제 #21
+주관식
+
+REST API의 특징을 설명하세요.
+
+[✍️ 답 입력]
+[⏭️ 다른 문제] [⬅️ 메인]
+```
+
+### Grading Rules
+
+- Multiple-choice: selected button number must equal `qb_questions.correct_option_no`.
+- Short-answer: use exact matching only for one clear canonical answer or a tiny alias set such as `서울 || Seoul`.
+- `loose_text` may be used for selected short-answer questions when only spaces, commas, or surrounding parentheses should be ignored. It does not ignore meaningful technical symbols like `+`, `-`, `.`, `/`, `#`, `:`, `_`.
+- Ambiguous short-answer prompts are auto-upgraded to AI grading at answer time. This includes ordered steps, multiple required items, comparisons, long phrase answers, or anything that is not safe for exact matching.
+- Subjective: answer is saved as a pending `qb_attempts` row, then a generated AI grading prompt is dispatched through the normal AI job system. The AI must update that attempt row with score, correctness, feedback, and `ai_status = 'done'`.
+
+### Result Screen
+
+Correct:
+
+```
+✅ 정답
+
+문제 #12
+HTTP 성공 상태 코드는?
+
+내 답: 200
+정답: 2. 200
+점수: 1 / 1
+
+해설
+HTTP 200은 성공입니다.
+
+[✨ AI와 대화]
+[🔁 다시 풀기] [➡️ 다음 문제]
+[⬅️ 메인]
+```
+
+Wrong:
+
+```
+❌ 오답
+
+문제 #7
+대한민국의 수도는?
+
+내 답: 부산
+정답: 서울
+점수: 0 / 1
+
+해설
+단답식은 정확히 일치해야 정답입니다.
+
+[✨ AI와 대화]
+[🔁 다시 풀기] [➡️ 다음 문제]
+[⬅️ 메인]
+```
+
+The result screen always includes `[✨ AI와 대화]`. Tapping it opens a ForceReply prompt and sends the user's follow-up to a new AI session with the question, expected answer, user answer, score, and feedback as context.
+
+### Wrong Answers
+
+```
+❌ 최근 오답
+
+#7 대한민국의 수도는?
+#18 HTTP 캐시 헤더의 역할은?
+
+[🔁 #7] [✨ AI]
+[🔁 #18] [✨ AI]
+[🎯 오답 랜덤] [⬅️ 메인]
+```
+
+### Empty State
+
+If no questions exist:
+
+```
+📭 아직 문제가 없습니다.
+
+아래 버튼으로 AI에게 문제 생성을 요청하세요.
+
+[✨ AI로 문제 만들기]
+[⬅️ 메인]
+```

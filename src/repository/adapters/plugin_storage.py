@@ -6,7 +6,16 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
-from src.repository.repository import Diary, Memo, Todo, WeatherLocation
+from src.repository.repository import (
+    Diary,
+    Memo,
+    QuestionBank,
+    QuestionBankAttempt,
+    QuestionBankOption,
+    QuestionBankQuestion,
+    Todo,
+    WeatherLocation,
+)
 
 if TYPE_CHECKING:
     from src.repository.repository import Repository
@@ -385,3 +394,253 @@ class RepositoryWeatherLocationStore:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def _row_to_question_bank(row: sqlite3.Row) -> QuestionBank:
+    """Convert one SQLite row to the shared QuestionBank dataclass."""
+    return QuestionBank(
+        id=row["id"],
+        chat_id=row["chat_id"],
+        title=row["title"],
+        description=row["description"],
+        archived=bool(row["archived"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_question(row: sqlite3.Row) -> QuestionBankQuestion:
+    """Convert one SQLite row to the shared QuestionBankQuestion dataclass."""
+    return QuestionBankQuestion(
+        id=row["id"],
+        bank_id=row["bank_id"],
+        chat_id=row["chat_id"],
+        type=row["type"],
+        prompt=row["prompt"],
+        answer_text=row["answer_text"],
+        correct_option_no=row["correct_option_no"],
+        model_answer=row["model_answer"],
+        grading_rubric=row["grading_rubric"],
+        explanation=row["explanation"] or "",
+        points=float(row["points"]),
+        pass_score=float(row["pass_score"]),
+        match_policy=row["match_policy"],
+        active=bool(row["active"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_question_option(row: sqlite3.Row) -> QuestionBankOption:
+    """Convert one SQLite row to the shared QuestionBankOption dataclass."""
+    return QuestionBankOption(
+        id=row["id"],
+        question_id=row["question_id"],
+        option_no=row["option_no"],
+        text=row["text"],
+    )
+
+
+def _row_to_question_attempt(row: sqlite3.Row) -> QuestionBankAttempt:
+    """Convert one SQLite row to the shared QuestionBankAttempt dataclass."""
+    is_correct = row["is_correct"]
+    return QuestionBankAttempt(
+        id=row["id"],
+        chat_id=row["chat_id"],
+        question_id=row["question_id"],
+        answer_text=row["answer_text"],
+        selected_option_no=row["selected_option_no"],
+        is_correct=bool(is_correct) if is_correct is not None else None,
+        score=float(row["score"]) if row["score"] is not None else None,
+        feedback=row["feedback"] or "",
+        ai_status=row["ai_status"],
+        ai_model=row["ai_model"],
+        ai_raw_response=row["ai_raw_response"],
+        submitted_at=row["submitted_at"],
+        evaluated_at=row["evaluated_at"],
+    )
+
+
+class RepositoryQuestionBankStore:
+    """Question bank store adapter over the repository."""
+
+    def __init__(self, repo: "Repository"):
+        self._repo = repo
+
+    def ensure_default_bank(self, chat_id: int) -> QuestionBank:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            """SELECT * FROM qb_banks
+               WHERE chat_id = ? AND archived = 0
+               ORDER BY id LIMIT 1""",
+            (chat_id,),
+        ).fetchone()
+        if row:
+            return _row_to_question_bank(row)
+
+        now = _now_utc()
+        cursor = conn.execute(
+            """INSERT INTO qb_banks
+               (chat_id, title, description, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (chat_id, "Default", "AI-created questions", now, now),
+        )
+        conn.commit()
+        return QuestionBank(
+            id=cursor.lastrowid or 0,
+            chat_id=chat_id,
+            title="Default",
+            description="AI-created questions",
+            archived=False,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def stats(self, chat_id: int) -> dict[str, int]:
+        conn = _require_conn(self._repo)
+        bank_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM qb_banks WHERE chat_id = ? AND archived = 0",
+            (chat_id,),
+        ).fetchone()
+        question_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM qb_questions WHERE chat_id = ? AND active = 1",
+            (chat_id,),
+        ).fetchone()
+        attempt_row = conn.execute(
+            """SELECT
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct,
+                   SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) AS wrong
+               FROM qb_attempts
+               WHERE chat_id = ?""",
+            (chat_id,),
+        ).fetchone()
+        return {
+            "banks": bank_row["cnt"] or 0,
+            "questions": question_row["cnt"] or 0,
+            "attempts": attempt_row["total"] or 0,
+            "correct": attempt_row["correct"] or 0,
+            "wrong": attempt_row["wrong"] or 0,
+        }
+
+    def get_question(self, question_id: int, chat_id: int) -> Optional[QuestionBankQuestion]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            "SELECT * FROM qb_questions WHERE id = ? AND chat_id = ? AND active = 1",
+            (question_id, chat_id),
+        ).fetchone()
+        return _row_to_question(row) if row else None
+
+    def get_options(self, question_id: int) -> list[QuestionBankOption]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            "SELECT * FROM qb_options WHERE question_id = ? ORDER BY option_no",
+            (question_id,),
+        ).fetchall()
+        return [_row_to_question_option(row) for row in rows]
+
+    def pick_question(self, chat_id: int, *, wrong_only: bool = False) -> Optional[QuestionBankQuestion]:
+        self.ensure_default_bank(chat_id)
+        conn = _require_conn(self._repo)
+        if wrong_only:
+            row = conn.execute(
+                """SELECT q.*
+                   FROM qb_questions q
+                   WHERE q.chat_id = ?
+                     AND q.active = 1
+                     AND EXISTS (
+                         SELECT 1
+                         FROM qb_attempts a
+                         WHERE a.question_id = q.id
+                           AND a.chat_id = q.chat_id
+                           AND a.is_correct = 0
+                     )
+                   ORDER BY RANDOM()
+                   LIMIT 1""",
+                (chat_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT * FROM qb_questions
+                   WHERE chat_id = ? AND active = 1
+                   ORDER BY RANDOM()
+                   LIMIT 1""",
+                (chat_id,),
+            ).fetchone()
+        return _row_to_question(row) if row else None
+
+    def add_attempt(
+        self,
+        *,
+        chat_id: int,
+        question_id: int,
+        answer_text: str,
+        selected_option_no: Optional[int] = None,
+        is_correct: Optional[bool] = None,
+        score: Optional[float] = None,
+        feedback: str = "",
+        ai_status: str = "not_needed",
+        ai_model: Optional[str] = None,
+        ai_raw_response: Optional[str] = None,
+    ) -> QuestionBankAttempt:
+        now = _now_utc()
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            """INSERT INTO qb_attempts
+               (chat_id, question_id, answer_text, selected_option_no, is_correct,
+                score, feedback, ai_status, ai_model, ai_raw_response,
+                submitted_at, evaluated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                chat_id,
+                question_id,
+                answer_text,
+                selected_option_no,
+                int(is_correct) if is_correct is not None else None,
+                score,
+                feedback,
+                ai_status,
+                ai_model,
+                ai_raw_response,
+                now,
+                now if is_correct is not None else None,
+            ),
+        )
+        conn.commit()
+        attempt = self.get_attempt(cursor.lastrowid or 0, chat_id)
+        if attempt:
+            return attempt
+        return QuestionBankAttempt(
+            id=cursor.lastrowid or 0,
+            chat_id=chat_id,
+            question_id=question_id,
+            answer_text=answer_text,
+            selected_option_no=selected_option_no,
+            is_correct=is_correct,
+            score=score,
+            feedback=feedback,
+            ai_status=ai_status,
+            ai_model=ai_model,
+            ai_raw_response=ai_raw_response,
+            submitted_at=now,
+            evaluated_at=now if is_correct is not None else None,
+        )
+
+    def get_attempt(self, attempt_id: int, chat_id: int) -> Optional[QuestionBankAttempt]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            "SELECT * FROM qb_attempts WHERE id = ? AND chat_id = ?",
+            (attempt_id, chat_id),
+        ).fetchone()
+        return _row_to_question_attempt(row) if row else None
+
+    def recent_wrong_attempts(self, chat_id: int, limit: int = 10) -> list[QuestionBankAttempt]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            """SELECT * FROM qb_attempts
+               WHERE chat_id = ? AND is_correct = 0
+               ORDER BY submitted_at DESC, id DESC
+               LIMIT ?""",
+            (chat_id, limit),
+        ).fetchall()
+        return [_row_to_question_attempt(row) for row in rows]

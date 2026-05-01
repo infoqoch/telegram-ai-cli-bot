@@ -224,6 +224,8 @@ Common optional hooks:
 - The bridge server is [`mcp_servers/plugin_bridge_server.py`](../mcp_servers/plugin_bridge_server.py).
 - Plugin tool handlers must tolerate the separate-process boundary. They cannot rely on bot in-memory state.
 - SQLite reads are fine. SQLite writes need care because the MCP bridge is a separate process.
+- Plugin ForceReply handlers may return `dispatch_ai=True`, `ai_message`, and optional `ai_session_name` to hand off a generated prompt to the normal AI job system. Use this when a plugin needs AI reasoning but should still respect session locking, provider selection, MCP configuration, and detached delivery.
+- Do not add plugin-specific AI dispatch branches to core handlers. Keep the handoff generic and put domain prompts in the plugin.
 
 ## Persistence And Concurrency
 

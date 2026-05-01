@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
-from src.repository.repository import Diary, Memo, Todo, WeatherLocation
+from src.repository.repository import (
+    Diary,
+    Memo,
+    QuestionBank,
+    QuestionBankAttempt,
+    QuestionBankOption,
+    QuestionBankQuestion,
+    Todo,
+    WeatherLocation,
+)
 
 
 class PluginDatabase(Protocol):
@@ -118,3 +127,44 @@ class WeatherLocationStore(Protocol):
 
     def delete(self, chat_id: int) -> bool:
         """Delete the saved weather location for one chat."""
+
+
+class QuestionBankStore(Protocol):
+    """Question bank persistence contract for plugins."""
+
+    def ensure_default_bank(self, chat_id: int) -> QuestionBank:
+        """Return the default bank for one chat, creating it if needed."""
+
+    def stats(self, chat_id: int) -> dict[str, int]:
+        """Return aggregate question/attempt stats for one chat."""
+
+    def get_question(self, question_id: int, chat_id: int) -> Optional[QuestionBankQuestion]:
+        """Return one active question owned by a chat."""
+
+    def get_options(self, question_id: int) -> list[QuestionBankOption]:
+        """Return multiple-choice options for one question."""
+
+    def pick_question(self, chat_id: int, *, wrong_only: bool = False) -> Optional[QuestionBankQuestion]:
+        """Pick one active question for practice."""
+
+    def add_attempt(
+        self,
+        *,
+        chat_id: int,
+        question_id: int,
+        answer_text: str,
+        selected_option_no: Optional[int] = None,
+        is_correct: Optional[bool] = None,
+        score: Optional[float] = None,
+        feedback: str = "",
+        ai_status: str = "not_needed",
+        ai_model: Optional[str] = None,
+        ai_raw_response: Optional[str] = None,
+    ) -> QuestionBankAttempt:
+        """Persist one answer attempt."""
+
+    def get_attempt(self, attempt_id: int, chat_id: int) -> Optional[QuestionBankAttempt]:
+        """Return one attempt owned by a chat."""
+
+    def recent_wrong_attempts(self, chat_id: int, limit: int = 10) -> list[QuestionBankAttempt]:
+        """Return recent wrong attempts."""

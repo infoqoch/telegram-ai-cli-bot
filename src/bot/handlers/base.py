@@ -547,6 +547,35 @@ class BaseHandler:
             parse_mode="HTML",
         )
 
+        if result.get("dispatch_ai"):
+            await self._dispatch_plugin_ai_request(update, chat_id, result)
+
+    async def _dispatch_plugin_ai_request(self, update: Update, chat_id: int, result: dict) -> None:
+        """Create a plugin-owned AI work session and dispatch one generated prompt."""
+        ai_message = result.get("ai_message")
+        if not ai_message:
+            logger.warning("Plugin requested AI dispatch without ai_message")
+            return
+
+        user_id = str(chat_id)
+        provider = self._get_selected_ai_provider(user_id)
+        model = get_default_model(provider)
+        session_name = result.get("ai_session_name") or "Plugin AI"
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=provider,
+            model=model,
+            name=session_name,
+            first_message=f"(Plugin AI: {session_name})",
+        )
+
+        await update.message.reply_text(
+            f"✨ Switched to new session: <b>{escape_html(session_name)}</b>\n"
+            f"<code>{session_id[:8]}</code>",
+            parse_mode="HTML",
+        )
+        await self._dispatch_to_ai(update, chat_id, user_id, ai_message)
+
     def _restore_temp_pending(self) -> int:
         """Restore non-expired pending messages from DB. Returns count restored."""
         return self._pending_requests.restore()
