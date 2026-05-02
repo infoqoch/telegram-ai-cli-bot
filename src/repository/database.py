@@ -105,6 +105,7 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "schedules", "run_at_local", "TEXT")
     if _table_exists(conn, "message_log"):
         _ensure_column(conn, "message_log", "delivery_text", "TEXT")
+        _ensure_column(conn, "message_log", "delivery_markup_json", "TEXT")
         _ensure_column(conn, "message_log", "delivery_status", "TEXT NOT NULL DEFAULT 'not_ready'")
         _ensure_column(conn, "message_log", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "message_log", "delivery_error", "TEXT")
@@ -122,6 +123,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "schedules", "cron_expr", "TEXT")
     _ensure_column(conn, "schedules", "run_at_local", "TEXT")
     _ensure_column(conn, "message_log", "delivery_text", "TEXT")
+    _ensure_column(conn, "message_log", "delivery_markup_json", "TEXT")
     _ensure_column(conn, "message_log", "delivery_status", "TEXT NOT NULL DEFAULT 'not_ready'")
     _ensure_column(conn, "message_log", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "message_log", "delivery_error", "TEXT")

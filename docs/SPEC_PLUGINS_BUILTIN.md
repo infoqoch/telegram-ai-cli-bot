@@ -665,7 +665,7 @@ After deletion: `🗑️ N memos deleted` + list refreshed.
 
 ### Concept
 
-AI-authored question bank with lightweight practice. MVP storage has only four tables: banks, questions, options, and attempts. There is no manual question-add UI; users create or edit questions by using AI Work, and the AI writes directly to the plugin tables through MCP `query_db`.
+AI-authored question bank with lightweight practice. MVP storage has four practice tables: banks, questions, options, and attempts. There is no manual question-add UI; users create or edit questions by using AI Work, and the AI writes directly to the plugin tables through MCP `query_db`. Scheduled practice uses the shared `schedules` table plus one plugin-owned scope table.
 
 ### Triggers
 
@@ -683,24 +683,62 @@ AI-authored question bank with lightweight practice. MVP storage has only four t
 풀이: 12
 정답률: 75%
 
-문제 생성/수정은 AI와 대화해서 처리합니다.
+문제 생성/수정과 스케줄 등록은 AI와 대화해서 처리합니다.
 
-[▶️ 문제 풀기]
+[🎲 전체 랜덤] [📁 문제집]
 [❌ 오답 보기] [📊 통계]
 [✨ AI로 문제 만들기]
 [🔄 Refresh]
 ```
 
-`[✨ AI로 문제 만들기]` opens `aiwork:question_bank`. The static AI context explains `qb_banks`, `qb_questions`, `qb_options`, and `qb_attempts` plus safe INSERT/UPDATE examples.
+`[✨ AI로 문제 만들기]` opens `aiwork:question_bank`. The static AI context explains `qb_banks`, `qb_questions`, `qb_options`, `qb_attempts`, and `qb_schedule_configs` plus safe INSERT/UPDATE examples.
+
+### Bank Scope UI
+
+`[📁 문제집]` opens a bank list:
+
+```
+📁 문제집 목록
+
+#1 Default  문제 12 / 정답률 80%
+#2 네트워크  문제 18 / 정답률 67%
+
+[📁 Default]
+[📁 네트워크]
+[✨ AI로 문제 만들기]
+[⬅️ 메인]
+```
+
+Bank detail:
+
+```
+📁 문제집
+
+네트워크
+
+문제: 18
+풀이: 6
+정답률: 67%
+
+[▶️ 이 문제집 풀기] [❌ 오답 보기]
+[📊 통계]
+[✨ AI로 작업]
+[⬅️ 문제집]
+```
 
 ### Practice Flow
 
 Practice picks one active random question. MVP has no quiz-session table.
+- Global scope: all active questions for `chat_id`
+- Bank scope: active questions from one `qb_banks.id`
+- Wrong-only scope: questions with at least one wrong attempt in that scope
 
 Multiple-choice:
 
 ```
 📝 문제 #12
+📁 네트워크
+전체 문제
 객관식
 
 HTTP 성공 상태 코드는?
@@ -716,6 +754,8 @@ Short-answer:
 
 ```
 📝 문제 #7
+📁 Default
+전체 문제
 단답식
 
 대한민국의 수도는?
@@ -728,6 +768,8 @@ Subjective:
 
 ```
 📝 문제 #21
+📁 AWS
+AWS
 주관식
 
 REST API의 특징을 설명하세요.
@@ -743,6 +785,7 @@ REST API의 특징을 설명하세요.
 - `loose_text` may be used for selected short-answer questions when only spaces, commas, or surrounding parentheses should be ignored. It does not ignore meaningful technical symbols like `+`, `-`, `.`, `/`, `#`, `:`, `_`.
 - Ambiguous short-answer prompts are auto-upgraded to AI grading at answer time. This includes ordered steps, multiple required items, comparisons, long phrase answers, or anything that is not safe for exact matching.
 - Subjective: answer is saved as a pending `qb_attempts` row, then a generated AI grading prompt is dispatched through the normal AI job system. The AI must update that attempt row with score, correctness, feedback, and `ai_status = 'done'`.
+- AI-graded responses may attach extra continuation buttons to the final detached AI reply. Question Bank uses this to keep the user moving after subjective or AI-graded short-answer evaluation.
 
 ### Result Screen
 
@@ -788,10 +831,14 @@ Wrong:
 
 The result screen always includes `[✨ AI와 대화]`. Tapping it opens a ForceReply prompt and sends the user's follow-up to a new AI session with the question, expected answer, user answer, score, and feedback as context.
 
+When the user answers from a bank-scoped or wrong-only flow, both `[🔁 다시 풀기]` and `[➡️ 다음 문제]` preserve that same scope.
+
+For subjective and AI-graded short answers, the immediate “채점 요청됨” message includes `[➡️ 계속 문제 풀기]`, and the final detached AI grading response also includes the same continuation button so the user is not trapped in the grading session log.
+
 ### Wrong Answers
 
 ```
-❌ 최근 오답
+❌ 네트워크 최근 오답
 
 #7 대한민국의 수도는?
 #18 HTTP 캐시 헤더의 역할은?
@@ -800,6 +847,8 @@ The result screen always includes `[✨ AI와 대화]`. Tapping it opens a Force
 [🔁 #18] [✨ AI]
 [🎯 오답 랜덤] [⬅️ 메인]
 ```
+
+Wrong answers may be viewed globally or from a bank detail screen. Bank-scoped wrong lists keep the bank scope when reopening a question or drawing the next wrong question.
 
 ### Empty State
 
@@ -813,3 +862,25 @@ If no questions exist:
 [✨ AI로 문제 만들기]
 [⬅️ 메인]
 ```
+
+### Scheduled Practice
+
+Question Bank registers one plugin schedule action:
+
+- `scheduled_practice`: send one interactive question at schedule time
+
+The schedule row itself stays in the shared `schedules` table:
+
+- `schedule_type = 'plugin'`
+- `plugin_name = 'question_bank'`
+- `action_name = 'scheduled_practice'`
+
+Question Bank-specific scope is stored in `qb_schedule_configs`:
+
+- `scope_type = 'all'`
+- `scope_type = 'bank'` with one `bank_id`
+- `scope_type = 'wrong_all'`
+- `scope_type = 'wrong_bank'` with one `bank_id`
+- `question_count` stays `1` in MVP
+
+If a wrong-only scheduled practice has no remaining wrong questions, the plugin returns no notification for that run. Other empty scopes return an “AI로 문제 만들기” empty state.

@@ -251,6 +251,7 @@ class MessageHandlers(BaseHandler):
         chat_id: int,
         user_id: str,
         message: str,
+        delivery_buttons: list[list[dict[str, str]]] | None = None,
     ) -> None:
         """Common AI dispatch: session decision → detached job spawn.
 
@@ -301,13 +302,16 @@ class MessageHandlers(BaseHandler):
                 return
 
             try:
-                _, start_error = self._start_detached_job(
-                    chat_id=chat_id,
-                    session_id=session_id,
-                    message=message,
-                    model=model,
-                    workspace_path=workspace_path,
-                )
+                start_kwargs = {
+                    "chat_id": chat_id,
+                    "session_id": session_id,
+                    "message": message,
+                    "model": model,
+                    "workspace_path": workspace_path,
+                }
+                if delivery_buttons:
+                    start_kwargs["delivery_buttons"] = delivery_buttons
+                job_id, start_error = self._start_detached_job(**start_kwargs)
             except Exception:
                 await update.message.reply_text("❌ Failed to start detached worker. Please try again.")
                 clear_context()

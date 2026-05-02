@@ -95,7 +95,11 @@ class TestScheduleExecutionService:
 
         mock_plugins.get_plugin_by_name.assert_called_once_with("todo")
         plugin = mock_plugins.get_plugin_by_name.return_value
-        plugin.execute_scheduled_action.assert_called_once_with("daily_wrap", 12345)
+        plugin.execute_scheduled_action.assert_called_once_with(
+            "daily_wrap",
+            12345,
+            schedule=schedule,
+        )
         mock_schedule_manager.update_run.assert_called_once_with("schedule-1")
 
     @pytest.mark.asyncio

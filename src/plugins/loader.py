@@ -15,6 +15,7 @@ from src.repository.adapters import RepositoryPluginDatabase
 
 if TYPE_CHECKING:
     from src.repository import Repository
+    from src.repository.repository import Schedule
 
 
 @dataclass
@@ -185,8 +186,14 @@ class Plugin(ABC):
         label = self.display_name or self.name.replace("_", " ").title()
         return PluginMenuEntry(label=label)
 
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict | None:
+    async def execute_scheduled_action(
+        self,
+        action_name: str,
+        chat_id: int,
+        schedule: Optional["Schedule"] = None,
+    ) -> str | dict | None:
         """스케줄된 액션 실행. str(HTML), dict(text, reply_markup), 또는 None(전송 스킵) 반환."""
+        del schedule
         raise NotImplementedError(f"Action '{action_name}' not implemented")
 
     def register_system_jobs(self, context: PluginSystemJobContext) -> None:

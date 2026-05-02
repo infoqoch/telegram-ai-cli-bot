@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS message_log (
 
     -- delivery
     delivery_text TEXT,
+    delivery_markup_json TEXT,
     delivery_status TEXT NOT NULL DEFAULT 'not_ready',
     delivery_attempts INTEGER NOT NULL DEFAULT 0,
     delivery_error TEXT,

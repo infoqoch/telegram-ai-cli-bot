@@ -161,7 +161,8 @@ END;
             ScheduledAction(name="daily_diary", description="📓 Daily diary reminder"),
         ]
 
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
+    async def execute_scheduled_action(self, action_name: str, chat_id: int, schedule=None) -> str | dict:
+        del schedule
         if action_name == "daily_diary":
             today = app_today()
             date = today.isoformat()

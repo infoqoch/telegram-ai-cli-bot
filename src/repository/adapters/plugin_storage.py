@@ -13,6 +13,7 @@ from src.repository.repository import (
     QuestionBankAttempt,
     QuestionBankOption,
     QuestionBankQuestion,
+    QuestionBankScheduleConfig,
     Todo,
     WeatherLocation,
 )
@@ -461,6 +462,19 @@ def _row_to_question_attempt(row: sqlite3.Row) -> QuestionBankAttempt:
     )
 
 
+def _row_to_question_bank_schedule_config(row: sqlite3.Row) -> QuestionBankScheduleConfig:
+    """Convert one SQLite row to the shared QuestionBankScheduleConfig dataclass."""
+    return QuestionBankScheduleConfig(
+        schedule_id=row["schedule_id"],
+        chat_id=row["chat_id"],
+        scope_type=row["scope_type"],
+        bank_id=row["bank_id"],
+        question_count=row["question_count"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 class RepositoryQuestionBankStore:
     """Question bank store adapter over the repository."""
 
@@ -496,27 +510,70 @@ class RepositoryQuestionBankStore:
             updated_at=now,
         )
 
-    def stats(self, chat_id: int) -> dict[str, int]:
+    def list_banks(self, chat_id: int) -> list[QuestionBank]:
+        self.ensure_default_bank(chat_id)
         conn = _require_conn(self._repo)
-        bank_row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM qb_banks WHERE chat_id = ? AND archived = 0",
+        rows = conn.execute(
+            """SELECT * FROM qb_banks
+               WHERE chat_id = ? AND archived = 0
+               ORDER BY id""",
             (chat_id,),
+        ).fetchall()
+        return [_row_to_question_bank(row) for row in rows]
+
+    def get_bank(self, bank_id: int, chat_id: int) -> Optional[QuestionBank]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            """SELECT * FROM qb_banks
+               WHERE id = ? AND chat_id = ? AND archived = 0""",
+            (bank_id, chat_id),
         ).fetchone()
-        question_row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM qb_questions WHERE chat_id = ? AND active = 1",
-            (chat_id,),
-        ).fetchone()
-        attempt_row = conn.execute(
-            """SELECT
-                   COUNT(*) AS total,
-                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct,
-                   SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) AS wrong
-               FROM qb_attempts
-               WHERE chat_id = ?""",
-            (chat_id,),
-        ).fetchone()
+        return _row_to_question_bank(row) if row else None
+
+    def stats(self, chat_id: int, bank_id: Optional[int] = None) -> dict[str, int]:
+        conn = _require_conn(self._repo)
+        if bank_id is None:
+            bank_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM qb_banks WHERE chat_id = ? AND archived = 0",
+                (chat_id,),
+            ).fetchone()
+            question_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM qb_questions WHERE chat_id = ? AND active = 1",
+                (chat_id,),
+            ).fetchone()
+            attempt_row = conn.execute(
+                """SELECT
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct,
+                       SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) AS wrong
+                   FROM qb_attempts
+                   WHERE chat_id = ?""",
+                (chat_id,),
+            ).fetchone()
+            bank_count = bank_row["cnt"] or 0
+        else:
+            bank_row = self.get_bank(bank_id, chat_id)
+            if bank_row is None:
+                return {"banks": 0, "questions": 0, "attempts": 0, "correct": 0, "wrong": 0}
+            question_row = conn.execute(
+                """SELECT COUNT(*) AS cnt
+                   FROM qb_questions
+                   WHERE chat_id = ? AND bank_id = ? AND active = 1""",
+                (chat_id, bank_id),
+            ).fetchone()
+            attempt_row = conn.execute(
+                """SELECT
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN a.is_correct = 1 THEN 1 ELSE 0 END) AS correct,
+                       SUM(CASE WHEN a.is_correct = 0 THEN 1 ELSE 0 END) AS wrong
+                   FROM qb_attempts a
+                   JOIN qb_questions q ON q.id = a.question_id
+                   WHERE a.chat_id = ? AND q.bank_id = ?""",
+                (chat_id, bank_id),
+            ).fetchone()
+            bank_count = 1
         return {
-            "banks": bank_row["cnt"] or 0,
+            "banks": bank_count,
             "questions": question_row["cnt"] or 0,
             "attempts": attempt_row["total"] or 0,
             "correct": attempt_row["correct"] or 0,
@@ -539,34 +596,68 @@ class RepositoryQuestionBankStore:
         ).fetchall()
         return [_row_to_question_option(row) for row in rows]
 
-    def pick_question(self, chat_id: int, *, wrong_only: bool = False) -> Optional[QuestionBankQuestion]:
+    def pick_question(
+        self,
+        chat_id: int,
+        *,
+        bank_id: Optional[int] = None,
+        wrong_only: bool = False,
+    ) -> Optional[QuestionBankQuestion]:
         self.ensure_default_bank(chat_id)
         conn = _require_conn(self._repo)
         if wrong_only:
-            row = conn.execute(
-                """SELECT q.*
-                   FROM qb_questions q
-                   WHERE q.chat_id = ?
-                     AND q.active = 1
-                     AND EXISTS (
-                         SELECT 1
-                         FROM qb_attempts a
-                         WHERE a.question_id = q.id
-                           AND a.chat_id = q.chat_id
-                           AND a.is_correct = 0
-                     )
-                   ORDER BY RANDOM()
-                   LIMIT 1""",
-                (chat_id,),
-            ).fetchone()
+            if bank_id is None:
+                row = conn.execute(
+                    """SELECT q.*
+                       FROM qb_questions q
+                       WHERE q.chat_id = ?
+                         AND q.active = 1
+                         AND EXISTS (
+                             SELECT 1
+                             FROM qb_attempts a
+                             WHERE a.question_id = q.id
+                               AND a.chat_id = q.chat_id
+                               AND a.is_correct = 0
+                         )
+                       ORDER BY RANDOM()
+                       LIMIT 1""",
+                    (chat_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT q.*
+                       FROM qb_questions q
+                       WHERE q.chat_id = ?
+                         AND q.bank_id = ?
+                         AND q.active = 1
+                         AND EXISTS (
+                             SELECT 1
+                             FROM qb_attempts a
+                             WHERE a.question_id = q.id
+                               AND a.chat_id = q.chat_id
+                               AND a.is_correct = 0
+                         )
+                       ORDER BY RANDOM()
+                       LIMIT 1""",
+                    (chat_id, bank_id),
+                ).fetchone()
         else:
-            row = conn.execute(
-                """SELECT * FROM qb_questions
-                   WHERE chat_id = ? AND active = 1
-                   ORDER BY RANDOM()
-                   LIMIT 1""",
-                (chat_id,),
-            ).fetchone()
+            if bank_id is None:
+                row = conn.execute(
+                    """SELECT * FROM qb_questions
+                       WHERE chat_id = ? AND active = 1
+                       ORDER BY RANDOM()
+                       LIMIT 1""",
+                    (chat_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT * FROM qb_questions
+                       WHERE chat_id = ? AND bank_id = ? AND active = 1
+                       ORDER BY RANDOM()
+                       LIMIT 1""",
+                    (chat_id, bank_id),
+                ).fetchone()
         return _row_to_question(row) if row else None
 
     def add_attempt(
@@ -634,13 +725,75 @@ class RepositoryQuestionBankStore:
         ).fetchone()
         return _row_to_question_attempt(row) if row else None
 
-    def recent_wrong_attempts(self, chat_id: int, limit: int = 10) -> list[QuestionBankAttempt]:
+    def recent_wrong_attempts(
+        self,
+        chat_id: int,
+        limit: int = 10,
+        bank_id: Optional[int] = None,
+    ) -> list[QuestionBankAttempt]:
         conn = _require_conn(self._repo)
-        rows = conn.execute(
-            """SELECT * FROM qb_attempts
-               WHERE chat_id = ? AND is_correct = 0
-               ORDER BY submitted_at DESC, id DESC
-               LIMIT ?""",
-            (chat_id, limit),
-        ).fetchall()
+        if bank_id is None:
+            rows = conn.execute(
+                """SELECT * FROM qb_attempts
+                   WHERE chat_id = ? AND is_correct = 0
+                   ORDER BY submitted_at DESC, id DESC
+                   LIMIT ?""",
+                (chat_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT a.*
+                   FROM qb_attempts a
+                   JOIN qb_questions q ON q.id = a.question_id
+                   WHERE a.chat_id = ? AND a.is_correct = 0 AND q.bank_id = ?
+                   ORDER BY a.submitted_at DESC, a.id DESC
+                   LIMIT ?""",
+                (chat_id, bank_id, limit),
+            ).fetchall()
         return [_row_to_question_attempt(row) for row in rows]
+
+    def save_schedule_config(
+        self,
+        *,
+        schedule_id: str,
+        chat_id: int,
+        scope_type: str,
+        bank_id: Optional[int] = None,
+        question_count: int = 1,
+    ) -> QuestionBankScheduleConfig:
+        now = _now_utc()
+        conn = _require_conn(self._repo)
+        conn.execute(
+            """INSERT INTO qb_schedule_configs
+               (schedule_id, chat_id, scope_type, bank_id, question_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(schedule_id) DO UPDATE SET
+                   chat_id = excluded.chat_id,
+                   scope_type = excluded.scope_type,
+                   bank_id = excluded.bank_id,
+                   question_count = excluded.question_count,
+                   updated_at = excluded.updated_at""",
+            (schedule_id, chat_id, scope_type, bank_id, question_count, now, now),
+        )
+        conn.commit()
+        config = self.get_schedule_config(schedule_id, chat_id)
+        if config:
+            return config
+        return QuestionBankScheduleConfig(
+            schedule_id=schedule_id,
+            chat_id=chat_id,
+            scope_type=scope_type,
+            bank_id=bank_id,
+            question_count=question_count,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def get_schedule_config(self, schedule_id: str, chat_id: int) -> Optional[QuestionBankScheduleConfig]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            """SELECT * FROM qb_schedule_configs
+               WHERE schedule_id = ? AND chat_id = ?""",
+            (schedule_id, chat_id),
+        ).fetchone()
+        return _row_to_question_bank_schedule_config(row) if row else None

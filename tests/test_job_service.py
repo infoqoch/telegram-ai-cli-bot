@@ -82,6 +82,45 @@ async def test_run_job_completes_message_and_releases_lock(repo, session_service
 
 
 @pytest.mark.asyncio
+async def test_run_job_merges_extra_delivery_buttons(repo, session_service):
+    """Detached AI delivery merges plugin-provided buttons with the default session button."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="질문",
+        model="sonnet",
+    )
+    repo.set_message_delivery_markup(
+        job_id,
+        [[{"text": "➡️ 계속 문제 풀기", "callback_data": "qb:practice:b2"}]],
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(text="응답", error=None, session_id="sess1"))
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    sent_call = fake_bot.send_message.await_args_list[-1]
+    markup = sent_call.kwargs["reply_markup"]
+    callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row if btn.callback_data]
+    assert callbacks == ["qb:practice:b2", "resp:switch:sess1"]
+
+
+@pytest.mark.asyncio
 async def test_run_job_drains_persistent_queue(repo, session_service):
     """Detached worker keeps processing queued messages in the same session."""
     session_service.create_session("12345", "sess1", model="sonnet", name="테스트")

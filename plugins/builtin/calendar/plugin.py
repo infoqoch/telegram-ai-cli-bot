@@ -762,8 +762,9 @@ class CalendarPlugin(Plugin):
                             recommended_hour=None, recommended_minute=5),
         ]
 
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
+    async def execute_scheduled_action(self, action_name: str, chat_id: int, schedule=None) -> str | dict:
         from src.time_utils import app_now
+        del chat_id, schedule
 
         if action_name == "morning_briefing":
             return self._build_day_briefing(

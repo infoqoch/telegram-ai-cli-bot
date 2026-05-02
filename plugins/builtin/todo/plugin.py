@@ -142,8 +142,9 @@ END;
             ScheduledAction(name="daily_wrap", description="Daily Wrap-up"),
         ]
 
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
+    async def execute_scheduled_action(self, action_name: str, chat_id: int, schedule=None) -> str:
         """Execute scheduled action."""
+        del schedule
         if action_name == "yesterday_report":
             return self._generate_yesterday_report(chat_id)
         if action_name == "daily_wrap":

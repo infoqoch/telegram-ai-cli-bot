@@ -375,12 +375,16 @@ class TestScheduleExecutorPlugin:
         # Execute the plugin path
         plugin = mock_loader.get_plugin_by_name(schedule.plugin_name)
         response = await plugin.execute_scheduled_action(
-            schedule.action_name, schedule.chat_id
+            schedule.action_name,
+            schedule.chat_id,
+            schedule=schedule,
         )
 
         assert response == "어제 할일 리포트"
         mock_plugin.execute_scheduled_action.assert_called_once_with(
-            "yesterday_report", 12345
+            "yesterday_report",
+            12345,
+            schedule=schedule,
         )
 
     @pytest.mark.asyncio

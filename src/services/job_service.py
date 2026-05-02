@@ -2,6 +2,7 @@
 
 import asyncio
 import html
+import json
 import os
 import time
 from typing import Optional
@@ -304,12 +305,55 @@ class JobService:
             f"{response}"
         )
 
-    @staticmethod
-    def _build_session_action_markup(session_id: str) -> InlineKeyboardMarkup:
-        """Build non-destructive AI-response shortcuts."""
-        return InlineKeyboardMarkup([[
+    def _build_delivery_markup(
+        self,
+        session_id: str,
+        delivery_markup_json: Optional[str] = None,
+    ) -> InlineKeyboardMarkup:
+        """Build AI-response shortcuts with optional extra plugin-provided buttons."""
+        rows: list[list[InlineKeyboardButton]] = []
+
+        if delivery_markup_json:
+            try:
+                payload = json.loads(delivery_markup_json)
+                rows.extend(self._decode_delivery_markup_rows(payload))
+            except Exception as exc:
+                logger.warning(
+                    f"Detached provider delivery markup decode failed - session={session_id[:8]}, "
+                    f"error={self._format_exception(exc)}"
+                )
+
+        rows.append([
             InlineKeyboardButton("💬 Session", callback_data=f"resp:switch:{session_id}"),
-        ]])
+        ])
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def _decode_delivery_markup_rows(payload: object) -> list[list[InlineKeyboardButton]]:
+        """Decode persisted button rows into Telegram inline buttons."""
+        if not isinstance(payload, list):
+            return []
+
+        rows: list[list[InlineKeyboardButton]] = []
+        for row in payload:
+            if not isinstance(row, list):
+                continue
+            buttons: list[InlineKeyboardButton] = []
+            for item in row:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text")
+                callback_data = item.get("callback_data")
+                url = item.get("url")
+                if not isinstance(text, str):
+                    continue
+                if isinstance(callback_data, str):
+                    buttons.append(InlineKeyboardButton(text, callback_data=callback_data))
+                elif isinstance(url, str):
+                    buttons.append(InlineKeyboardButton(text, url=url))
+            if buttons:
+                rows.append(buttons)
+        return rows
 
     async def _send_completion_notice(
         self,
@@ -442,7 +486,7 @@ class JobService:
                 chat_id,
                 full_response,
                 job_id=job_id,
-                reply_markup=self._build_session_action_markup(session_id),
+                reply_markup=self._build_delivery_markup(session_id, job.get("delivery_markup_json")),
             )
             self._repo.mark_message_delivered(job_id)
             logger.info(

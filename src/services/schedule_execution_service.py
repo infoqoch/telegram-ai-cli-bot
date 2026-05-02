@@ -95,7 +95,11 @@ class ScheduleExecutionService:
             plugin = self._plugin_loader.get_plugin_by_name(schedule.plugin_name)
             if not plugin:
                 raise RuntimeError(f"Plugin '{schedule.plugin_name}' not found")
-            result = await plugin.execute_scheduled_action(schedule.action_name, schedule.chat_id)
+            result = await plugin.execute_scheduled_action(
+                schedule.action_name,
+                schedule.chat_id,
+                schedule=schedule,
+            )
             if isinstance(result, dict):
                 # Plugin returned rich response (text + reply_markup)
                 await self._send_plugin_rich_response(schedule.chat_id, schedule.name, result)
@@ -175,4 +179,3 @@ class ScheduleExecutionService:
         return InlineKeyboardMarkup([[
             InlineKeyboardButton("💬 Session", callback_data=f"resp:sched:{log_id}"),
         ]])
-

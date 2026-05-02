@@ -161,6 +161,26 @@ class TestDispatchToAi:
         handlers._start_detached_job.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_dispatch_passes_delivery_buttons_when_present(self, handlers):
+        """플러그인 AI 디스패치용 extra 버튼을 detached job에 전달한다."""
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+
+        buttons = [[{"text": "계속", "callback_data": "qb:practice:all"}]]
+
+        await handlers._dispatch_to_ai(update, 12345, "12345", "hello", delivery_buttons=buttons)
+
+        handlers._start_detached_job.assert_called_once_with(
+            chat_id=12345,
+            session_id="session-abc",
+            message="hello",
+            model="sonnet",
+            workspace_path=None,
+            delivery_buttons=buttons,
+        )
+
+    @pytest.mark.asyncio
     async def test_dispatch_blocked_during_session_creation(self, handlers):
         """세션 생성 중에는 메시지 차단."""
         handlers._creating_sessions.add("12345")

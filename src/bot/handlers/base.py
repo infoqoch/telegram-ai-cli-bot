@@ -3,7 +3,7 @@
 import asyncio
 from collections import defaultdict
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -574,7 +574,13 @@ class BaseHandler:
             f"<code>{session_id[:8]}</code>",
             parse_mode="HTML",
         )
-        await self._dispatch_to_ai(update, chat_id, user_id, ai_message)
+        await self._dispatch_to_ai(
+            update,
+            chat_id,
+            user_id,
+            ai_message,
+            delivery_buttons=result.get("delivery_buttons"),
+        )
 
     def _restore_temp_pending(self) -> int:
         """Restore non-expired pending messages from DB. Returns count restored."""
@@ -595,6 +601,7 @@ class BaseHandler:
         message: str,
         model: str,
         workspace_path: Optional[str] = None,
+        delivery_buttons: Any = None,
     ) -> tuple[Optional[int], Optional[str]]:
         """Create a message_log job, reserve the session lock, and spawn a worker."""
         job_id, error = self._detached_jobs.prepare_job(
@@ -606,6 +613,9 @@ class BaseHandler:
         )
         if error:
             return None, error
+
+        if job_id and delivery_buttons:
+            self._repository.set_message_delivery_markup(job_id, delivery_buttons)
 
         try:
             worker_pid = self._spawn_detached_worker(job_id)

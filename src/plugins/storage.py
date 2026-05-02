@@ -11,6 +11,7 @@ from src.repository.repository import (
     QuestionBankAttempt,
     QuestionBankOption,
     QuestionBankQuestion,
+    QuestionBankScheduleConfig,
     Todo,
     WeatherLocation,
 )
@@ -135,8 +136,14 @@ class QuestionBankStore(Protocol):
     def ensure_default_bank(self, chat_id: int) -> QuestionBank:
         """Return the default bank for one chat, creating it if needed."""
 
-    def stats(self, chat_id: int) -> dict[str, int]:
-        """Return aggregate question/attempt stats for one chat."""
+    def list_banks(self, chat_id: int) -> list[QuestionBank]:
+        """List active banks for one chat."""
+
+    def get_bank(self, bank_id: int, chat_id: int) -> Optional[QuestionBank]:
+        """Return one active bank owned by a chat."""
+
+    def stats(self, chat_id: int, bank_id: Optional[int] = None) -> dict[str, int]:
+        """Return aggregate question/attempt stats for one chat or one bank."""
 
     def get_question(self, question_id: int, chat_id: int) -> Optional[QuestionBankQuestion]:
         """Return one active question owned by a chat."""
@@ -144,7 +151,13 @@ class QuestionBankStore(Protocol):
     def get_options(self, question_id: int) -> list[QuestionBankOption]:
         """Return multiple-choice options for one question."""
 
-    def pick_question(self, chat_id: int, *, wrong_only: bool = False) -> Optional[QuestionBankQuestion]:
+    def pick_question(
+        self,
+        chat_id: int,
+        *,
+        bank_id: Optional[int] = None,
+        wrong_only: bool = False,
+    ) -> Optional[QuestionBankQuestion]:
         """Pick one active question for practice."""
 
     def add_attempt(
@@ -166,5 +179,24 @@ class QuestionBankStore(Protocol):
     def get_attempt(self, attempt_id: int, chat_id: int) -> Optional[QuestionBankAttempt]:
         """Return one attempt owned by a chat."""
 
-    def recent_wrong_attempts(self, chat_id: int, limit: int = 10) -> list[QuestionBankAttempt]:
+    def recent_wrong_attempts(
+        self,
+        chat_id: int,
+        limit: int = 10,
+        bank_id: Optional[int] = None,
+    ) -> list[QuestionBankAttempt]:
         """Return recent wrong attempts."""
+
+    def save_schedule_config(
+        self,
+        *,
+        schedule_id: str,
+        chat_id: int,
+        scope_type: str,
+        bank_id: Optional[int] = None,
+        question_count: int = 1,
+    ) -> QuestionBankScheduleConfig:
+        """Create or replace one question-bank schedule config."""
+
+    def get_schedule_config(self, schedule_id: str, chat_id: int) -> Optional[QuestionBankScheduleConfig]:
+        """Return one schedule config owned by a chat."""

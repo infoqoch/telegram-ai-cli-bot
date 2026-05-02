@@ -57,6 +57,16 @@ qb_attempts (
     submitted_at TEXT,
     evaluated_at TEXT
 )
+
+qb_schedule_configs (
+    schedule_id TEXT PRIMARY KEY,   -- references schedules.id
+    chat_id INTEGER NOT NULL,
+    scope_type TEXT NOT NULL,       -- 'all', 'bank', 'wrong_all', 'wrong_bank'
+    bank_id INTEGER,
+    question_count INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+)
 ```
 
 ## Creation Rules
@@ -93,6 +103,15 @@ Get a bank id:
 SELECT id FROM qb_banks
 WHERE chat_id = {chat_id} AND archived = 0
 ORDER BY id LIMIT 1
+```
+
+List banks first when the user mentions a specific bank:
+
+```sql
+SELECT id, title, description
+FROM qb_banks
+WHERE chat_id = {chat_id} AND archived = 0
+ORDER BY id
 ```
 
 Create a safe short-answer question:
@@ -177,9 +196,53 @@ SET is_correct = 1,
 WHERE id = <attempt_id> AND chat_id = {chat_id}
 ```
 
+## Scheduled Practice
+
+Question Bank schedules use the shared `schedules` table plus `qb_schedule_configs`.
+
+1. Insert one row into `schedules` with:
+   - `schedule_type = 'plugin'`
+   - `plugin_name = 'question_bank'`
+   - `action_name = 'scheduled_practice'`
+   - `message = ''`
+   - `name` describing the scope, e.g. `네트워크 문제집 랜덤 1문제`
+   - reuse the current user's real `user_id`; if you do not know it yet, query an existing row in `schedules` or `users` first
+2. Insert one row into `qb_schedule_configs` using the same `schedule_id`.
+3. Call `reload_schedules()` after the DB writes.
+
+Scope rules:
+
+- `scope_type = 'all'`: all active questions for this chat
+- `scope_type = 'bank'`: one bank only, requires `bank_id`
+- `scope_type = 'wrong_all'`: only previously wrong questions across all banks
+- `scope_type = 'wrong_bank'`: only previously wrong questions in one bank, requires `bank_id`
+- Keep `question_count = 1` for MVP
+
+Example schedule insert:
+
+```sql
+INSERT INTO schedules
+    (id, user_id, chat_id, hour, minute, message, name, schedule_type, trigger_type,
+     cron_expr, run_at_local, ai_provider, model, workspace_path, plugin_name, action_name,
+     enabled, created_at, last_run, last_error, run_count)
+VALUES
+    ('<schedule_id>', '<user_id>', {chat_id}, 9, 0, '', '네트워크 문제집 랜덤 1문제',
+     'plugin', 'cron', '0 9 * * *', NULL, 'claude', 'sonnet', NULL,
+     'question_bank', 'scheduled_practice', 1, datetime('now'), NULL, NULL, 0)
+```
+
+Then:
+
+```sql
+INSERT INTO qb_schedule_configs
+    (schedule_id, chat_id, scope_type, bank_id, question_count)
+VALUES
+    ('<schedule_id>', {chat_id}, 'bank', <bank_id>, 1)
+```
+
 ## Constraints
 
-- This is an MVP. Do not rely on quiz session tables, tags, spaced repetition, or scheduling tables.
+- This is an MVP. Do not rely on quiz session tables, tags, or spaced repetition tables.
 - `query_db` blocks multi-statement SQL, so execute one SQL statement at a time.
 - `DROP` and `ALTER` are not allowed.
 - Escape single quotes inside SQL strings by doubling them.

@@ -347,6 +347,18 @@ class QuestionBankAttempt:
     evaluated_at: Optional[str]
 
 
+@dataclass
+class QuestionBankScheduleConfig:
+    """Question bank schedule scope configuration."""
+    schedule_id: str
+    chat_id: int
+    scope_type: str
+    bank_id: Optional[int]
+    question_count: int
+    created_at: str
+    updated_at: str
+
+
 class Repository:
     """Unified repository for all data operations."""
 
@@ -1658,6 +1670,18 @@ class Repository:
                    delivered_at = NULL
                WHERE id = ?""",
             (self._now(), response, error, delivery_text, queue_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def set_message_delivery_markup(self, queue_id: int, markup: Any) -> bool:
+        """Persist optional inline-button metadata for one generated response."""
+        markup_json = json.dumps(markup, ensure_ascii=False) if markup is not None else None
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET delivery_markup_json = ?
+               WHERE id = ?""",
+            (markup_json, queue_id),
         )
         self._conn.commit()
         return cursor.rowcount > 0

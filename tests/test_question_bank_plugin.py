@@ -35,6 +35,36 @@ def _add_short_question(plugin: QuestionBankPlugin, chat_id: int = 1) -> int:
     return cursor.lastrowid
 
 
+def _add_bank(plugin: QuestionBankPlugin, title: str, chat_id: int = 1) -> int:
+    conn = plugin.store._repo._conn
+    cursor = conn.execute(
+        """INSERT INTO qb_banks (chat_id, title, description)
+           VALUES (?, ?, 'custom bank')""",
+        (chat_id, title),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def _add_short_question_to_bank(
+    plugin: QuestionBankPlugin,
+    bank_id: int,
+    *,
+    chat_id: int = 1,
+    prompt: str,
+    answer_text: str = "서울",
+) -> int:
+    conn = plugin.store._repo._conn
+    cursor = conn.execute(
+        """INSERT INTO qb_questions
+           (bank_id, chat_id, type, prompt, answer_text, explanation)
+           VALUES (?, ?, 'short', ?, ?, '설명')""",
+        (bank_id, chat_id, prompt, answer_text),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
 def _add_alias_short_question(plugin: QuestionBankPlugin, chat_id: int = 1) -> int:
     bank = plugin.store.ensure_default_bank(chat_id)
     conn = plugin.store._repo._conn
@@ -94,12 +124,16 @@ def _add_symbol_short_question(plugin: QuestionBankPlugin, chat_id: int = 1) -> 
 
 def _add_choice_question(plugin: QuestionBankPlugin, chat_id: int = 1) -> int:
     bank = plugin.store.ensure_default_bank(chat_id)
+    return _add_choice_question_to_bank(plugin, bank.id, chat_id=chat_id)
+
+
+def _add_choice_question_to_bank(plugin: QuestionBankPlugin, bank_id: int, chat_id: int = 1) -> int:
     conn = plugin.store._repo._conn
     cursor = conn.execute(
         """INSERT INTO qb_questions
            (bank_id, chat_id, type, prompt, correct_option_no, explanation)
            VALUES (?, ?, 'multiple_choice', 'HTTP 성공 상태 코드는?', 2, 'HTTP 200은 성공입니다.')""",
-        (bank.id, chat_id),
+        (bank_id, chat_id),
     )
     question_id = cursor.lastrowid
     conn.executemany(
@@ -136,6 +170,7 @@ def test_main_screen_has_ai_creation_not_manual_add():
 
     assert "AI로 문제 만들기" in str(result["reply_markup"])
     assert "문제 추가" not in result["text"]
+    assert "문제집" in str(result["reply_markup"])
 
 
 def test_multiple_choice_answer_records_attempt_and_ai_chat_button():
@@ -149,6 +184,38 @@ def test_multiple_choice_answer_records_attempt_and_ai_chat_button():
     stats = plugin.store.stats(1)
     assert stats["attempts"] == 1
     assert stats["correct"] == 1
+
+
+def test_bank_detail_uses_scoped_callbacks():
+    plugin = _make_plugin()
+    bank_id = _add_bank(plugin, "네트워크", chat_id=1)
+    _add_short_question_to_bank(plugin, bank_id, chat_id=1, prompt="OSI 7계층?", answer_text="7")
+
+    result = plugin._handle_bank_detail(1, bank_id)
+
+    markup = str(result["reply_markup"])
+    assert f"qb:practice:b{bank_id}" in markup
+    assert f"qb:wrong:b{bank_id}" in markup
+    assert f"qb:stats:b{bank_id}" in markup
+
+
+def test_pick_question_can_be_scoped_to_bank():
+    plugin = _make_plugin()
+    _add_short_question(plugin, chat_id=1)
+    bank_id = _add_bank(plugin, "네트워크", chat_id=1)
+    _add_short_question_to_bank(
+        plugin,
+        bank_id,
+        chat_id=1,
+        prompt="TCP는 몇 계층?",
+        answer_text="4",
+    )
+
+    question = plugin.store.pick_question(1, bank_id=bank_id)
+
+    assert question is not None
+    assert question.bank_id == bank_id
+    assert question.prompt == "TCP는 몇 계층?"
 
 
 def test_short_answer_uses_strict_trim_matching():
@@ -173,16 +240,29 @@ def test_short_answer_supports_explicit_aliases():
     assert plugin.store.stats(1)["correct"] == 1
 
 
+def test_result_buttons_preserve_bank_scope():
+    plugin = _make_plugin()
+    bank_id = _add_bank(plugin, "네트워크", chat_id=1)
+    question_id = _add_choice_question_to_bank(plugin, bank_id, chat_id=1)
+
+    result = plugin._handle_choice_answer(1, question_id, 2, scope_token=f"b{bank_id}")
+
+    markup = str(result["reply_markup"])
+    assert f"qb:q:{question_id}:b{bank_id}" in markup
+    assert f"qb:practice:b{bank_id}" in markup
+
+
 def test_ambiguous_short_answer_dispatches_ai_grading():
     plugin = _make_plugin()
     question_id = _add_ambiguous_short_question(plugin)
-    interaction = MagicMock(action="answer", state={"question_id": question_id})
+    interaction = MagicMock(action="answer", state={"question_id": question_id, "scope_token": "b9"})
 
     result = plugin.handle_interaction("SYN, SYN-ACK, ACK", 1, interaction=interaction)
 
     assert result["dispatch_ai"] is True
     assert "Short Answer Grading" in result["ai_message"]
     assert "Three-Way Handshake" in result["ai_message"]
+    assert result["delivery_buttons"][0][0]["callback_data"] == "qb:practice:b9"
 
 
 def test_loose_text_ignores_spaces_and_parentheses_only():
@@ -208,7 +288,7 @@ def test_loose_text_preserves_meaningful_symbols():
 def test_subjective_answer_dispatches_ai_grading_prompt():
     plugin = _make_plugin()
     question_id = _add_subjective_question(plugin)
-    interaction = MagicMock(action="answer", state={"question_id": question_id})
+    interaction = MagicMock(action="answer", state={"question_id": question_id, "scope_token": "wa"})
 
     result = plugin.handle_interaction("HTTP 메서드와 stateless를 사용합니다.", 1, interaction=interaction)
 
@@ -216,6 +296,7 @@ def test_subjective_answer_dispatches_ai_grading_prompt():
     assert "UPDATE qb_attempts" in result["ai_message"]
     assert "Subjective Grading" in result["ai_message"]
     assert plugin.store.stats(1)["attempts"] == 1
+    assert result["delivery_buttons"][0][0]["callback_data"] == "qb:practice:wa"
 
 
 def test_ai_followup_dispatch_includes_attempt_context():
@@ -241,3 +322,29 @@ async def test_can_handle_exact_keywords():
     assert await plugin.can_handle("문제은행", 1)
     assert await plugin.can_handle("퀴즈", 1)
     assert not await plugin.can_handle("문제은행이 뭐야", 1)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_practice_uses_bank_scope_config():
+    plugin = _make_plugin()
+    bank_id = _add_bank(plugin, "네트워크", chat_id=1)
+    _add_short_question_to_bank(
+        plugin,
+        bank_id,
+        chat_id=1,
+        prompt="TCP는 몇 계층?",
+        answer_text="4",
+    )
+    plugin.store.save_schedule_config(
+        schedule_id="sched-qb-bank",
+        chat_id=1,
+        scope_type="bank",
+        bank_id=bank_id,
+    )
+    schedule = MagicMock(id="sched-qb-bank")
+
+    result = await plugin.execute_scheduled_action("scheduled_practice", 1, schedule=schedule)
+
+    assert isinstance(result, dict)
+    assert "TCP는 몇 계층?" in result["text"]
+    assert "네트워크" in result["text"]
