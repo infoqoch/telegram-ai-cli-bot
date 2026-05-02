@@ -1686,6 +1686,18 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def set_message_completion_hook(self, queue_id: int, hook: Any) -> bool:
+        """Persist one optional post-AI completion hook for a generated response."""
+        hook_json = json.dumps(hook, ensure_ascii=False) if hook is not None else None
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET completion_hook_json = ?
+               WHERE id = ?""",
+            (hook_json, queue_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def increment_delivery_attempts(self, queue_id: int) -> bool:
         """Count one Telegram delivery attempt for a generated message."""
         cursor = self._conn.execute(
@@ -1726,7 +1738,8 @@ class Repository:
     def get_failed_deliveries(self, max_attempts: int = 10, limit: int = 20) -> list[dict[str, Any]]:
         """Get messages that failed Telegram delivery and are eligible for retry."""
         rows = self._conn.execute(
-            """SELECT id, chat_id, session_id, delivery_text, delivery_attempts, delivery_error
+            """SELECT id, chat_id, session_id, delivery_text, delivery_markup_json,
+                      delivery_attempts, delivery_error
                FROM message_log
                WHERE delivery_status = 'failed'
                  AND delivery_attempts < ?

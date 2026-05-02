@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from telegram import InlineKeyboardMarkup
+
 from typing import TYPE_CHECKING
 
 from src.bot.formatters import escape_html, split_message
 from src.logging_config import logger
+from src.services.delivery_markup import decode_delivery_markup_json
 
 if TYPE_CHECKING:
     from telegram import Bot
@@ -33,6 +36,7 @@ class DeliveryRetryService:
             job_id = row["id"]
             chat_id = row["chat_id"]
             delivery_text = row["delivery_text"]
+            delivery_markup_json = row.get("delivery_markup_json")
             attempts = row["delivery_attempts"]
 
             # Optimistic lock - claim this row
@@ -44,19 +48,23 @@ class DeliveryRetryService:
                 # Increment before send: counts attempt even if send fails (reset to 'failed' on error)
                 self._repo.increment_delivery_attempts(job_id)
                 chunks = split_message(delivery_text)
+                markup = self._build_retry_markup(delivery_markup_json)
 
-                for chunk in chunks:
+                for index, chunk in enumerate(chunks, start=1):
+                    chunk_markup = markup if index == len(chunks) else None
                     try:
                         await bot.send_message(
                             chat_id=chat_id,
                             text=chunk,
                             parse_mode="HTML",
+                            reply_markup=chunk_markup,
                         )
                     except Exception as html_err:
                         logger.debug(f"[DeliveryRetry] HTML send failed, trying plain: {html_err}")
                         await bot.send_message(
                             chat_id=chat_id,
                             text=chunk,
+                            reply_markup=chunk_markup,
                         )
 
                 self._repo.mark_message_delivered(job_id)
@@ -93,3 +101,12 @@ class DeliveryRetryService:
             logger.info(f"[DeliveryRetry] Retry cycle complete: {success_count}/{len(failed)} succeeded")
 
         return success_count
+
+    @staticmethod
+    def _build_retry_markup(delivery_markup_json: str | None) -> InlineKeyboardMarkup | None:
+        """Rebuild persisted inline buttons for a retry send."""
+        try:
+            rows = decode_delivery_markup_json(delivery_markup_json)
+        except Exception:
+            return None
+        return InlineKeyboardMarkup(rows) if rows else None

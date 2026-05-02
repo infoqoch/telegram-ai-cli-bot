@@ -191,6 +191,7 @@ Common optional hooks:
 - `build_storage(repository)`
 - `get_scheduled_actions()`
 - `execute_scheduled_action()`
+- `handle_ai_completion()`
 - `register_system_jobs(context)`
 - `get_tool_specs()`
 - `ai_context.md`
@@ -224,7 +225,9 @@ Common optional hooks:
 - The bridge server is [`mcp_servers/plugin_bridge_server.py`](../mcp_servers/plugin_bridge_server.py).
 - Plugin tool handlers must tolerate the separate-process boundary. They cannot rely on bot in-memory state.
 - SQLite reads are fine. SQLite writes need care because the MCP bridge is a separate process.
-- Plugin ForceReply handlers may return `dispatch_ai=True`, `ai_message`, optional `ai_session_name`, and optional `delivery_buttons` to hand off a generated prompt to the normal AI job system. `delivery_buttons` are attached to the final detached AI response, which is useful for “continue workflow” shortcuts after grading or analysis completes.
+- Plugin ForceReply handlers may return `dispatch_ai=True`, `ai_message`, optional `ai_session_name`, optional `delivery_buttons`, and optional `post_completion_hook` to hand off a generated prompt to the normal AI job system.
+- `delivery_buttons` decorate the final detached AI response without changing its body.
+- `post_completion_hook` lets a plugin replace the final delivered body after the AI job completes. Use this when the AI should update domain data, and the plugin should render the user-facing result card from that stored state.
 - Scheduled plugin actions may receive the full persisted `schedule` object through `execute_scheduled_action(action_name, chat_id, schedule=...)`. Use that when a plugin needs per-schedule config stored in plugin-owned tables.
 - Do not add plugin-specific AI dispatch branches to core handlers. Keep the handoff generic and put domain prompts in the plugin.
 

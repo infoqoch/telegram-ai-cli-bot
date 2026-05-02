@@ -548,9 +548,15 @@ class BaseHandler:
         )
 
         if result.get("dispatch_ai"):
-            await self._dispatch_plugin_ai_request(update, chat_id, result)
+            await self._dispatch_plugin_ai_request(update, chat_id, interaction.plugin_name, result)
 
-    async def _dispatch_plugin_ai_request(self, update: Update, chat_id: int, result: dict) -> None:
+    async def _dispatch_plugin_ai_request(
+        self,
+        update: Update,
+        chat_id: int,
+        plugin_name: str,
+        result: dict,
+    ) -> None:
         """Create a plugin-owned AI work session and dispatch one generated prompt."""
         ai_message = result.get("ai_message")
         if not ai_message:
@@ -580,7 +586,23 @@ class BaseHandler:
             user_id,
             ai_message,
             delivery_buttons=result.get("delivery_buttons"),
+            post_completion_hook=self._build_plugin_completion_hook(plugin_name, result.get("post_completion_hook")),
         )
+
+    @staticmethod
+    def _build_plugin_completion_hook(plugin_name: str, hook: Any) -> Optional[dict[str, Any]]:
+        """Inject the owning plugin name into one plugin-owned completion hook payload."""
+        if not isinstance(hook, dict):
+            return None
+        action = hook.get("action")
+        payload = hook.get("payload")
+        if not isinstance(action, str) or not isinstance(payload, dict):
+            return None
+        return {
+            "plugin_name": plugin_name,
+            "action": action,
+            "payload": payload,
+        }
 
     def _restore_temp_pending(self) -> int:
         """Restore non-expired pending messages from DB. Returns count restored."""
@@ -602,6 +624,7 @@ class BaseHandler:
         model: str,
         workspace_path: Optional[str] = None,
         delivery_buttons: Any = None,
+        post_completion_hook: Any = None,
     ) -> tuple[Optional[int], Optional[str]]:
         """Create a message_log job, reserve the session lock, and spawn a worker."""
         job_id, error = self._detached_jobs.prepare_job(
@@ -616,6 +639,8 @@ class BaseHandler:
 
         if job_id and delivery_buttons:
             self._repository.set_message_delivery_markup(job_id, delivery_buttons)
+        if job_id and post_completion_hook:
+            self._repository.set_message_completion_hook(job_id, post_completion_hook)
 
         try:
             worker_pid = self._spawn_detached_worker(job_id)

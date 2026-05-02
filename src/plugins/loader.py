@@ -196,6 +196,20 @@ class Plugin(ABC):
         del schedule
         raise NotImplementedError(f"Action '{action_name}' not implemented")
 
+    async def handle_ai_completion(
+        self,
+        action_name: str,
+        chat_id: int,
+        payload: dict[str, Any],
+        *,
+        ai_response: str,
+        ai_error: Optional[str],
+        session_id: Optional[str] = None,
+    ) -> str | dict | None:
+        """Optionally override the final delivered message after one AI job completes."""
+        del action_name, chat_id, payload, ai_response, ai_error, session_id
+        return None
+
     def register_system_jobs(self, context: PluginSystemJobContext) -> None:
         """Register plugin-owned system jobs into the shared app runtime."""
         del context

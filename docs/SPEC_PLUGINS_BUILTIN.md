@@ -785,7 +785,7 @@ REST API의 특징을 설명하세요.
 - `loose_text` may be used for selected short-answer questions when only spaces, commas, or surrounding parentheses should be ignored. It does not ignore meaningful technical symbols like `+`, `-`, `.`, `/`, `#`, `:`, `_`.
 - Ambiguous short-answer prompts are auto-upgraded to AI grading at answer time. This includes ordered steps, multiple required items, comparisons, long phrase answers, or anything that is not safe for exact matching.
 - Subjective: answer is saved as a pending `qb_attempts` row, then a generated AI grading prompt is dispatched through the normal AI job system. The AI must update that attempt row with score, correctness, feedback, and `ai_status = 'done'`.
-- AI-graded responses may attach extra continuation buttons to the final detached AI reply. Question Bank uses this to keep the user moving after subjective or AI-graded short-answer evaluation.
+- Subjective and AI-graded short answers use a plugin completion hook. The AI does the grading work, but the final user-visible message is rendered by Question Bank from the updated attempt row.
 
 ### Result Screen
 
@@ -833,7 +833,11 @@ The result screen always includes `[✨ AI와 대화]`. Tapping it opens a Force
 
 When the user answers from a bank-scoped or wrong-only flow, both `[🔁 다시 풀기]` and `[➡️ 다음 문제]` preserve that same scope.
 
-For subjective and AI-graded short answers, the immediate “채점 요청됨” message includes `[➡️ 계속 문제 풀기]`, and the final detached AI grading response also includes the same continuation button so the user is not trapped in the grading session log.
+For subjective and AI-graded short answers:
+
+- The immediate “채점 요청됨” message includes `[➡️ 계속 문제 풀기]`.
+- The AI response itself is not the final UX surface.
+- After grading completes, Question Bank renders the final result card, including `[✨ AI와 대화]`, `[🔁 다시 풀기]`, and `[➡️ 계속 문제 풀기]`.
 
 ### Wrong Answers
 

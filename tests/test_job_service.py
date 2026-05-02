@@ -121,6 +121,65 @@ async def test_run_job_merges_extra_delivery_buttons(repo, session_service):
 
 
 @pytest.mark.asyncio
+async def test_run_job_uses_plugin_completion_hook_for_final_delivery(repo, session_service):
+    """A plugin completion hook can replace the final delivered body with a plugin-rendered card."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="Question Bank Grading")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="채점 프롬프트",
+        model="sonnet",
+    )
+    repo.set_message_completion_hook(
+        job_id,
+        {
+            "plugin_name": "question_bank",
+            "action": "render_attempt_result",
+            "payload": {"attempt_id": 77, "scope_token": "wb2"},
+        },
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(text="원본 AI 응답", error=None, session_id="sess1"))
+
+    plugin = MagicMock()
+    plugin.handle_ai_completion = AsyncMock(
+        return_value={
+            "text": "❌ <b>오답</b>\n\n문제 #77",
+            "delivery_buttons": [[{"text": "➡️ 계속 문제 풀기", "callback_data": "qb:practice:wb2"}]],
+        }
+    )
+    plugin_loader = MagicMock()
+    plugin_loader.get_plugin_by_name.return_value = plugin
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+        plugin_loader=plugin_loader,
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    sent_call = fake_bot.send_message.await_args_list[-1]
+    sent_text = sent_call.kwargs["text"]
+    assert "❌ <b>오답</b>" in sent_text
+    assert "[Claude" not in sent_text
+    callbacks = [btn.callback_data for row in sent_call.kwargs["reply_markup"].inline_keyboard for btn in row]
+    assert callbacks == ["qb:practice:wb2", "resp:switch:sess1"]
+    saved = repo.get_message_log(job_id)
+    assert saved["response"] == "원본 AI 응답"
+    assert "문제 #77" in saved["delivery_text"]
+
+
+@pytest.mark.asyncio
 async def test_run_job_drains_persistent_queue(repo, session_service):
     """Detached worker keeps processing queued messages in the same session."""
     session_service.create_session("12345", "sess1", model="sonnet", name="테스트")

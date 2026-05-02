@@ -252,6 +252,7 @@ class MessageHandlers(BaseHandler):
         user_id: str,
         message: str,
         delivery_buttons: list[list[dict[str, str]]] | None = None,
+        post_completion_hook: dict[str, object] | None = None,
     ) -> None:
         """Common AI dispatch: session decision → detached job spawn.
 
@@ -311,6 +312,8 @@ class MessageHandlers(BaseHandler):
                 }
                 if delivery_buttons:
                     start_kwargs["delivery_buttons"] = delivery_buttons
+                if post_completion_hook:
+                    start_kwargs["post_completion_hook"] = post_completion_hook
                 job_id, start_error = self._start_detached_job(**start_kwargs)
             except Exception:
                 await update.message.reply_text("❌ Failed to start detached worker. Please try again.")

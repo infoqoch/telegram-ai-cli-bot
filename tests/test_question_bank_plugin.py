@@ -263,6 +263,7 @@ def test_ambiguous_short_answer_dispatches_ai_grading():
     assert "Short Answer Grading" in result["ai_message"]
     assert "Three-Way Handshake" in result["ai_message"]
     assert result["delivery_buttons"][0][0]["callback_data"] == "qb:practice:b9"
+    assert result["post_completion_hook"]["action"] == "render_attempt_result"
 
 
 def test_loose_text_ignores_spaces_and_parentheses_only():
@@ -297,6 +298,7 @@ def test_subjective_answer_dispatches_ai_grading_prompt():
     assert "Subjective Grading" in result["ai_message"]
     assert plugin.store.stats(1)["attempts"] == 1
     assert result["delivery_buttons"][0][0]["callback_data"] == "qb:practice:wa"
+    assert result["post_completion_hook"]["action"] == "render_attempt_result"
 
 
 def test_ai_followup_dispatch_includes_attempt_context():
@@ -348,3 +350,33 @@ async def test_scheduled_practice_uses_bank_scope_config():
     assert isinstance(result, dict)
     assert "TCP는 몇 계층?" in result["text"]
     assert "네트워크" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_ai_completion_hook_renders_question_bank_result_card():
+    plugin = _make_plugin()
+    question_id = _add_subjective_question(plugin)
+    attempt = plugin.store.add_attempt(
+        chat_id=1,
+        question_id=question_id,
+        answer_text="HTTP 메서드와 stateless를 사용합니다.",
+        is_correct=False,
+        score=0.5,
+        feedback="핵심 개념이 일부 빠졌습니다.",
+        ai_status="done",
+    )
+
+    result = await plugin.handle_ai_completion(
+        "render_attempt_result",
+        1,
+        {"attempt_id": attempt.id, "scope_token": "wa"},
+        ai_response="채점 결과",
+        ai_error=None,
+        session_id="sess-qb",
+    )
+
+    assert isinstance(result, dict)
+    assert "REST API의 특징을 설명하세요." in result["text"]
+    assert "핵심 개념이 일부 빠졌습니다." in result["text"]
+    assert result["delivery_buttons"][0][0]["callback_data"] == f"qb:ask:{attempt.id}"
+    assert result["delivery_buttons"][1][1]["callback_data"] == "qb:practice:wa"

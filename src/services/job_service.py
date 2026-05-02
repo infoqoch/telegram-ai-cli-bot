@@ -5,7 +5,7 @@ import html
 import json
 import os
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -14,7 +14,11 @@ from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
 from src.bot.formatters import split_message, truncate_message
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
 from src.repository import Repository
+from src.services.delivery_markup import decode_delivery_markup_json
 from src.services.session_service import SessionService
+
+if TYPE_CHECKING:
+    from src.plugins.loader import PluginLoader
 
 
 class JobService:
@@ -27,6 +31,7 @@ class JobService:
         telegram_token: str,
         ai_registry: Optional[AIRegistry] = None,
         claude_client=None,
+        plugin_loader: Optional["PluginLoader"] = None,
     ):
         self._repo = repo
         self._sessions = session_service
@@ -36,6 +41,7 @@ class JobService:
             ai_registry = AIRegistry({"claude": claude_client})
         self._ai_registry = ai_registry
         self._telegram_token = telegram_token
+        self._plugin_loader = plugin_loader
 
     async def run_job(self, job_id: int) -> bool:
         """Run one detached job and drain the persistent queue for the same session."""
@@ -315,8 +321,7 @@ class JobService:
 
         if delivery_markup_json:
             try:
-                payload = json.loads(delivery_markup_json)
-                rows.extend(self._decode_delivery_markup_rows(payload))
+                rows.extend(decode_delivery_markup_json(delivery_markup_json))
             except Exception as exc:
                 logger.warning(
                     f"Detached provider delivery markup decode failed - session={session_id[:8]}, "
@@ -328,32 +333,71 @@ class JobService:
         ])
         return InlineKeyboardMarkup(rows)
 
-    @staticmethod
-    def _decode_delivery_markup_rows(payload: object) -> list[list[InlineKeyboardButton]]:
-        """Decode persisted button rows into Telegram inline buttons."""
-        if not isinstance(payload, list):
-            return []
+    async def _apply_completion_hook(
+        self,
+        job: dict[str, Any],
+        *,
+        session_id: str,
+        chat_id: int,
+        ai_response: str,
+        ai_error: Optional[str],
+    ) -> tuple[Optional[str], Optional[object]]:
+        """Let a plugin override the final delivered message after AI completion."""
+        hook_json = job.get("completion_hook_json")
+        if not hook_json or not self._plugin_loader:
+            return None, None
 
-        rows: list[list[InlineKeyboardButton]] = []
-        for row in payload:
-            if not isinstance(row, list):
-                continue
-            buttons: list[InlineKeyboardButton] = []
-            for item in row:
-                if not isinstance(item, dict):
-                    continue
-                text = item.get("text")
-                callback_data = item.get("callback_data")
-                url = item.get("url")
-                if not isinstance(text, str):
-                    continue
-                if isinstance(callback_data, str):
-                    buttons.append(InlineKeyboardButton(text, callback_data=callback_data))
-                elif isinstance(url, str):
-                    buttons.append(InlineKeyboardButton(text, url=url))
-            if buttons:
-                rows.append(buttons)
-        return rows
+        try:
+            hook = json.loads(hook_json)
+        except Exception as exc:
+            logger.warning(
+                f"Detached completion hook decode failed - session={session_id[:8]}, "
+                f"error={self._format_exception(exc)}"
+            )
+            return None, None
+
+        if not isinstance(hook, dict):
+            return None, None
+
+        plugin_name = hook.get("plugin_name")
+        action = hook.get("action")
+        payload = hook.get("payload")
+        if not isinstance(plugin_name, str) or not isinstance(action, str) or not isinstance(payload, dict):
+            return None, None
+
+        plugin = self._plugin_loader.get_plugin_by_name(plugin_name)
+        if not plugin:
+            logger.warning(
+                f"Detached completion hook plugin missing - session={session_id[:8]}, plugin={plugin_name}"
+            )
+            return None, None
+
+        try:
+            result = await plugin.handle_ai_completion(
+                action,
+                chat_id,
+                payload,
+                ai_response=ai_response,
+                ai_error=ai_error,
+                session_id=session_id,
+            )
+        except Exception as exc:
+            logger.exception(
+                f"Detached completion hook failed - session={session_id[:8]}, "
+                f"plugin={plugin_name}, action={action}, error={exc}"
+            )
+            return None, None
+
+        if result is None:
+            return None, None
+        if isinstance(result, str):
+            return result, None
+        if isinstance(result, dict):
+            text = result.get("text")
+            delivery_buttons = result.get("delivery_buttons")
+            if isinstance(text, str):
+                return text, delivery_buttons
+        return None, None
 
     async def _send_completion_notice(
         self,
@@ -437,26 +481,43 @@ class JobService:
                 error=error,
                 short_message=short_message,
             )
+            delivery_markup_json = job.get("delivery_markup_json")
 
-            session_info = self._sessions.get_session_info(session_id)
-            history_count = self._sessions.get_history_count(session_id)
-            question_preview = truncate_message(message, 30)
-
-            full_response = self._build_full_response(
-                provider_label=provider_label,
-                model_label=model_label,
-                session_info=session_info,
-                history_count=history_count,
-                question_preview=question_preview,
-                response=response,
+            custom_delivery_text, custom_delivery_buttons = await self._apply_completion_hook(
+                job,
+                session_id=session_id,
+                chat_id=chat_id,
+                ai_response=response,
+                ai_error=stored_error,
             )
-            delivery_text = full_response
+            if custom_delivery_text is not None:
+                delivery_body = custom_delivery_text
+                if custom_delivery_buttons is not None:
+                    self._repo.set_message_delivery_markup(job_id, custom_delivery_buttons)
+                    delivery_markup_json = json.dumps(custom_delivery_buttons, ensure_ascii=False)
+            else:
+                delivery_body = response
+
+            if custom_delivery_text is not None:
+                delivery_text = delivery_body
+            else:
+                session_info = self._sessions.get_session_info(session_id)
+                history_count = self._sessions.get_history_count(session_id)
+                question_preview = truncate_message(message, 30)
+                delivery_text = self._build_full_response(
+                    provider_label=provider_label,
+                    model_label=model_label,
+                    session_info=session_info,
+                    history_count=history_count,
+                    question_preview=question_preview,
+                    response=delivery_body,
+                )
 
             self._repo.store_generated_message(
                 job_id,
                 response=response,
                 error=stored_error,
-                delivery_text=full_response,
+                delivery_text=delivery_text,
             )
             logger.info(
                 f"Detached provider persisted generated response - job_id={job_id}, "
@@ -479,14 +540,14 @@ class JobService:
 
             logger.info(
                 f"Detached provider sending Telegram response - job_id={job_id}, "
-                f"session={session_id[:8]}, history_count={history_count}, response_chars={len(full_response)}"
+                f"session={session_id[:8]}, response_chars={len(delivery_text)}"
             )
             await self._send_message_to_chat(
                 bot,
                 chat_id,
-                full_response,
+                delivery_text,
                 job_id=job_id,
-                reply_markup=self._build_delivery_markup(session_id, job.get("delivery_markup_json")),
+                reply_markup=self._build_delivery_markup(session_id, delivery_markup_json),
             )
             self._repo.mark_message_delivered(job_id)
             logger.info(

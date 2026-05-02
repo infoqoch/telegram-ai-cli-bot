@@ -303,6 +303,38 @@ END;
         result["edit"] = False
         return result
 
+    async def handle_ai_completion(
+        self,
+        action_name: str,
+        chat_id: int,
+        payload: dict[str, object],
+        *,
+        ai_response: str,
+        ai_error: Optional[str],
+        session_id: Optional[str] = None,
+    ) -> str | dict | None:
+        del ai_response, session_id
+        if ai_error or action_name != "render_attempt_result":
+            return None
+
+        attempt_id = payload.get("attempt_id")
+        scope_token = payload.get("scope_token")
+        if not isinstance(attempt_id, int) or not isinstance(scope_token, str):
+            return None
+
+        attempt = self.store.get_attempt(attempt_id, chat_id)
+        if not attempt or attempt.is_correct is None:
+            return None
+
+        question = self.store.get_question(attempt.question_id, chat_id)
+        if not question:
+            return None
+
+        return {
+            "text": self._build_ai_completion_result_text(question, attempt),
+            "delivery_buttons": self._build_ai_completion_buttons(question.id, attempt.id, scope_token),
+        }
+
     def _handle_main(self, chat_id: int) -> dict:
         self.store.ensure_default_bank(chat_id)
         stats = self.store.stats(chat_id)
@@ -595,6 +627,7 @@ END;
             "ai_session_name": "Question Bank Grading",
             "ai_message": self._build_subjective_grading_prompt(chat_id, question, attempt),
             "delivery_buttons": [[self._button_payload("➡️ 계속 문제 풀기", continue_button.callback_data)]],
+            "post_completion_hook": self._build_attempt_completion_hook(attempt.id, scope_token),
         }
 
     def _process_ai_graded_short_answer(
@@ -625,6 +658,7 @@ END;
             "ai_session_name": "Question Bank Short Grading",
             "ai_message": self._build_short_grading_prompt(chat_id, question, attempt),
             "delivery_buttons": [[self._button_payload("➡️ 계속 문제 풀기", continue_button.callback_data)]],
+            "post_completion_hook": self._build_attempt_completion_hook(attempt.id, scope_token),
         }
 
     def _render_result(
@@ -953,6 +987,49 @@ User follow-up:
 
     def _button_payload(self, text: str, callback_data: str) -> dict[str, str]:
         return {"text": text, "callback_data": callback_data}
+
+    def _build_attempt_completion_hook(self, attempt_id: int, scope_token: str) -> dict[str, object]:
+        return {
+            "action": "render_attempt_result",
+            "payload": {"attempt_id": attempt_id, "scope_token": scope_token},
+        }
+
+    def _build_ai_completion_result_text(
+        self,
+        question: QuestionBankQuestion,
+        attempt: QuestionBankAttempt,
+    ) -> str:
+        icon = "✅" if attempt.is_correct else "❌"
+        title = "정답" if attempt.is_correct else "오답"
+        score = f"{attempt.score:g}" if attempt.score is not None else "-"
+        lines = [
+            f"{icon} <b>{title}</b>",
+            "",
+            f"<b>문제 #{question.id}</b>",
+            escape_html(question.prompt),
+            "",
+            f"내 답: <code>{escape_html(attempt.answer_text)}</code>",
+            f"정답: <code>{escape_html(self._expected_answer_text(question))}</code>",
+            f"점수: <b>{score}</b> / {question.points:g}",
+        ]
+        if attempt.feedback:
+            lines.extend(["", f"<b>해설</b>\n{escape_html(attempt.feedback)}"])
+        return "\n".join(lines)
+
+    def _build_ai_completion_buttons(
+        self,
+        question_id: int,
+        attempt_id: int,
+        scope_token: str,
+    ) -> list[list[dict[str, str]]]:
+        return [
+            [self._button_payload("✨ AI와 대화", f"qb:ask:{attempt_id}")],
+            [
+                self._button_payload("🔁 다시 풀기", f"qb:q:{question_id}:{scope_token}"),
+                self._button_payload("➡️ 계속 문제 풀기", f"qb:practice:{scope_token}"),
+            ],
+            [self._button_payload("⬅️ 메인", "qb:main")],
+        ]
 
     def _accepted_short_answers(self, question: QuestionBankQuestion) -> list[str]:
         answer_text = question.answer_text or ""

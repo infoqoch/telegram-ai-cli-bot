@@ -181,6 +181,30 @@ class TestDispatchToAi:
         )
 
     @pytest.mark.asyncio
+    async def test_dispatch_passes_post_completion_hook_when_present(self, handlers):
+        """AI 완료 후 플러그인 렌더 훅도 detached job에 전달한다."""
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+
+        hook = {
+            "plugin_name": "question_bank",
+            "action": "render_attempt_result",
+            "payload": {"attempt_id": 10, "scope_token": "all"},
+        }
+
+        await handlers._dispatch_to_ai(update, 12345, "12345", "hello", post_completion_hook=hook)
+
+        handlers._start_detached_job.assert_called_once_with(
+            chat_id=12345,
+            session_id="session-abc",
+            message="hello",
+            model="sonnet",
+            workspace_path=None,
+            post_completion_hook=hook,
+        )
+
+    @pytest.mark.asyncio
     async def test_dispatch_blocked_during_session_creation(self, handlers):
         """세션 생성 중에는 메시지 차단."""
         handlers._creating_sessions.add("12345")

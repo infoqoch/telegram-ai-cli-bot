@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.ai import build_default_registry
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
+from src.plugins.loader import PluginLoader
 from src.repository import init_repository, shutdown_repository
 from src.services.job_service import JobService
 from src.services.session_service import SessionService
@@ -32,11 +33,14 @@ async def _run(job_id: int) -> int:
         session_purge_days=settings.session_purge_days,
     )
     ai_registry = build_default_registry(settings)
+    plugin_loader = PluginLoader(settings.base_dir, repository=repo)
+    plugin_loader.load_all()
     job_service = JobService(
         repo=repo,
         session_service=session_service,
         ai_registry=ai_registry,
         telegram_token=settings.telegram_token,
+        plugin_loader=plugin_loader,
     )
 
     ok = await job_service.run_job(job_id)
