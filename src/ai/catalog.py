@@ -86,31 +86,31 @@ MODEL_PROFILES = {
     ],
     "codex": [
         ModelProfile(
-            key="gpt54_xhigh",
+            key="xhigh",
             provider="codex",
-            label="GPT-5.4 XHigh",
-            short_label="5.4 XHigh",
-            button_label="5.4 XHigh",
+            label="XHigh",
+            short_label="XHigh",
+            button_label="XHigh",
             badge=MODEL_BADGE_TOP,
-            provider_model="gpt-5.4",
+            provider_model="gpt-5.5",
             reasoning_effort="xhigh",
         ),
         ModelProfile(
-            key="gpt54_high",
+            key="high",
             provider="codex",
-            label="GPT-5.4 High",
-            short_label="5.4 High",
-            button_label="5.4 High",
+            label="High",
+            short_label="High",
+            button_label="High",
             badge=MODEL_BADGE_MID,
-            provider_model="gpt-5.4",
+            provider_model="gpt-5.5",
             reasoning_effort="high",
         ),
         ModelProfile(
-            key="gpt53_codex_medium",
+            key="medium",
             provider="codex",
-            label="GPT-5.3 Codex Medium",
-            short_label="5.3 Codex",
-            button_label="5.3 Codex",
+            label="Medium",
+            short_label="Medium",
+            button_label="Medium",
             badge=MODEL_BADGE_LIGHT,
             provider_model="gpt-5.3-codex",
             reasoning_effort="medium",
@@ -162,11 +162,32 @@ def _get_default_model_overrides() -> dict[str, str]:
     return overrides
 
 
-MODEL_KEY_INDEX = {
-    profile.key: profile
-    for provider_profiles in MODEL_PROFILES.values()
-    for profile in provider_profiles
+MODEL_KEY_ALIASES = {
+    "codex": {
+        # Keep existing DB/session/env values working after moving Codex keys to
+        # provider-local profiles. The concrete CLI model can now change independently.
+        "codex_xhigh": "xhigh",
+        "codex_high": "high",
+        "codex_medium": "medium",
+        "gpt54_xhigh": "xhigh",
+        "gpt54_high": "high",
+        "gpt55_xhigh": "xhigh",
+        "gpt55_high": "high",
+        "gpt53_codex_medium": "medium",
+    },
 }
+
+
+def resolve_model_key(model: str | None, provider: str | None = None) -> str | None:
+    """Return the canonical profile key for a user-facing or legacy model key."""
+    if model is None:
+        return None
+    if provider:
+        return MODEL_KEY_ALIASES.get(provider, {}).get(model, model)
+    for provider_aliases in MODEL_KEY_ALIASES.values():
+        if model in provider_aliases:
+            return provider_aliases[model]
+    return model
 
 
 def get_provider_label(provider: str) -> str:
@@ -197,6 +218,14 @@ def get_provider_profiles(provider: str) -> list[ModelProfile]:
     return list(MODEL_PROFILES.get(provider, []))
 
 
+def _find_provider_profile(provider: str, model: str) -> ModelProfile | None:
+    """Find a profile within one provider namespace."""
+    for profile in get_provider_profiles(provider):
+        if profile.key == model:
+            return profile
+    return None
+
+
 def get_default_model(provider: str) -> str:
     """Return default model profile key for a provider.
 
@@ -204,8 +233,9 @@ def get_default_model(provider: str) -> str:
     """
     overrides = _get_default_model_overrides()
     override = overrides.get(provider)
-    if override and override in MODEL_KEY_INDEX:
-        return override
+    resolved_override = resolve_model_key(override, provider)
+    if resolved_override and _find_provider_profile(provider, resolved_override):
+        return resolved_override
     # First profile = highest tier model
     profiles = MODEL_PROFILES.get(provider, MODEL_PROFILES[DEFAULT_PROVIDER])
     return profiles[0].key
@@ -213,11 +243,12 @@ def get_default_model(provider: str) -> str:
 
 def get_profile(provider: str, model: str | None) -> ModelProfile:
     """Return one profile, falling back to the provider default."""
-    model = model or get_default_model(provider)
-    for profile in get_provider_profiles(provider):
-        if profile.key == model:
-            return profile
-    return MODEL_KEY_INDEX[get_default_model(provider)]
+    model = resolve_model_key(model, provider) or get_default_model(provider)
+    profile = _find_provider_profile(provider, model)
+    if profile:
+        return profile
+    default_profile = _find_provider_profile(provider, get_default_model(provider))
+    return default_profile or MODEL_PROFILES[DEFAULT_PROVIDER][0]
 
 
 def get_profile_label(provider: str, model: str | None) -> str:
@@ -247,6 +278,7 @@ def is_supported_provider(provider: str) -> bool:
 
 def is_supported_model(provider: str, model: str) -> bool:
     """Whether the profile key is supported for a provider."""
+    model = resolve_model_key(model, provider) or model
     return any(profile.key == model for profile in get_provider_profiles(provider))
 
 
@@ -255,10 +287,16 @@ def infer_provider_from_model(model: str | None) -> str:
     if not model:
         return DEFAULT_PROVIDER
 
-    if model in ("opus", "sonnet", "haiku"):
+    canonical_model = resolve_model_key(model) or model
+
+    if canonical_model in ("opus", "sonnet", "haiku"):
         return "claude"
-    if model.startswith("gpt") or "codex" in model:
+    if (
+        model.startswith("gpt")
+        or model.startswith("codex")
+        or canonical_model in {"xhigh", "high", "medium"}
+    ):
         return "codex"
-    if model.startswith("gemini"):
+    if canonical_model.startswith("gemini"):
         return "gemini"
     return DEFAULT_PROVIDER

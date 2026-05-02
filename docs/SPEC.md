@@ -185,7 +185,7 @@ The user activates one AI provider at a time.
 | Provider | Character | Session/model examples |
 |----------|-----------|------------------------|
 | `Claude` | Conversational coding assistant | `opus`, `sonnet`, `haiku` |
-| `Codex` | ChatGPT login-based CLI coding agent | `GPT-5.4 High`, `GPT-5.4 XHigh`, `GPT-5.3 Codex Medium` |
+| `Codex` | ChatGPT login-based CLI coding agent | `high`, `xhigh`, `medium` |
 | `Gemini` | Google Gemini CLI agent | `Pro`, `Flash`, `Flash Lite` |
 
 ### `/select_ai`
@@ -326,9 +326,9 @@ Users do not need to know the underlying CLI flags. The UI only shows human-read
 | Claude | `Opus` | `opus` |
 | Claude | `Sonnet` | `sonnet` |
 | Claude | `Haiku` | `haiku` |
-| Codex | `GPT-5.4 High` | `model=gpt-5.4`, `reasoning=high` |
-| Codex | `GPT-5.4 XHigh` | `model=gpt-5.4`, `reasoning=xhigh` |
-| Codex | `GPT-5.3 Codex Medium` | `model=gpt-5.3-codex`, `reasoning=medium` |
+| Codex | `High` | profile key `high`, current backing `model=gpt-5.5`, `reasoning=high` |
+| Codex | `XHigh` | profile key `xhigh`, current backing `model=gpt-5.5`, `reasoning=xhigh` |
+| Codex | `Medium` | profile key `medium`, current backing `model=gpt-5.3-codex`, `reasoning=medium` |
 | Gemini | `Pro` | `gemini-2.5-pro` |
 | Gemini | `Flash` | `gemini-2.5-flash` |
 | Gemini | `Flash Lite` | `gemini-2.5-flash-lite` |
@@ -336,6 +336,8 @@ Users do not need to know the underlying CLI flags. The UI only shows human-read
 - The profile key is stored in the DB; the actual per-provider CLI flags are interpreted internally.
 - Only UI labels are shown in buttons, session list, `/session`, and `/tasks`.
 - Codex profiles are treated as "model profile" concepts that include reasoning depth.
+- Codex stores provider-local profile keys (`xhigh`, `high`, `medium`) like Claude stores `opus` / `sonnet` / `haiku`; concrete GPT versions are selected inside `src/ai/catalog.py`.
+- Legacy Codex keys such as `codex_high`, `gpt54_high`, and `gpt54_xhigh` are accepted as aliases and normalized to the provider-local keys.
 
 ### Session Rename (`/rename`)
 

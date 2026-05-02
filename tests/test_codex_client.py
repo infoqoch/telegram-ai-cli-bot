@@ -53,7 +53,7 @@ class TestCodexClient:
 
     def test_build_command_includes_project_mcp_overrides(self, client):
         """Codex commands should expose the shared project-local MCP bridge."""
-        cmd = client._build_command("Hello", session_id=None, model="gpt54_xhigh", workspace_path=None)
+        cmd = client._build_command("Hello", session_id=None, model="xhigh", workspace_path=None)
 
         import sys
         root = Path(__file__).resolve().parents[1]
@@ -64,10 +64,20 @@ class TestCodexClient:
 
         assert expected_command in cmd
         assert expected_args in cmd
+        assert "-m" in cmd
+        assert cmd[cmd.index("-m") + 1] == "gpt-5.5"
+        assert 'model_reasoning_effort="xhigh"' in cmd
 
     def test_build_command_skips_mcp_overrides_without_config(self, client):
         """Codex should not emit MCP config overrides when no project config exists."""
         with patch.object(CodexClient, "_load_project_mcp_servers", return_value={}):
-            cmd = client._build_command("Hello", session_id=None, model="gpt54_xhigh", workspace_path=None)
+            cmd = client._build_command("Hello", session_id=None, model="xhigh", workspace_path=None)
 
         assert not any(part.startswith("mcp_servers.") for part in cmd)
+
+    def test_build_command_accepts_legacy_gpt54_alias(self, client):
+        """Legacy saved profile keys should route to the current Codex model."""
+        cmd = client._build_command("Hello", session_id=None, model="gpt54_high", workspace_path=None)
+
+        assert cmd[cmd.index("-m") + 1] == "gpt-5.5"
+        assert 'model_reasoning_effort="high"' in cmd

@@ -469,7 +469,7 @@ class TestSessionCallbackFlows:
         assert "📥 Import Local" in buttons
         assert "☑️ Multi Delete" in buttons
         assert "📚 🧠 Opus" not in buttons
-        assert "🤖 🧠 5.4 XHigh" not in buttons
+        assert "🤖 🧠 XHigh" not in buttons
 
     @pytest.mark.asyncio
     async def test_sess_new_opens_model_picker(self, handlers):
@@ -484,9 +484,9 @@ class TestSessionCallbackFlows:
         assert "📚 🧠 Opus" in buttons
         assert "📚 🚀 Sonnet" in buttons
         assert "📚 ⚡ Haiku" in buttons
-        assert "🤖 🧠 5.4 XHigh" in buttons
-        assert "🤖 🚀 5.4 High" in buttons
-        assert "🤖 ⚡ 5.3 Codex" in buttons
+        assert "🤖 🧠 XHigh" in buttons
+        assert "🤖 🚀 High" in buttons
+        assert "🤖 ⚡ Medium" in buttons
 
     @pytest.mark.asyncio
     async def test_sess_new_force_reply(self, handlers):
@@ -501,12 +501,12 @@ class TestSessionCallbackFlows:
     async def test_sess_new_codex_selection_switches_provider(self, handlers):
         """Codex 모델 선택 시 current AI도 Codex로 동기화된다."""
         query = make_query()
-        await handlers._handle_new_session_callback(query, 12345, "gpt54_high")
+        await handlers._handle_new_session_callback(query, 12345, "high")
 
         handlers.sessions.select_ai_provider.assert_called_once_with("12345", "codex")
         text = get_text(query)
         assert "🤖 Codex" in text
-        assert "5.4 High" in text
+        assert "High" in text
 
     @pytest.mark.asyncio
     async def test_sess_switch(self, handlers):

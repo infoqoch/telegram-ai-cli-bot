@@ -90,7 +90,7 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 | `BOT_LOG_DIR` | `.data/logs/` | Log file directory |
 | `BOT_MAIN_MENU_PLUGINS` | (none) | Comma-separated plugin names to promote to the main menu |
 | `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
-| `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (overrides built-in default) |
+| `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (`xhigh`/`high`/`medium`; legacy `gpt54_*` aliases still work) |
 | `DEFAULT_MODEL_GEMINI` | (none) | Default Gemini model profile (gemini-pro/gemini-flash/gemini-flash-lite) |
 
 ## Gemini Setup
