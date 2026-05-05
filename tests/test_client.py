@@ -92,8 +92,8 @@ class TestClaudeClient:
         assert result == "(no content)"
 
     @pytest.mark.asyncio
-    async def test_chat_removes_generated_mcp_config(self, client, tmp_path):
-        """Claude MCP config temp file is cleaned up after command execution."""
+    async def test_chat_keeps_shared_mcp_config(self, client, tmp_path):
+        """Claude MCP config file remains available for concurrent CLI calls."""
         mcp_config = tmp_path / "mcp_test.json"
         mcp_config.write_text("{}", encoding="utf-8")
 
@@ -105,7 +105,7 @@ class TestClaudeClient:
             response = await client.chat("Hello")
 
         assert response.text == "ok"
-        assert not mcp_config.exists()
+        assert mcp_config.exists()
 
 
 class TestChatError:

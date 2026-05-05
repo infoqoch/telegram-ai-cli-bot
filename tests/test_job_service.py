@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.claude.client import ChatError, ChatResponse
+from src.network_guard import CircuitOpen
 from src.repository.database import init_schema
 from src.repository.repository import Repository
 from src.services.job_service import JobService
@@ -402,3 +403,38 @@ async def test_run_job_preserves_response_when_delivery_fails(repo, session_serv
     assert saved["delivery_error"] == "NetworkUnavailable: telegram: RuntimeError: Timed out"
     assert saved["delivered_at"] is None
     assert repo.get_session_lock("sess1") is None
+
+
+@pytest.mark.asyncio
+async def test_run_job_does_not_count_delivery_attempt_when_circuit_open(repo, session_service):
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="질문",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(text="응답", error=None, session_id="sess1"))
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock(side_effect=CircuitOpen("telegram", "circuit open"))
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    saved = repo.get_message_log(job_id)
+    assert saved["delivery_status"] == "failed"
+    assert saved["delivery_attempts"] == 0
+    assert saved["delivery_error"] == "CircuitOpen: telegram: circuit open"
+    assert saved["delivered_at"] is None

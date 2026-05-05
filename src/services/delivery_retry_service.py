@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from src.bot.formatters import escape_html, split_message
 from src.logging_config import logger
-from src.network_guard import NetworkUnavailable, network_guard
+from src.network_guard import CircuitOpen, NetworkUnavailable, network_guard
 from src.services.delivery_markup import decode_delivery_markup_json
 
 if TYPE_CHECKING:
@@ -45,9 +45,16 @@ class DeliveryRetryService:
                 logger.debug(f"[DeliveryRetry] job_id={job_id} already claimed, skipping")
                 continue
 
-            try:
-                # Increment before send: counts attempt even if send fails (reset to 'failed' on error)
+            attempt_counted = False
+
+            def count_attempt_once() -> None:
+                nonlocal attempt_counted
+                if attempt_counted:
+                    return
                 self._repo.increment_delivery_attempts(job_id)
+                attempt_counted = True
+
+            try:
                 chunks = split_message(delivery_text)
                 markup = self._build_retry_markup(delivery_markup_json)
 
@@ -62,31 +69,47 @@ class DeliveryRetryService:
                             parse_mode="HTML",
                             reply_markup=chunk_markup,
                         )
+                        count_attempt_once()
                     except Exception as html_err:
+                        if isinstance(html_err, CircuitOpen):
+                            raise
+                        count_attempt_once()
                         if isinstance(html_err, NetworkUnavailable):
                             raise
                         logger.debug(f"[DeliveryRetry] HTML send failed, trying plain: {html_err}")
-                        await network_guard.run_async(
-                            "telegram",
-                            bot.send_message,
-                            chat_id=chat_id,
-                            text=chunk,
-                            reply_markup=chunk_markup,
-                        )
+                        try:
+                            await network_guard.run_async(
+                                "telegram",
+                                bot.send_message,
+                                chat_id=chat_id,
+                                text=chunk,
+                                reply_markup=chunk_markup,
+                            )
+                            count_attempt_once()
+                        except Exception as plain_err:
+                            if isinstance(plain_err, CircuitOpen):
+                                raise
+                            count_attempt_once()
+                            raise
 
                 self._repo.mark_message_delivered(job_id)
                 success_count += 1
                 logger.info(f"[DeliveryRetry] Successfully retried job_id={job_id}, chat_id={chat_id}")
 
             except Exception as exc:
+                effective_attempts = attempts + (1 if attempt_counted else 0)
                 logger.warning(
                     f"[DeliveryRetry] Retry failed - job_id={job_id}, "
-                    f"attempts={attempts + 1}, error={exc}"
+                    f"attempts={effective_attempts}, error={exc}"
                 )
+                if isinstance(exc, CircuitOpen) and not attempt_counted:
+                    self._repo.mark_message_delivery_failed(job_id, str(exc))
+                    continue
+
                 # Check if max attempts reached
-                if attempts + 1 >= MAX_DELIVERY_ATTEMPTS:
+                if effective_attempts >= MAX_DELIVERY_ATTEMPTS:
                     self._repo.mark_delivery_abandoned(job_id)
-                    logger.warning(f"[DeliveryRetry] Abandoned job_id={job_id} after {attempts + 1} attempts")
+                    logger.warning(f"[DeliveryRetry] Abandoned job_id={job_id} after {effective_attempts} attempts")
                     # Try to notify user about abandoned message
                     try:
                         preview = escape_html(
@@ -96,7 +119,7 @@ class DeliveryRetryService:
                             "telegram",
                             bot.send_message,
                             chat_id=chat_id,
-                            text=f"⚠️ Message delivery failed (attempt {attempts + 1}).\n\n"
+                            text=f"⚠️ Message delivery failed (attempt {effective_attempts}).\n\n"
                                  f"<i>Preview:</i> {preview}",
                             parse_mode="HTML",
                         )

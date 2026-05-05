@@ -71,25 +71,6 @@ class BaseCLIClient:
         config_path.write_text(json.dumps(config), encoding="utf-8")
         return str(config_path)
 
-    @staticmethod
-    def _command_option_value(cmd: list[str], option: str) -> Optional[str]:
-        """Return the value immediately following a CLI option."""
-        try:
-            index = cmd.index(option)
-        except ValueError:
-            return None
-        value_index = index + 1
-        if value_index >= len(cmd):
-            return None
-        return cmd[value_index]
-
-    @staticmethod
-    def _remove_temp_file(path: Optional[str]) -> None:
-        if not path:
-            return
-        with suppress(OSError):
-            Path(path).unlink()
-
     def _resolve_prompts(self, workspace_path: Optional[str]) -> PromptConfig:
         """Determine prompts for one AI call.
 

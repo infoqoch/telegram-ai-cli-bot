@@ -13,7 +13,7 @@ from src.ai import AIRegistry, get_profile_label, get_provider_label
 from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
 from src.bot.formatters import split_message, truncate_message
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
-from src.network_guard import NetworkUnavailable, network_guard
+from src.network_guard import CircuitOpen, NetworkUnavailable, network_guard
 from src.repository import Repository
 from src.services.delivery_markup import decode_delivery_markup_json
 from src.services.session_service import SessionService
@@ -598,15 +598,13 @@ class JobService:
         for index, chunk in enumerate(chunks, start=1):
             chunk_markup = reply_markup if index == len(chunks) else None
             try:
-                if job_id is not None:
-                    self._repo.increment_delivery_attempts(job_id)
                 logger.info(
                     f"Detached provider Telegram send - chat_id={chat_id}, chunk={index}/{len(chunks)}, "
                     f"chars={len(chunk)}, parse_mode=HTML"
                 )
-                await network_guard.run_async(
-                    "telegram",
-                    bot.send_message,
+                await self._send_telegram_with_attempt_count(
+                    bot,
+                    job_id=job_id,
                     chat_id=chat_id,
                     text=chunk,
                     parse_mode="HTML",
@@ -620,12 +618,10 @@ class JobService:
                     f"chat_id={chat_id}, chunk={index}/{len(chunks)}, "
                     f"error={self._format_exception(exc)}"
                 )
-                if job_id is not None:
-                    self._repo.increment_delivery_attempts(job_id)
                 try:
-                    await network_guard.run_async(
-                        "telegram",
-                        bot.send_message,
+                    await self._send_telegram_with_attempt_count(
+                        bot,
+                        job_id=job_id,
                         chat_id=chat_id,
                         text=chunk,
                         reply_markup=chunk_markup,
@@ -637,3 +633,22 @@ class JobService:
                         f"error={self._format_exception(fallback_exc)}"
                     )
                     raise
+
+    async def _send_telegram_with_attempt_count(
+        self,
+        bot: Bot,
+        *,
+        job_id: Optional[int],
+        **kwargs,
+    ) -> None:
+        try:
+            await network_guard.run_async("telegram", bot.send_message, **kwargs)
+        except CircuitOpen:
+            raise
+        except Exception:
+            if job_id is not None:
+                self._repo.increment_delivery_attempts(job_id)
+            raise
+        else:
+            if job_id is not None:
+                self._repo.increment_delivery_attempts(job_id)
