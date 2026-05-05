@@ -66,6 +66,7 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 | Concurrency | Per-user async locks |
 | Session isolation | `session_locks` prevent duplicate execution on the same session |
 | Delivery retry | Failed Telegram sends retried every 60s, up to 10 times |
+| Network guard | Telegram, Calendar, and Weather network calls use dependency-scoped circuit breakers |
 | Message length | `MAX_MESSAGE_LENGTH` = 4096 enforced |
 
 ## Environment Variables
@@ -92,6 +93,20 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 | `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
 | `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (`xhigh`/`high`/`medium`; legacy `gpt54_*` aliases still work) |
 | `DEFAULT_MODEL_GEMINI` | (none) | Default Gemini model profile (gemini-pro/gemini-flash/gemini-flash-lite) |
+| `NETWORK_GUARD_FAILURE_THRESHOLD` | `3` | Transient network failures before opening a dependency circuit |
+| `NETWORK_GUARD_RESET_SECONDS` | `120` | Seconds to skip calls for an open dependency circuit before retrying |
+
+## Network Reliability
+
+Network calls are grouped by dependency, not by feature. A Google Calendar outage opens only the `google_calendar` circuit; Weather and Telegram continue independently. Current dependency keys are:
+
+- `telegram`: Telegram Bot API request/send/retrieve/admin notification traffic
+- `google_calendar`: Google Calendar API calls from the Calendar plugin
+- `weather`: Weather and geocoding API calls from the Weather plugin
+
+When a circuit is open, the bot skips calls to that dependency until the reset window expires. Telegram delivery retry does not consume retry attempts while the Telegram circuit is already open, because no real network send was attempted.
+
+Generated AI responses are stored before Telegram delivery. If Telegram delivery fails, the stored response is retried every 60 seconds until sent or abandoned after 10 actual delivery attempts. Delivery is at-least-once: timeout cases where Telegram accepted a message but the bot did not receive the response can still produce duplicates.
 
 ## Gemini Setup
 

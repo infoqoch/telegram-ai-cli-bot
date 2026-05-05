@@ -132,6 +132,34 @@ Each provider CLI has a different mechanism for system prompts, MCP, and session
 - Delivery retry exists so a successful AI result is less likely to be lost because Telegram delivery failed once.
 - SQLite is used for operational durability, not just feature storage.
 
+### Network Guard And Delivery Semantics
+
+The shared network guard lives in [`src/network_guard.py`](../src/network_guard.py). It is a callable interceptor plus circuit breaker, not a Java-style reflection proxy. Each guarded call names a dependency key, and circuit state is isolated per key.
+
+Current dependency keys:
+
+| Dependency | Covered Boundary |
+|------------|------------------|
+| `telegram` | PTB request layer, direct Telegram sends, admin notification HTTP calls |
+| `google_calendar` | Google Calendar `request.execute()` calls |
+| `weather` | Weather plugin `httpx` geocoding and forecast calls |
+
+The Telegram boundary is primarily enforced by [`src/telegram_request.py`](../src/telegram_request.py), which wraps PTB's `BaseRequest`. Direct send wrappers still exist around delivery-critical paths so tests with mocked bots and fallback decisions use the same transient error classification.
+
+Transient dependency failures raise `NetworkUnavailable`. Once the threshold is reached, later calls raise `CircuitOpen` without touching the network until the reset window expires. A `CircuitOpen` does not count as a Telegram delivery attempt unless an actual send attempt already happened in the same delivery flow.
+
+Generated detached AI responses are persisted via `store_generated_message()` before Telegram delivery starts. Delivery status then follows this model:
+
+- `pending`: generated response exists and delivery is being attempted
+- `sent`: Telegram returned success; retry ignores the row
+- `failed`: response is preserved for retry
+- `retrying`: retry worker has claimed the row with an optimistic update
+- `abandoned`: max actual delivery attempts reached
+
+This is at-least-once delivery. It prevents losing completed AI responses, but it cannot prove exactly-once delivery because Telegram may accept a message and then the client may time out before seeing the success response. Chunked messages can also partially deliver before a later chunk fails. Do not treat delivery retry as a duplicate-free transport.
+
+Claude MCP config is written to a stable `.data/mcp_config.json` path. Do not delete it after each call; concurrent CLI processes may be starting with the same config path.
+
 ### Local Session Discovery And Adoption
 
 - The bot keeps its own session DB.
