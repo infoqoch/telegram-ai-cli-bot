@@ -58,6 +58,34 @@ class TestDetachedJobManager:
         ):
             assert manager._is_expected_worker_alive(99123, 41) is False
 
+    def test_spawn_worker_sanitizes_subscription_cli_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+        monkeypatch.setenv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1")
+        monkeypatch.delenv("PYTHONPYCACHEPREFIX", raising=False)
+        manager = DetachedJobManager(
+            MagicMock(),
+            base_dir=tmp_path,
+            python_executable="/usr/bin/python3",
+        )
+
+        with patch("src.bot.runtime.detached_job_manager.get_log_dir", return_value=tmp_path / "logs"), patch(
+            "src.bot.runtime.detached_job_manager.os.path.isfile",
+            return_value=False,
+        ), patch("src.bot.runtime.detached_job_manager.subprocess.Popen") as popen:
+            popen.return_value.pid = 99123
+
+            assert manager.spawn_worker(41) == 99123
+
+        env = popen.call_args.kwargs["env"]
+        assert env["PYTHONUNBUFFERED"] == "1"
+        assert env["PYTHONPYCACHEPREFIX"] == ".build"
+        assert "OPENAI_API_KEY" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "GEMINI_API_KEY" not in env
+        assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" not in env
+
     @pytest.mark.asyncio
     async def test_cleanup_orphaned_jobs_notifies_for_stale_locks(self):
         repo = MagicMock()

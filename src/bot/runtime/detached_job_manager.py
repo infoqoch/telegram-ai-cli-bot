@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from src.ai.env_safety import build_cli_subprocess_env
 from src.bot.formatters import escape_html
 from src.logging_config import logger
 from src.runtime_paths import get_log_dir
@@ -125,8 +126,7 @@ class DetachedJobManager:
 
     def spawn_worker(self, job_id: int) -> int:
         """Spawn one detached worker process for a queued message job."""
-        env = os.environ.copy()
-        env.pop("CLAUDECODE", None)
+        env = build_cli_subprocess_env()
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("PYTHONPYCACHEPREFIX", ".build")
 

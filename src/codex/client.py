@@ -1,26 +1,76 @@
 """Async Codex CLI client."""
 
 import asyncio
+from contextlib import suppress
 import json
 import re
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from src.ai.base_client import BaseCLIClient, PromptConfig
 from src.ai.catalog import get_profile
 from src.ai.client_types import ChatError, ChatResponse
 from src.logging_config import logger
+from src.runtime_paths import get_data_dir
 
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_CODEX_PROMPT_CONFIG_KEY = "model_instructions_file"
 
 
 class CodexClient(BaseCLIClient):
     """Async wrapper for Codex CLI."""
 
-    def _inject_prompt_args(self, cmd: list[str], prompts: PromptConfig) -> None:
+    @staticmethod
+    def _prompt_content(prompts: PromptConfig) -> Optional[str]:
+        return prompts.system or prompts.append
+
+    @classmethod
+    def _write_prompt_file(cls, content: str) -> str:
+        prompt_dir = get_data_dir() / "codex-prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".md",
+            prefix="instructions_",
+            delete=False,
+            dir=prompt_dir,
+            encoding="utf-8",
+        ) as handle:
+            handle.write(content)
+            return handle.name
+
+    @staticmethod
+    def _remove_prompt_file(path: Optional[str]) -> None:
+        if not path:
+            return
+        with suppress(OSError):
+            Path(path).unlink()
+
+    def _prepare_prompt_file(self, session_id: Optional[str], workspace_path: Optional[str]) -> Optional[str]:
+        if session_id:
+            return None
+
+        content = self._prompt_content(self._resolve_prompts(workspace_path))
+        if not content:
+            return None
+        return self._write_prompt_file(content)
+
+    def _inject_prompt_args(
+        self,
+        cmd: list[str],
+        prompts: PromptConfig,
+        prompt_file_path: Optional[str] = None,
+    ) -> None:
         """Inject prompt arguments using Codex CLI flags."""
-        content = prompts.system or prompts.append
-        if content:
-            cmd.extend(["-c", f'instructions="{content}"'])
+        content = self._prompt_content(prompts)
+        if not content:
+            return
+        if prompt_file_path:
+            encoded = self._format_toml_value(prompt_file_path)
+            cmd.extend(["-c", f"{_CODEX_PROMPT_CONFIG_KEY}={encoded}"])
+            return
+        cmd.extend(["-c", f"instructions={self._format_toml_value(content)}"])
 
     @classmethod
     def _load_project_mcp_servers(cls) -> dict[str, dict]:
@@ -93,14 +143,17 @@ class CodexClient(BaseCLIClient):
     ) -> ChatResponse:
         """Send one message via codex exec/exec resume."""
         profile = get_profile("codex", model)
-        cmd = self._build_command(
-            message=message,
-            session_id=session_id,
-            model=profile.key,
-            workspace_path=workspace_path,
-        )
+        prompt_file_path: Optional[str] = None
 
         try:
+            prompt_file_path = self._prepare_prompt_file(session_id, workspace_path)
+            cmd = self._build_command(
+                message=message,
+                session_id=session_id,
+                model=profile.key,
+                workspace_path=workspace_path,
+                prompt_file_path=prompt_file_path,
+            )
             output, error, returncode = await self._run_command(
                 cmd,
                 timeout=self.timeout,
@@ -112,6 +165,8 @@ class CodexClient(BaseCLIClient):
         except Exception as e:
             logger.exception(f"Codex CLI exception: {e}")
             return ChatResponse(str(e), ChatError.CLI_ERROR, session_id)
+        finally:
+            self._remove_prompt_file(prompt_file_path)
 
         if returncode != 0 and not output:
             return ChatResponse(error or "Codex CLI failed", ChatError.CLI_ERROR, session_id)
@@ -124,6 +179,7 @@ class CodexClient(BaseCLIClient):
         session_id: Optional[str],
         model: str,
         workspace_path: Optional[str],
+        prompt_file_path: Optional[str] = None,
     ) -> list[str]:
         """Build codex exec command."""
         profile = get_profile("codex", model)
@@ -141,8 +197,8 @@ class CodexClient(BaseCLIClient):
         common.append("--dangerously-bypass-approvals-and-sandbox")
         common.append("--skip-git-repo-check")
 
-        prompts = self._resolve_prompts(workspace_path)
-        self._inject_prompt_args(common, prompts)
+        prompts = PromptConfig() if session_id else self._resolve_prompts(workspace_path)
+        self._inject_prompt_args(common, prompts, prompt_file_path)
         self._inject_project_mcp_args(common)
 
         if session_id:

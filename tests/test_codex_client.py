@@ -1,6 +1,7 @@
 """Codex CLI client tests."""
 
 import asyncio
+import json
 from pathlib import Path
 import signal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -81,3 +82,109 @@ class TestCodexClient:
 
         assert cmd[cmd.index("-m") + 1] == "gpt-5.5"
         assert 'model_reasoning_effort="high"' in cmd
+
+    @pytest.mark.asyncio
+    async def test_run_command_sanitizes_cli_env(self, client, monkeypatch):
+        """Provider subprocesses should not inherit API-key auth routes."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_process = AsyncMock()
+            mock_process.pid = 12345
+            mock_process.communicate = AsyncMock(return_value=(b"{}", b""))
+            mock_exec.return_value = mock_process
+
+            await client._run_command(["codex", "exec"], timeout=1)
+
+        env = mock_exec.call_args.kwargs["env"]
+        assert "OPENAI_API_KEY" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "GEMINI_API_KEY" not in env
+
+    @pytest.mark.asyncio
+    async def test_chat_uses_model_instructions_file_for_fresh_session(self, tmp_path, monkeypatch):
+        """Fresh Codex sessions should pass system prompts via a temp instruction file."""
+        monkeypatch.setenv("BOT_DATA_DIR", str(tmp_path / "data"))
+        prompt_path = tmp_path / "telegram.md"
+        prompt_path.write_text("system prompt\nwith quotes: \"ok\"", encoding="utf-8")
+        client = CodexClient(command="codex", system_prompt_file=prompt_path, timeout=60)
+        captured: dict[str, object] = {}
+
+        async def fake_run_command(cmd, timeout=None, cwd=None):
+            captured["cmd"] = cmd
+            config_values = [cmd[index + 1] for index, value in enumerate(cmd) if value == "-c"]
+            instruction_configs = [
+                value for value in config_values if value.startswith("model_instructions_file=")
+            ]
+            assert len(instruction_configs) == 1
+            prompt_file = Path(json.loads(instruction_configs[0].split("=", 1)[1]))
+            captured["prompt_file"] = prompt_file
+            assert prompt_file.read_text(encoding="utf-8") == prompt_path.read_text(encoding="utf-8")
+            assert not any(value.startswith("instructions=") for value in config_values)
+            return (
+                "\n".join(
+                    [
+                        json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {"type": "agent_message", "text": "ok"},
+                            }
+                        ),
+                    ]
+                ),
+                "",
+                0,
+            )
+
+        with patch.object(CodexClient, "_load_project_mcp_servers", return_value={}), patch.object(
+            client,
+            "_run_command",
+            side_effect=fake_run_command,
+        ):
+            response = await client.chat("Hello", session_id=None, model="xhigh")
+
+        assert response.text == "ok"
+        assert response.session_id == "thread-1"
+        assert isinstance(captured["prompt_file"], Path)
+        assert not captured["prompt_file"].exists()
+
+    @pytest.mark.asyncio
+    async def test_chat_does_not_reinject_model_instructions_file_on_resume(self, tmp_path, monkeypatch):
+        """Resumed Codex sessions should rely on the existing thread instructions."""
+        monkeypatch.setenv("BOT_DATA_DIR", str(tmp_path / "data"))
+        prompt_path = tmp_path / "telegram.md"
+        prompt_path.write_text("system prompt", encoding="utf-8")
+        client = CodexClient(command="codex", system_prompt_file=prompt_path, timeout=60)
+        captured: dict[str, list[str]] = {}
+
+        async def fake_run_command(cmd, timeout=None, cwd=None):
+            captured["cmd"] = cmd
+            return (
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "text": "resumed"},
+                    }
+                ),
+                "",
+                0,
+            )
+
+        with patch.object(CodexClient, "_load_project_mcp_servers", return_value={}), patch.object(
+            client,
+            "_run_command",
+            side_effect=fake_run_command,
+        ):
+            response = await client.chat("Hello", session_id="thread-1", model="xhigh")
+
+        config_values = [
+            captured["cmd"][index + 1]
+            for index, value in enumerate(captured["cmd"])
+            if value == "-c"
+        ]
+        assert response.text == "resumed"
+        assert not any(value.startswith("model_instructions_file=") for value in config_values)
+        assert not any(value.startswith("instructions=") for value in config_values)

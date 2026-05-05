@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+from src.ai.env_safety import build_cli_subprocess_env
 from src.logging_config import logger
 
 
@@ -138,6 +139,7 @@ class BaseCLIClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=build_cli_subprocess_env(),
             start_new_session=True,
         )
         logger.trace(f"subprocess created - pid={process.pid}")
