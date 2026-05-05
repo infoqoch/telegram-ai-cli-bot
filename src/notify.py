@@ -2,9 +2,9 @@
 
 import asyncio
 import httpx
-from typing import Optional
 
 from src.config import get_settings
+from src.network_guard import NetworkUnavailable, network_guard
 
 
 async def send_dev_report(
@@ -45,9 +45,13 @@ async def send_dev_report(
         "parse_mode": "HTML",
     }
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload)
-        return response.status_code == 200
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await network_guard.run_async("telegram", client.post, url, json=payload)
+            return response.status_code == 200
+    except NetworkUnavailable as exc:
+        print(f"Telegram network unavailable: {exc}")
+        return False
 
 
 def notify_sync(

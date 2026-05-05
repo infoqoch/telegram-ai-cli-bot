@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.lock import ProcessLock
+from src.network_guard import network_guard
 from src.runtime_paths import get_supervisor_lock_path
 from src.runtime_exit_codes import RuntimeExitCode, describe_exit_code, is_restartable_exit_code
 
@@ -132,7 +133,7 @@ def notify_admin(message: str) -> bool:
         }
 
         with httpx.Client(timeout=10) as client:
-            response = client.post(url, json=data)
+            response = network_guard.run_sync("telegram", client.post, url, json=data)
 
         if response.status_code == 200:
             logger.info(f"admin notification sent successfully")

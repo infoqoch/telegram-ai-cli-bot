@@ -97,6 +97,7 @@ class ClaudeClient(BaseCLIClient):
 
         normalized_model = get_profile("claude", model).provider_model if model else None
         cmd = self._build_command(message, session_id, normalized_model, workspace_path)
+        mcp_config_path = self._command_option_value(cmd, "--mcp-config")
         logger.trace(f"command built - {len(cmd)} parts")
 
         try:
@@ -179,6 +180,8 @@ class ClaudeClient(BaseCLIClient):
         except Exception as e:
             logger.exception(f"Claude CLI error: {e}")
             return ChatResponse("", ChatError.CLI_ERROR, None)
+        finally:
+            self._remove_temp_file(mcp_config_path)
 
     @classmethod
     def _parse_structured_error(

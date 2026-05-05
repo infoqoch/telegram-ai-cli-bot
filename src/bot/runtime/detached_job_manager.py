@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Optional
 from src.ai.env_safety import build_cli_subprocess_env
 from src.bot.formatters import escape_html
 from src.logging_config import logger
+from src.network_guard import network_guard
 from src.runtime_paths import get_log_dir
 
 if TYPE_CHECKING:
@@ -269,7 +270,9 @@ class DetachedJobManager:
         """Notify a user that a detached job response could not be delivered."""
         try:
             short_request = job["request"][:50]
-            await bot.send_message(
+            await network_guard.run_async(
+                "telegram",
+                bot.send_message,
                 chat_id=job["chat_id"],
                 text=(
                     f"⚠️ Could not deliver the response due to: {reason}\n"

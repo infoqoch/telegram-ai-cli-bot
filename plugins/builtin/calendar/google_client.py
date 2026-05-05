@@ -11,6 +11,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from src.logging_config import logger
+from src.network_guard import NetworkUnavailable, network_guard
 
 load_dotenv()
 
@@ -82,6 +83,14 @@ class GoogleCalendarClient:
         self._service = build("calendar", "v3", credentials=creds)
         return self._service
 
+    def _execute_request(self, operation: str, request):
+        try:
+            return network_guard.run_sync("google_calendar", request.execute)
+        except NetworkUnavailable as exc:
+            self.last_error = str(exc)
+            logger.warning(f"Google Calendar {operation} unavailable: {_log_safe(self.last_error)}")
+            raise
+
     def list_events(
         self,
         date_start: datetime,
@@ -90,19 +99,20 @@ class GoogleCalendarClient:
     ) -> list[CalendarEvent]:
         try:
             service = self._get_service()
-            result = (
-                service.events()
-                .list(
+            result = self._execute_request(
+                "list_events",
+                service.events().list(
                     calendarId=self._calendar_id,
                     timeMin=date_start.isoformat(),
                     timeMax=date_end.isoformat(),
                     maxResults=max_results,
                     singleEvents=True,
                     orderBy="startTime",
-                )
-                .execute()
+                ),
             )
             return [self._parse_event(item) for item in result.get("items", [])]
+        except NetworkUnavailable:
+            raise
         except Exception as e:
             self.last_error = _extract_error_reason(e)
             logger.error("Google Calendar list_events error: " + _log_safe(self.last_error), exc_info=True)
@@ -111,12 +121,13 @@ class GoogleCalendarClient:
     def get_event(self, event_id: str) -> Optional[CalendarEvent]:
         try:
             service = self._get_service()
-            item = (
-                service.events()
-                .get(calendarId=self._calendar_id, eventId=event_id)
-                .execute()
+            item = self._execute_request(
+                "get_event",
+                service.events().get(calendarId=self._calendar_id, eventId=event_id),
             )
             return self._parse_event(item)
+        except NetworkUnavailable:
+            raise
         except Exception as e:
             self.last_error = _extract_error_reason(e)
             logger.error("Google Calendar get_event error: " + _log_safe(self.last_error), exc_info=True)
@@ -150,12 +161,13 @@ class GoogleCalendarClient:
                     "end": {"dateTime": end.isoformat(), "timeZone": tz},
                 }
 
-            item = (
-                service.events()
-                .insert(calendarId=self._calendar_id, body=body)
-                .execute()
+            item = self._execute_request(
+                "create_event",
+                service.events().insert(calendarId=self._calendar_id, body=body),
             )
             return self._parse_event(item)
+        except NetworkUnavailable:
+            raise
         except Exception as e:
             self.last_error = _extract_error_reason(e)
             logger.error("Google Calendar create_event error: " + _log_safe(self.last_error), exc_info=True)
@@ -164,10 +176,15 @@ class GoogleCalendarClient:
     def delete_event(self, event_id: str) -> bool:
         try:
             service = self._get_service()
-            service.events().delete(
-                calendarId=self._calendar_id, eventId=event_id
-            ).execute()
+            self._execute_request(
+                "delete_event",
+                service.events().delete(
+                    calendarId=self._calendar_id, eventId=event_id
+                ),
+            )
             return True
+        except NetworkUnavailable:
+            raise
         except Exception as e:
             self.last_error = _extract_error_reason(e)
             logger.error("Google Calendar delete_event error: " + _log_safe(self.last_error), exc_info=True)
@@ -182,10 +199,9 @@ class GoogleCalendarClient:
     ) -> Optional[CalendarEvent]:
         try:
             service = self._get_service()
-            existing = (
-                service.events()
-                .get(calendarId=self._calendar_id, eventId=event_id)
-                .execute()
+            existing = self._execute_request(
+                "get_event",
+                service.events().get(calendarId=self._calendar_id, eventId=event_id),
             )
 
             tz = os.getenv("APP_TIMEZONE", "Asia/Seoul")
@@ -196,14 +212,15 @@ class GoogleCalendarClient:
             if end is not None:
                 existing["end"] = {"dateTime": end.isoformat(), "timeZone": tz}
 
-            item = (
-                service.events()
-                .update(
+            item = self._execute_request(
+                "update_event",
+                service.events().update(
                     calendarId=self._calendar_id, eventId=event_id, body=existing
-                )
-                .execute()
+                ),
             )
             return self._parse_event(item)
+        except NetworkUnavailable:
+            raise
         except Exception as e:
             self.last_error = _extract_error_reason(e)
             logger.error("Google Calendar update_event error: " + _log_safe(self.last_error), exc_info=True)

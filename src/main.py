@@ -28,11 +28,13 @@ _process_lock = ProcessLock(get_main_lock_path())
 
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
+from src.network_guard import network_guard
 from src.runtime_exit_codes import RuntimeExitCode
 from src.bootstrap import build_bot_runtime
 from src.bot.command_catalog import build_bot_commands
 from src.scheduler_manager import scheduler_manager
 from src.repository import shutdown_repository
+from src.telegram_request import build_guarded_telegram_request
 from src.time_utils import configure_app_timezone
 from src.services.delivery_retry_service import DeliveryRetryService
 from src.services.schedule_execution_service import ScheduleExecutionService
@@ -45,12 +47,14 @@ async def _sync_bot_commands(bot, settings, runtime) -> None:
     """Publish a compact slash-command list to Telegram."""
     has_plugins = bool(runtime.plugin_loader and runtime.plugin_loader.plugins)
     default_commands = build_bot_commands(has_plugins=has_plugins)
-    await bot.set_my_commands(default_commands)
+    await network_guard.run_async("telegram", bot.set_my_commands, default_commands)
     logger.info(f"Telegram commands synced: {[cmd.command for cmd in default_commands]}")
 
     if settings.admin_chat_id:
         admin_commands = build_bot_commands(has_plugins=has_plugins, is_admin=True)
-        await bot.set_my_commands(
+        await network_guard.run_async(
+            "telegram",
+            bot.set_my_commands,
             admin_commands,
             scope=BotCommandScopeChat(chat_id=settings.admin_chat_id),
         )
@@ -98,12 +102,10 @@ def create_app(settings) -> Application:
     app = (
         Application.builder()
         .token(settings.telegram_token)
+        .request(build_guarded_telegram_request())
+        .get_updates_request(build_guarded_telegram_request())
         .concurrent_updates(True)
         .post_init(post_init)
-        .read_timeout(15)
-        .write_timeout(15)
-        .connect_timeout(10)
-        .pool_timeout(5)
         .build()
     )
     logger.trace("Application build complete - concurrent_updates=True")

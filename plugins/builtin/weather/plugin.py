@@ -8,6 +8,7 @@ from typing import Optional, cast
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from src.network_guard import NetworkUnavailable, network_guard
 from src.plugins.loader import (
     PLUGIN_SURFACE_CATALOG,
     PLUGIN_SURFACE_MAIN_MENU,
@@ -216,11 +217,17 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         }
 
     async def _handle_city_weather(self, chat_id: int, city: str) -> dict:
-        geo = await self._geocode(city)
+        try:
+            geo = await self._geocode(city)
+        except NetworkUnavailable as exc:
+            return {"text": f"❌ Weather network unavailable.\n\n<code>{exc}</code>", "edit": True}
         if not geo:
             return {"text": f"❌ City '{city}' not found.", "edit": True}
 
-        weather = await self._fetch_weather(geo["lat"], geo["lon"])
+        try:
+            weather = await self._fetch_weather(geo["lat"], geo["lon"])
+        except NetworkUnavailable as exc:
+            return {"text": f"❌ Weather network unavailable.\n\n<code>{exc}</code>", "edit": True}
         if not weather:
             return {"text": "❌ Unable to fetch weather data.", "edit": True}
 
@@ -245,7 +252,10 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         if not location:
             return self._handle_province_select()
 
-        weather = await self._fetch_weather(location["lat"], location["lon"])
+        try:
+            weather = await self._fetch_weather(location["lat"], location["lon"])
+        except NetworkUnavailable as exc:
+            return {"text": f"❌ Weather network unavailable.\n\n<code>{exc}</code>", "edit": True}
         if not weather:
             return {"text": "❌ Unable to fetch weather data.", "edit": True}
 
@@ -324,7 +334,12 @@ CREATE TABLE IF NOT EXISTS weather_locations (
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 params = {"name": search_query, "count": 1, "language": "ko"}
-                resp = await client.get(self.GEOCODING_URL, params=params)
+                resp = await network_guard.run_async(
+                    "weather",
+                    client.get,
+                    self.GEOCODING_URL,
+                    params=params,
+                )
                 if resp.status_code != 200:
                     return None
                 data = resp.json()
@@ -338,6 +353,8 @@ CREATE TABLE IF NOT EXISTS weather_locations (
                     "lat": r["latitude"],
                     "lon": r["longitude"],
                 }
+        except NetworkUnavailable:
+            raise
         except Exception:
             return None
 
@@ -352,15 +369,28 @@ CREATE TABLE IF NOT EXISTS weather_locations (
                     "timezone": "Asia/Seoul",
                     "forecast_days": 3,
                 }
-                resp = await client.get(self.WEATHER_URL, params=params)
+                resp = await network_guard.run_async(
+                    "weather",
+                    client.get,
+                    self.WEATHER_URL,
+                    params=params,
+                )
                 if resp.status_code != 200:
                     return None
                 return resp.json()
+        except NetworkUnavailable:
+            raise
         except Exception:
             return None
 
     async def _set_location(self, chat_id: int, location_name: str) -> PluginResult:
-        geo = await self._geocode(location_name)
+        try:
+            geo = await self._geocode(location_name)
+        except NetworkUnavailable as exc:
+            return PluginResult(
+                handled=True,
+                response=f"❌ Weather network unavailable.\n\n<code>{exc}</code>",
+            )
         if not geo:
             return PluginResult(
                 handled=True,
@@ -395,7 +425,13 @@ CREATE TABLE IF NOT EXISTS weather_locations (
                 reply_markup=result.get("reply_markup"),
             )
 
-        weather = await self._fetch_weather(location["lat"], location["lon"])
+        try:
+            weather = await self._fetch_weather(location["lat"], location["lon"])
+        except NetworkUnavailable as exc:
+            return PluginResult(
+                handled=True,
+                response=f"❌ Weather network unavailable.\n\n<code>{exc}</code>",
+            )
         if not weather:
             return PluginResult(
                 handled=True,

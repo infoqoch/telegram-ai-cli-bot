@@ -91,6 +91,22 @@ class TestClaudeClient:
         result = await client.summarize([])
         assert result == "(no content)"
 
+    @pytest.mark.asyncio
+    async def test_chat_removes_generated_mcp_config(self, client, tmp_path):
+        """Claude MCP config temp file is cleaned up after command execution."""
+        mcp_config = tmp_path / "mcp_test.json"
+        mcp_config.write_text("{}", encoding="utf-8")
+
+        with patch.object(ClaudeClient, "_generate_mcp_config", return_value=str(mcp_config)), patch.object(
+            client,
+            "_run_command",
+            AsyncMock(return_value=('{"result":"ok","session_id":"sess1"}', "", 0)),
+        ):
+            response = await client.chat("Hello")
+
+        assert response.text == "ok"
+        assert not mcp_config.exists()
+
 
 class TestChatError:
     """ChatError Enum 테스트."""

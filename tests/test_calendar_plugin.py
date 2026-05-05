@@ -8,6 +8,7 @@ import pytest
 
 from plugins.builtin.calendar.google_client import CalendarEvent, GoogleCalendarClient
 from plugins.builtin.calendar.plugin import CalendarPlugin
+from src.network_guard import NetworkUnavailable, network_guard
 from plugins.builtin.calendar.ui import (
     build_calendar_grid,
     build_date_quick_select,
@@ -181,6 +182,29 @@ class TestCalendarPlugin:
         assert "evening_summary" in names
         assert "reminder_10m" in names
         assert "reminder_1h" in names
+
+    def test_show_hub_returns_network_error_when_calendar_unavailable(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.side_effect = NetworkUnavailable("google_calendar", "offline")
+
+        result = plugin._show_hub(1, date(2026, 3, 22))
+
+        assert "Calendar network unavailable" in result["text"]
+        assert result["edit"] is True
+
+
+class TestGoogleCalendarClientNetworkGuard:
+
+    def test_execute_request_raises_network_unavailable_for_transient_error(self):
+        network_guard.reset("google_calendar")
+        client = GoogleCalendarClient(credentials_file="/tmp/missing.json", calendar_id="primary")
+        request = MagicMock()
+        request.execute.side_effect = OSError(54, "Connection reset by peer")
+
+        with pytest.raises(NetworkUnavailable):
+            client._execute_request("list_events", request)
+
+        assert "google_calendar:" in client.last_error
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TimedOut
 
 from src.services.schedule_execution_service import ScheduleExecutionService
 
@@ -124,6 +124,27 @@ class TestScheduleExecutionService:
         second_call = mock_bot.send_message.await_args_list[1].kwargs
         assert first_call["parse_mode"] == "HTML"
         assert "parse_mode" not in second_call
+
+    @pytest.mark.asyncio
+    async def test_execute_does_not_plain_fallback_on_network_error(
+        self, service, mock_bot, mock_schedule_manager
+    ):
+        mock_bot.send_message = AsyncMock(side_effect=TimedOut("Timed out"))
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "workspace"
+        schedule.workspace_path = None
+        schedule.ai_provider = "claude"
+        schedule.message = "테스트"
+        schedule.model = "sonnet"
+        schedule.chat_id = 12345
+        schedule.name = "워크스페이스"
+
+        await service.execute(schedule)
+
+        assert mock_bot.send_message.await_count == 1
+        mock_schedule_manager.update_run.assert_called_once()
+        assert "telegram:" in mock_schedule_manager.update_run.call_args.kwargs["last_error"]
 
     @pytest.mark.asyncio
     async def test_execute_records_error_when_plugin_missing(

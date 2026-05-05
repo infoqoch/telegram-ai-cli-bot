@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from src.bot.formatters import escape_html, split_message
 from src.logging_config import logger
+from src.network_guard import NetworkUnavailable, network_guard
 from src.services.delivery_markup import decode_delivery_markup_json
 
 if TYPE_CHECKING:
@@ -53,15 +54,21 @@ class DeliveryRetryService:
                 for index, chunk in enumerate(chunks, start=1):
                     chunk_markup = markup if index == len(chunks) else None
                     try:
-                        await bot.send_message(
+                        await network_guard.run_async(
+                            "telegram",
+                            bot.send_message,
                             chat_id=chat_id,
                             text=chunk,
                             parse_mode="HTML",
                             reply_markup=chunk_markup,
                         )
                     except Exception as html_err:
+                        if isinstance(html_err, NetworkUnavailable):
+                            raise
                         logger.debug(f"[DeliveryRetry] HTML send failed, trying plain: {html_err}")
-                        await bot.send_message(
+                        await network_guard.run_async(
+                            "telegram",
+                            bot.send_message,
                             chat_id=chat_id,
                             text=chunk,
                             reply_markup=chunk_markup,
@@ -85,7 +92,9 @@ class DeliveryRetryService:
                         preview = escape_html(
                             (delivery_text[:100] + "...") if len(delivery_text) > 100 else delivery_text
                         )
-                        await bot.send_message(
+                        await network_guard.run_async(
+                            "telegram",
+                            bot.send_message,
                             chat_id=chat_id,
                             text=f"⚠️ Message delivery failed (attempt {attempts + 1}).\n\n"
                                  f"<i>Preview:</i> {preview}",

@@ -399,6 +399,6 @@ async def test_run_job_preserves_response_when_delivery_fails(repo, session_serv
     assert saved["delivery_text"] is not None
     assert saved["delivery_status"] == "failed"
     assert saved["delivery_attempts"] == 2
-    assert saved["delivery_error"] == "RuntimeError: Timed out"
+    assert saved["delivery_error"] == "NetworkUnavailable: telegram: RuntimeError: Timed out"
     assert saved["delivered_at"] is None
     assert repo.get_session_lock("sess1") is None

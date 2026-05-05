@@ -8,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
+from src.network_guard import NetworkUnavailable, network_guard
 from src.schedule_utils import normalize_schedule_type, resolve_provider, resolve_schedule_type
 
 if TYPE_CHECKING:
@@ -135,14 +136,20 @@ class ScheduleExecutionService:
             is_last = i == len(chunks) - 1
             chunk_markup = reply_markup if is_last else None
             try:
-                await self._bot.send_message(
+                await network_guard.run_async(
+                    "telegram",
+                    self._bot.send_message,
                     chat_id=chat_id,
                     text=f"{header_html}{chunk}",
                     parse_mode="HTML",
                     reply_markup=chunk_markup,
                 )
-            except Exception:
-                await self._bot.send_message(
+            except Exception as exc:
+                if isinstance(exc, NetworkUnavailable):
+                    raise
+                await network_guard.run_async(
+                    "telegram",
+                    self._bot.send_message,
                     chat_id=chat_id,
                     text=f"{header_plain}{chunk}",
                     reply_markup=chunk_markup,
@@ -160,14 +167,20 @@ class ScheduleExecutionService:
         reply_markup = result.get("reply_markup")
 
         try:
-            await self._bot.send_message(
+            await network_guard.run_async(
+                "telegram",
+                self._bot.send_message,
                 chat_id=chat_id,
                 text=f"{header}{text}",
                 parse_mode="HTML",
                 reply_markup=reply_markup,
             )
-        except Exception:
-            await self._bot.send_message(
+        except Exception as exc:
+            if isinstance(exc, NetworkUnavailable):
+                raise
+            await network_guard.run_async(
+                "telegram",
+                self._bot.send_message,
                 chat_id=chat_id,
                 text=f"⏰ {schedule_name}\n\n{text}",
                 reply_markup=reply_markup,

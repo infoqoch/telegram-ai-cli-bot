@@ -13,9 +13,11 @@ from src.ai import AIRegistry, get_profile_label, get_provider_label
 from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
 from src.bot.formatters import split_message, truncate_message
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
+from src.network_guard import NetworkUnavailable, network_guard
 from src.repository import Repository
 from src.services.delivery_markup import decode_delivery_markup_json
 from src.services.session_service import SessionService
+from src.telegram_request import build_guarded_telegram_request
 
 if TYPE_CHECKING:
     from src.plugins.loader import PluginLoader
@@ -68,7 +70,7 @@ class JobService:
             f"Detached job lock ready - job_id={job_id}, session={session_id[:8]}, worker_pid={worker_pid}"
         )
 
-        bot = Bot(token=self._telegram_token)
+        bot = Bot(token=self._telegram_token, request=build_guarded_telegram_request())
 
         try:
             current_job = job
@@ -210,7 +212,9 @@ class JobService:
                 f"Detached provider job long-task notice - job_id={job_id}, "
                 f"session={session_id[:8]}, threshold={LONG_TASK_THRESHOLD_SECONDS}s"
             )
-            await bot.send_message(
+            await network_guard.run_async(
+                "telegram",
+                bot.send_message,
                 chat_id=chat_id,
                 text=(
                     f"<code>{escaped_short_message}</code>\n"
@@ -410,7 +414,9 @@ class JobService:
         """Send the post-completion notice for long-running successful jobs."""
         elapsed_min = int(elapsed // 60)
         elapsed_sec = int(elapsed % 60)
-        await bot.send_message(
+        await network_guard.run_async(
+            "telegram",
+            bot.send_message,
             chat_id=chat_id,
             text=(
                 f"<code>{self._escape_html(short_message)}</code>\n"
@@ -567,7 +573,9 @@ class JobService:
 
             self._repo.complete_message(job_id, error=str(e))
             try:
-                await bot.send_message(
+                await network_guard.run_async(
+                    "telegram",
+                    bot.send_message,
                     chat_id=chat_id,
                     text="❌ An error occurred. Please try again later.",
                 )
@@ -596,13 +604,17 @@ class JobService:
                     f"Detached provider Telegram send - chat_id={chat_id}, chunk={index}/{len(chunks)}, "
                     f"chars={len(chunk)}, parse_mode=HTML"
                 )
-                await bot.send_message(
+                await network_guard.run_async(
+                    "telegram",
+                    bot.send_message,
                     chat_id=chat_id,
                     text=chunk,
                     parse_mode="HTML",
                     reply_markup=chunk_markup,
                 )
             except Exception as exc:
+                if isinstance(exc, NetworkUnavailable):
+                    raise
                 logger.warning(
                     f"Detached provider Telegram HTML send failed, retrying plain text - "
                     f"chat_id={chat_id}, chunk={index}/{len(chunks)}, "
@@ -611,7 +623,13 @@ class JobService:
                 if job_id is not None:
                     self._repo.increment_delivery_attempts(job_id)
                 try:
-                    await bot.send_message(chat_id=chat_id, text=chunk, reply_markup=chunk_markup)
+                    await network_guard.run_async(
+                        "telegram",
+                        bot.send_message,
+                        chat_id=chat_id,
+                        text=chunk,
+                        reply_markup=chunk_markup,
+                    )
                 except Exception as fallback_exc:
                     logger.error(
                         f"Detached provider Telegram plain text send failed - "

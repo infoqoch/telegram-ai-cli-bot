@@ -8,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
+from src.network_guard import network_guard
 from src.plugins.storage import TodoStore
 from src.scheduler_manager import scheduler_manager
 from src.time_utils import app_today, get_app_timezone
@@ -81,7 +82,9 @@ class TodoScheduler:
                     InlineKeyboardButton("📄 Today", callback_data="td:list"),
                 ])
 
-                await context.bot.send_message(
+                await network_guard.run_async(
+                    "telegram",
+                    context.bot.send_message,
                     chat_id=chat_id,
                     text="\n".join(lines),
                     parse_mode="HTML",
@@ -126,7 +129,9 @@ class TodoScheduler:
                     InlineKeyboardButton("📄 List", callback_data="td:list"),
                 ])
 
-                await context.bot.send_message(
+                await network_guard.run_async(
+                    "telegram",
+                    context.bot.send_message,
                     chat_id=chat_id,
                     text="\n".join(lines),
                     parse_mode="HTML",

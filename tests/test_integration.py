@@ -52,6 +52,8 @@ class TestAppStartup:
 
         mock_builder = MagicMock()
         mock_builder.token.return_value = mock_builder
+        mock_builder.request.return_value = mock_builder
+        mock_builder.get_updates_request.return_value = mock_builder
         mock_builder.concurrent_updates.return_value = mock_builder
         mock_builder.post_init.return_value = mock_builder
         mock_builder.read_timeout.return_value = mock_builder

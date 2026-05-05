@@ -9,6 +9,7 @@ from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
+from src.network_guard import NetworkUnavailable
 from src.plugins.loader import (
     PLUGIN_SURFACE_CATALOG,
     PLUGIN_SURFACE_MAIN_MENU,
@@ -325,7 +326,10 @@ class CalendarPlugin(Plugin):
         start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=tz)
         end = start + timedelta(days=1)
 
-        events = self._gcal.list_events(start, end)
+        try:
+            events = self._gcal.list_events(start, end)
+        except NetworkUnavailable as exc:
+            return self._network_unavailable_response(exc)
         self._event_cache[chat_id] = events
 
         date_label = format_date_full(target_date)
@@ -519,7 +523,10 @@ class CalendarPlugin(Plugin):
         d = date.fromisoformat(date_str)
         start = datetime(d.year, d.month, d.day, hour, minute, tzinfo=tz)
 
-        event = self._gcal.create_event(summary=title, start=start, all_day=all_day)
+        try:
+            event = self._gcal.create_event(summary=title, start=start, all_day=all_day)
+        except NetworkUnavailable as exc:
+            return self._network_unavailable_response(exc)
 
         if not event:
             return {
@@ -590,7 +597,10 @@ class CalendarPlugin(Plugin):
         }
 
     def _process_edit_title(self, chat_id: int, title: str, event_id: str) -> dict:
-        event = self._gcal.update_event(event_id, summary=title)
+        try:
+            event = self._gcal.update_event(event_id, summary=title)
+        except NetworkUnavailable as exc:
+            return self._network_unavailable_response(exc)
 
         if not event:
             return {
@@ -675,7 +685,10 @@ class CalendarPlugin(Plugin):
         new_start = datetime(d.year, d.month, d.day, hour, minute, tzinfo=tz)
         new_end = new_start + timedelta(hours=1)
 
-        event = self._gcal.update_event(event_id, start=new_start, end=new_end)
+        try:
+            event = self._gcal.update_event(event_id, start=new_start, end=new_end)
+        except NetworkUnavailable as exc:
+            return self._network_unavailable_response(exc)
         if not event:
             return {
                 "text": f"❌ Failed to update time.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
@@ -729,7 +742,10 @@ class CalendarPlugin(Plugin):
         }
 
     def _execute_delete(self, chat_id: int, event_id: str) -> dict:
-        success = self._gcal.delete_event(event_id)
+        try:
+            success = self._gcal.delete_event(event_id)
+        except NetworkUnavailable as exc:
+            return self._network_unavailable_response(exc)
 
         if not success:
             return {
@@ -742,6 +758,16 @@ class CalendarPlugin(Plugin):
 
         return {
             "text": "🗑 Event deleted.",
+            "reply_markup": InlineKeyboardMarkup(
+                [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
+            ),
+            "edit": True,
+        }
+
+    @staticmethod
+    def _network_unavailable_response(exc: NetworkUnavailable) -> dict:
+        return {
+            "text": f"❌ Calendar network unavailable.\n\n<code>{escape_html(str(exc))}</code>",
             "reply_markup": InlineKeyboardMarkup(
                 [[InlineKeyboardButton("📅 Calendar", callback_data="cal:hub")]]
             ),
