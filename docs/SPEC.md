@@ -414,7 +414,7 @@ Only one active session can exist for a given (user, AI provider, workspace path
 | Flow | Collision behavior |
 |------|--------------------|
 | `/new_workspace <path>` (manual) | Auto-switches to the existing session. Message: `📁 Workspace session already exists — Switched to existing session: <name>`. |
-| `/workspace` → `Session` button (`ws:sess_model`) | Auto-switches to the existing session. Message: `A workspace session already exists. Switched to existing session: <name>`. |
+| `/workspace` → `Session` button (`ws:sess_model`) | Provider is inferred from the chosen model; collision is checked against `(user, inferred provider, workspace path)`. Auto-switches to the existing session if one matches. Message: `A <AI> workspace session already exists. Switched to: <name>`. |
 | Schedule log → `Create session from log` (`resp:sched:`) | Creates a new session without the workspace tag (workspace_path dropped) to avoid overwriting the existing workspace session's `provider_session_id`. The new session resumes from the log's `provider_session_id`; the user's existing workspace session is untouched. |
 
 Recycled sessions (inactive 24h+) are NOT counted as collisions — creating a new workspace session while an old one is recycled succeeds; the recycled session remains archived until purged.
@@ -453,8 +453,8 @@ Recycled sessions (inactive 24h+) are NOT counted as collisions — creating a n
 
 When a workspace is selected: choose `[Session]` (start session) / `[Schedule]` (register schedule).
 
-- Start session: select model → create. If a session for the same workspace already exists, auto-switches to it (prevents duplicate creation).
-- Uses model selection buttons based on the current AI. Even for the same workspace, Claude/Codex sessions can each exist separately.
+- Start session: pick a provider/model from a unified picker (one row per supported AI provider, just like `/new`) → create. Picking a model also switches the current AI to that provider.
+- Duplicate check is scoped to `(user, provider, workspace_path)`: a Claude and a Codex session can coexist for the same workspace. If a session for the chosen `(provider, workspace)` already exists, auto-switches to it instead of creating a new one.
 - Register schedule: time → minute → `Daily` or `One-time` → model → enter message → registration complete.
 
 ---

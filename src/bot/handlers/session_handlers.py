@@ -70,10 +70,11 @@ class SessionHandlers(BaseHandler):
 
         if context.args:
             provider = context.args[0].lower()
-            if not is_supported_provider(provider):
+            available = self.ai.supported_providers()
+            if not is_supported_provider(provider) or provider not in available:
                 await update.message.reply_text(
                     "❌ Unsupported AI provider.\n\n"
-                    "Available: claude, codex"
+                    f"Available: {', '.join(available)}"
                 )
                 clear_context()
                 return
@@ -248,7 +249,11 @@ class SessionHandlers(BaseHandler):
         session_name = ""
         if len(args) > 1:
             potential_model = args[1].lower()
-            if potential_model in {profile.key for profile in provider_profiles}:
+            target_provider = infer_provider_from_model(potential_model)
+            if is_supported_model(target_provider, potential_model):
+                provider = target_provider
+                provider_label = self._format_provider_display(provider)
+                provider_profiles = get_provider_profiles(provider)
                 model = potential_model
                 if len(args) > 2:
                     session_name = " ".join(args[2:])
@@ -271,7 +276,8 @@ class SessionHandlers(BaseHandler):
             )
             return
 
-        logger.info(f"/new_workspace - path={expanded_path}, model={model}, name={display_name}")
+        logger.info(f"/new_workspace - path={expanded_path}, provider={provider}, model={model}, name={display_name}")
+        self._set_selected_ai_provider(user_id, provider)
         session_id = self.sessions.create_session(
             user_id=user_id,
             ai_provider=provider,

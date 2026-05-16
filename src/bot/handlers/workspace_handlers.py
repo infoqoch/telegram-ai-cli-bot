@@ -6,7 +6,12 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import ContextTypes
 
-from src.ai import get_profile_label, is_supported_provider
+from src.ai import (
+    get_profile_label,
+    infer_provider_from_model,
+    is_supported_model,
+    is_supported_provider,
+)
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from src.schedule_utils import next_occurrence, normalize_trigger_type
@@ -156,31 +161,40 @@ class WorkspaceHandlers(BaseHandler):
         await query.answer()
 
     async def _ws_start_session(self, query, user_id: str, ws_id: str) -> None:
-        """Handle ws:session:<ws_id> - show model selection for session start."""
+        """Handle ws:session:<ws_id> - show model selection across all providers."""
         ws = self._workspace_registry.get(ws_id)
         if not ws:
             await query.answer("Workspace not found")
             return
 
-        provider = self._get_selected_ai_provider(user_id)
+        current_provider = self._get_selected_ai_provider(user_id)
 
         buttons = [
-            self._build_model_buttons(provider, f"ws:sess_model:{ws_id}:"),
-            [InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")],
+            self._build_model_buttons(
+                p,
+                f"ws:sess_model:{ws_id}:",
+                include_provider_icon=True,
+            )
+            for p in self.ai.supported_providers()
         ]
+        buttons.append([InlineKeyboardButton(BUTTON_BACK, callback_data=f"ws:select:{ws_id}")])
 
         await query.edit_message_text(
             f"<b>{escape_html(ws.name)}</b> - Start Session\n\n"
             f"<code>{escape_html(ws.short_path)}</code>\n\n"
-            f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
-            f"Select model:",
+            f"Current AI: <b>{self._format_provider_display(current_provider)}</b>\n"
+            f"Select a model. Choosing one also switches the current AI:",
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
         await query.answer()
 
     async def _ws_create_session(self, query, user_id: str, action: str) -> None:
-        """Handle ws:sess_model:<ws_id>:<model> - create workspace session."""
+        """Handle ws:sess_model:<ws_id>:<model> - create workspace session.
+
+        The model token alone determines provider (via infer_provider_from_model),
+        so a single picker row per provider can dispatch into this callback.
+        """
         parts = action.split(":")
         ws_id, model = parts[1], parts[2]
         ws = self._workspace_registry.get(ws_id)
@@ -188,21 +202,33 @@ class WorkspaceHandlers(BaseHandler):
             await query.answer("Workspace not found")
             return
 
-        # Prevent duplicate workspace sessions
-        existing = self.sessions.list_sessions(user_id)
-        for s in existing:
-            if s.get("workspace_path") == ws.path:
-                self.sessions.switch_session(user_id, s["full_session_id"])
-                await query.edit_message_text(
-                    f"A workspace session already exists.\n"
-                    f"Switched to existing session: <b>{escape_html(s.get('name', ws.name))}</b>",
-                    parse_mode="HTML"
-                )
-                await query.answer("Switched to existing session")
-                return
+        # Resolve provider from the model token; fall back to current provider.
+        selected_provider = self._get_selected_ai_provider(user_id)
+        provider = infer_provider_from_model(model)
+        if not is_supported_model(provider, model):
+            provider = selected_provider
+
+        # Dedup must be (user, provider, workspace_path) — same key the DB enforces.
+        # Path-only dedup blocks creating a Codex session next to an existing Claude
+        # workspace session (and vice versa) even though they're independent records.
+        repo = self._repository
+        existing = (
+            repo.find_session_by_workspace(user_id, provider, ws.path)
+            if repo else None
+        )
+        if existing:
+            self.sessions.switch_session(user_id, existing["id"])
+            self._set_selected_ai_provider(user_id, provider)
+            await query.edit_message_text(
+                f"A {self._format_provider_display(provider)} workspace session already exists.\n"
+                f"Switched to: <b>{escape_html(existing.get('name') or ws.name)}</b>",
+                parse_mode="HTML"
+            )
+            await query.answer("Switched to existing session")
+            return
 
         self._workspace_registry.mark_used(ws_id)
-        provider = self._get_selected_ai_provider(user_id)
+        self._set_selected_ai_provider(user_id, provider)
 
         session_name = f"{ws.name} ({model})"
         session_id = self.sessions.create_session(

@@ -85,6 +85,7 @@ class TestWorkspaceCallbackFlows:
         """ws:sess_model:{id}:{model} - 세션 생성."""
         handlers.claude = MagicMock()
         handlers.claude.create_session = AsyncMock(return_value="uuid-1234")
+        handlers.sessions._repo.find_session_by_workspace.return_value = None
 
         query = make_query()
         await handlers._handle_workspace_callback(query, 12345, "ws:sess_model:ws001:sonnet")
@@ -92,6 +93,28 @@ class TestWorkspaceCallbackFlows:
         text = get_text(query)
         assert "Session Created" in text or "sonnet" in text.lower()
         handlers.sessions.create_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ws_sess_model_dedup_is_provider_scoped(self, handlers):
+        """Workspace dedup should match (user, provider, path) — not path-only.
+
+        Creating a Codex workspace session while a Claude one exists at the same
+        path must not collide; only an existing Codex session at that path should
+        trigger the switch-to-existing branch.
+        """
+        handlers.sessions._repo.find_session_by_workspace.return_value = None
+        query = make_query()
+        # Codex model token — provider inferred from "high".
+        await handlers._handle_workspace_callback(query, 12345, "ws:sess_model:ws001:high")
+
+        # The repo lookup must be called with the codex provider explicitly.
+        call_args = handlers.sessions._repo.find_session_by_workspace.call_args
+        assert call_args is not None
+        # signature: (user_id, ai_provider, workspace_path)
+        assert call_args.args[1] == "codex" or call_args.kwargs.get("ai_provider") == "codex"
+        handlers.sessions.create_session.assert_called_once()
+        _, kwargs = handlers.sessions.create_session.call_args
+        assert kwargs["ai_provider"] == "codex"
 
     @pytest.mark.asyncio
     async def test_ws_schedule_shows_hours(self, handlers):
