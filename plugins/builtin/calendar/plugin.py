@@ -21,6 +21,7 @@ from src.plugins.loader import (
     ToolSpec,
 )
 from src.time_utils import app_today, get_app_timezone
+from src.ui_emoji import BUTTON_AI_WORK
 
 import importlib.util
 from pathlib import Path
@@ -256,9 +257,9 @@ class CalendarPlugin(Plugin):
         if action == "del":
             return self._show_delete_confirm(chat_id, int(parts[2]))
 
-        # Delete execute
+        # Delete execute — idx-based to keep callback_data within 64 bytes.
         if action == "delok":
-            return self._execute_delete(chat_id, parts[2])
+            return self._execute_delete(chat_id, int(parts[2]))
 
         # Edit title prompt
         if action == "edt":
@@ -268,27 +269,27 @@ class CalendarPlugin(Plugin):
         if action == "edit":
             return self._show_edit_menu(chat_id, int(parts[2]))
 
-        # Edit date
+        # Edit date — uses event idx so callback_data stays under 64 bytes
+        # regardless of Google event id length.
         if action == "eddate":
-            event_id = parts[2]
-            return self._show_edit_date_select(event_id)
+            return self._show_edit_date_select(chat_id, int(parts[2]))
 
         # Edit date picked
         if action == "edd":
-            event_id = parts[2]
+            idx = int(parts[2])
             d = date.fromisoformat(parts[3])
-            return self._show_edit_hour_select(event_id, d.isoformat())
+            return self._show_edit_hour_select(chat_id, idx, d.isoformat())
 
         # Edit hour picked
         if action == "edh":
-            event_id = parts[2]
-            return self._show_edit_minute_select(event_id, parts[3], int(parts[4]))
+            idx = int(parts[2])
+            return self._show_edit_minute_select(chat_id, idx, parts[3], int(parts[4]))
 
         # Edit minute picked -> execute time update
         if action == "edm":
-            event_id = parts[2]
+            idx = int(parts[2])
             return self._execute_edit_time(
-                chat_id, event_id, parts[3], int(parts[4]), int(parts[5])
+                chat_id, idx, parts[3], int(parts[4]), int(parts[5])
             )
 
         return {"text": "❌ Unknown command.", "edit": True}
@@ -563,7 +564,7 @@ class CalendarPlugin(Plugin):
         ev = events[idx]
         buttons = [
             [
-                InlineKeyboardButton("📅 Date/Time", callback_data=f"cal:eddate:{ev.id}"),
+                InlineKeyboardButton("📅 Date/Time", callback_data=f"cal:eddate:{idx}"),
                 InlineKeyboardButton("📌 Title", callback_data=f"cal:edt:{idx}"),
             ],
             [InlineKeyboardButton("◀ Back", callback_data=f"cal:ev:{idx}")],
@@ -617,14 +618,18 @@ class CalendarPlugin(Plugin):
             ]),
         }
 
-    def _show_edit_date_select(self, event_id: str) -> dict:
+    def _show_edit_date_select(self, chat_id: int, idx: int) -> dict:
+        events = self._event_cache.get(chat_id, [])
+        if idx < 0 or idx >= len(events):
+            return {"text": "❌ Event not found.", "edit": True}
+
         today = app_today()
         buttons = []
         for delta, label in [(0, "Today"), (1, "Tomorrow"), (2, "Day after")]:
             d = today + timedelta(days=delta)
             buttons.append(InlineKeyboardButton(
                 f"{label} {d.month}/{d.day}",
-                callback_data=f"cal:edd:{event_id}:{d.isoformat()}",
+                callback_data=f"cal:edd:{idx}:{d.isoformat()}",
             ))
         return {
             "text": "📅 <b>Select new date</b>",
@@ -635,13 +640,17 @@ class CalendarPlugin(Plugin):
             "edit": True,
         }
 
-    def _show_edit_hour_select(self, event_id: str, date_str: str) -> dict:
+    def _show_edit_hour_select(self, chat_id: int, idx: int, date_str: str) -> dict:
+        events = self._event_cache.get(chat_id, [])
+        if idx < 0 or idx >= len(events):
+            return {"text": "❌ Event not found.", "edit": True}
+
         d = date.fromisoformat(date_str)
         rows = []
         row = []
         for h in range(24):
             row.append(InlineKeyboardButton(
-                f"{h:02d}h", callback_data=f"cal:edh:{event_id}:{date_str}:{h}"
+                f"{h:02d}h", callback_data=f"cal:edh:{idx}:{date_str}:{h}"
             ))
             if len(row) == 4:
                 rows.append(row)
@@ -656,13 +665,17 @@ class CalendarPlugin(Plugin):
             "edit": True,
         }
 
-    def _show_edit_minute_select(self, event_id: str, date_str: str, hour: int) -> dict:
+    def _show_edit_minute_select(self, chat_id: int, idx: int, date_str: str, hour: int) -> dict:
+        events = self._event_cache.get(chat_id, [])
+        if idx < 0 or idx >= len(events):
+            return {"text": "❌ Event not found.", "edit": True}
+
         d = date.fromisoformat(date_str)
         rows = []
         row = []
         for m in range(0, 60, 5):
             row.append(InlineKeyboardButton(
-                f":{m:02d}", callback_data=f"cal:edm:{event_id}:{date_str}:{hour}:{m}"
+                f":{m:02d}", callback_data=f"cal:edm:{idx}:{date_str}:{hour}:{m}"
             ))
             if len(row) == 4:
                 rows.append(row)
@@ -678,8 +691,13 @@ class CalendarPlugin(Plugin):
         }
 
     def _execute_edit_time(
-        self, chat_id: int, event_id: str, date_str: str, hour: int, minute: int
+        self, chat_id: int, idx: int, date_str: str, hour: int, minute: int
     ) -> dict:
+        events = self._event_cache.get(chat_id, [])
+        if idx < 0 or idx >= len(events):
+            return {"text": "❌ Event not found.", "edit": True}
+        event_id = events[idx].id
+
         tz = get_app_timezone()
         d = date.fromisoformat(date_str)
         new_start = datetime(d.year, d.month, d.day, hour, minute, tzinfo=tz)
@@ -725,7 +743,7 @@ class CalendarPlugin(Plugin):
 
         buttons = [
             [
-                InlineKeyboardButton("✅ Delete", callback_data=f"cal:delok:{ev.id}"),
+                InlineKeyboardButton("✅ Delete", callback_data=f"cal:delok:{idx}"),
                 InlineKeyboardButton("❌ Cancel", callback_data=f"cal:ev:{idx}"),
             ]
         ]
@@ -741,7 +759,12 @@ class CalendarPlugin(Plugin):
             "edit": True,
         }
 
-    def _execute_delete(self, chat_id: int, event_id: str) -> dict:
+    def _execute_delete(self, chat_id: int, idx: int) -> dict:
+        events = self._event_cache.get(chat_id, [])
+        if idx < 0 or idx >= len(events):
+            return {"text": "❌ Event not found.", "edit": True}
+        event_id = events[idx].id
+
         try:
             success = self._gcal.delete_event(event_id)
         except NetworkUnavailable as exc:
@@ -825,9 +848,10 @@ class CalendarPlugin(Plugin):
                     f"{'─' * 20}\n"
                     f"No events ☀️"
                 ),
-                "reply_markup": InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
-                ),
+                "reply_markup": InlineKeyboardMarkup([
+                    [InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:calendar")],
+                    [InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")],
+                ]),
             }
 
         lines = [
@@ -844,9 +868,10 @@ class CalendarPlugin(Plugin):
 
         return {
             "text": "\n".join(lines),
-            "reply_markup": InlineKeyboardMarkup(
-                [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
-            ),
+            "reply_markup": InlineKeyboardMarkup([
+                [InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:calendar")],
+                [InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")],
+            ]),
         }
 
     def _build_reminder(self, now: datetime, minutes: int, label: str) -> str | dict:
@@ -879,7 +904,8 @@ class CalendarPlugin(Plugin):
 
         return {
             "text": "\n".join(lines),
-            "reply_markup": InlineKeyboardMarkup(
-                [[InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")]]
-            ),
+            "reply_markup": InlineKeyboardMarkup([
+                [InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:calendar")],
+                [InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")],
+            ]),
         }

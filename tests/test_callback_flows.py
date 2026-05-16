@@ -782,11 +782,31 @@ class TestSessionCallbackFlows:
         query = make_query()
         await handlers._handle_plugin_callback(query, 12345, "memo:add", plugin)
 
+        # edit:False면 원본 메시지를 덮어쓰지 않고 ForceReply만 새 메시지로 추가한다.
+        query.edit_message_text.assert_not_called()
         query.message.reply_text.assert_called_once()
         assert 987 in handlers._plugin_interactions
         interaction = handlers._plugin_interactions[987]
         assert interaction.plugin_name == "memo"
         assert interaction.chat_id == 12345
+
+    @pytest.mark.asyncio
+    async def test_plugin_callback_force_reply_with_edit_true_overwrites_original(self, handlers):
+        """edit:True인 ForceReply는 기존처럼 원본을 안내문으로 덮어쓴다 (호환성)."""
+        plugin = MagicMock()
+        plugin.name = "memo"
+        plugin.handle_callback_async = AsyncMock(return_value={
+            "text": "📝 <b>Add Memo</b>",
+            "force_reply_prompt": "📝 Enter memo:",
+            "force_reply": ForceReply(selective=True, input_field_placeholder="Enter memo..."),
+            "edit": True,
+        })
+
+        query = make_query()
+        await handlers._handle_plugin_callback(query, 12345, "memo:add", plugin)
+
+        query.edit_message_text.assert_called_once()
+        query.message.reply_text.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_sess_delete_confirm(self, handlers):

@@ -330,7 +330,10 @@ After deletion: `🗑 Event deleted.` + `[📅 Calendar]` button.
 
 Reminder actions are **interval-based** (run every N minutes). Each event is reminded only once per trigger type (dedup via in-memory set). Returns `None` when there is nothing to report (intentional silence — no message sent).
 
-Morning and evening briefings show an `[📅 Open Calendar]` button for quick access.
+All scheduled calendar messages (morning briefing, evening summary, 10-min reminder, 1-hour reminder) carry two buttons:
+
+- `[✨ AI Work]` — opens the calendar AI Work flow so the user can ask the AI about the day directly from the briefing.
+- `[📅 Open Calendar]` — jumps to the calendar hub.
 
 ### MCP Tools
 
@@ -829,7 +832,9 @@ Wrong:
 [⬅️ 메인]
 ```
 
-The result screen always includes `[✨ AI와 대화]`. Tapping it opens a ForceReply prompt and sends the user's follow-up to a new AI session with the question, expected answer, user answer, score, and feedback as context.
+The result screen always includes `[✨ AI와 대화]`. Tapping it keeps the result message visible in chat history and adds a new ForceReply prompt below it; the user's follow-up is sent to a new AI session with the question, expected answer, user answer, score, and feedback as context.
+
+`[✍️ 답 입력]` on short-answer and subjective questions follows the same pattern: the question card stays visible above, and a ForceReply prompt for the answer is added as a new message below.
 
 When the user answers from a bank-scoped or wrong-only flow, both `[🔁 다시 풀기]` and `[➡️ 다음 문제]` preserve that same scope.
 

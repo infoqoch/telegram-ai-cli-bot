@@ -287,8 +287,11 @@ class TestCalendarCallbacks:
     @pytest.mark.asyncio
     async def test_delete_execute(self):
         plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = [_make_event("ev1", "To Delete")]
         mock_gcal.delete_event.return_value = True
-        result = await plugin.handle_callback_async("cal:delok:ev1", 1)
+        # Populate cache via hub before idx-based delete.
+        await plugin.handle_callback_async("cal:hub", 1)
+        result = await plugin.handle_callback_async("cal:delok:0", 1)
         assert "deleted" in result["text"].lower()
         mock_gcal.delete_event.assert_called_once_with("ev1")
 
@@ -297,6 +300,45 @@ class TestCalendarCallbacks:
         plugin, _ = _make_plugin()
         result = await plugin.handle_callback_async("cal:noop", 1)
         assert result.get("noop") is True
+
+    @pytest.mark.asyncio
+    async def test_edit_flow_callback_data_under_64_bytes(self):
+        """Edit-flow callbacks must stay under Telegram's 64-byte limit
+        even for long Google Calendar event ids (e.g. recurring instances).
+        Regression: previously embedded ev.id directly, which silently broke
+        the keyboard for long ids and made the Edit button look frozen."""
+        plugin, mock_gcal = _make_plugin()
+        # Realistic worst case: recurring instance id w/ RRULE timestamp suffix
+        long_id = "abcdefghijklmnopqrstuvwxyz0123456789_20260508T060000Z"
+        mock_gcal.list_events.return_value = [_make_event(long_id, "쿠폰환불요청", 15)]
+
+        await plugin.handle_callback_async("cal:hub", 1)
+        # Open detail then the edit submenu.
+        await plugin.handle_callback_async("cal:ev:0", 1)
+        edit_menu = await plugin.handle_callback_async("cal:edit:0", 1)
+
+        # All buttons in the edit submenu must fit within Telegram's limit.
+        for row in edit_menu["reply_markup"].inline_keyboard:
+            for btn in row:
+                assert len(btn.callback_data.encode("utf-8")) <= 64, (
+                    f"callback_data too long: {btn.callback_data!r}"
+                )
+
+        # Drill all the way to the minute picker — the deepest, longest path.
+        await plugin.handle_callback_async("cal:eddate:0", 1)
+        await plugin.handle_callback_async("cal:edd:0:2026-05-08", 1)
+        minute_screen = await plugin.handle_callback_async("cal:edh:0:2026-05-08:15", 1)
+        for row in minute_screen["reply_markup"].inline_keyboard:
+            for btn in row:
+                assert len(btn.callback_data.encode("utf-8")) <= 64, (
+                    f"callback_data too long: {btn.callback_data!r}"
+                )
+
+        # Final execute reaches the GCal client with the original long id.
+        mock_gcal.update_event.return_value = _make_event(long_id, "쿠폰환불요청", 15, 30)
+        await plugin.handle_callback_async("cal:edm:0:2026-05-08:15:30", 1)
+        mock_gcal.update_event.assert_called_once()
+        assert mock_gcal.update_event.call_args[0][0] == long_id
 
 
 # ---------------------------------------------------------------------------

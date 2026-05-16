@@ -461,11 +461,14 @@ class CallbackHandlers(BaseHandler):
             result = await plugin.handle_callback_async(callback_data, chat_id)
 
             # ForceReply 처리
+            # edit:False(기본 플러그인 동작)면 원본 메시지(결과/문제 화면 등)를 그대로 두고
+            # ForceReply 안내만 새 메시지로 추가한다. edit:True면 기존처럼 원본을 안내문으로 덮어씀.
             if result.get("force_reply"):
-                await query.edit_message_text(
-                    text=result.get("text", "Enter input"),
-                    parse_mode="HTML"
-                )
+                if result.get("edit", True):
+                    await query.edit_message_text(
+                        text=result.get("text", "Enter input"),
+                        parse_mode="HTML"
+                    )
                 prompt_message = await query.message.reply_text(
                     text=result.get("force_reply_prompt", "Reply below."),
                     reply_markup=result["force_reply"],
