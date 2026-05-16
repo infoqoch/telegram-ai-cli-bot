@@ -124,7 +124,9 @@ MODEL_PROFILES = {
             short_label="Pro",
             button_label="Pro",
             badge=MODEL_BADGE_TOP,
-            provider_model="gemini-2.5-pro",
+            # Use Gemini CLI shorthand so it routes to the current latest
+            # (e.g. 3.1-pro-preview today; auto-tracks future releases).
+            provider_model="pro",
         ),
         ModelProfile(
             key="gemini-flash",
@@ -133,7 +135,7 @@ MODEL_PROFILES = {
             short_label="Flash",
             button_label="Flash",
             badge=MODEL_BADGE_MID,
-            provider_model="gemini-2.5-flash",
+            provider_model="flash",
         ),
         ModelProfile(
             key="gemini-flash-lite",
@@ -142,7 +144,7 @@ MODEL_PROFILES = {
             short_label="Lite",
             button_label="Flash Lite",
             badge=MODEL_BADGE_LIGHT,
-            provider_model="gemini-2.5-flash-lite",
+            provider_model="flash-lite",
         ),
     ],
 }
