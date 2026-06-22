@@ -56,6 +56,19 @@ class TestSessionService:
         mock_repo.create_session.assert_called_once()
         mock_repo.add_message.assert_called_once()
 
+    def test_create_session_random_name_uses_provider_icon(self, service, mock_repo):
+        """랜덤 세션명은 선택한 AI provider 아이콘을 붙인다."""
+        mock_repo.list_sessions.return_value = []
+
+        service.create_session(
+            user_id="user1",
+            session_id="new_session",
+            ai_provider="gemini",
+            model="gemini-pro",
+        )
+
+        assert mock_repo.create_session.call_args.kwargs["name"].endswith("💎")
+
     def test_create_session_requires_keyword_options(self, service):
         """Session creation options after session_id stay keyword-only."""
         with pytest.raises(TypeError):

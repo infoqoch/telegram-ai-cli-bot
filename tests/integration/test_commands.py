@@ -4,6 +4,7 @@
 """
 
 import pytest
+from unittest.mock import MagicMock
 
 from tests.integration.conftest import (
     create_command_update,
@@ -169,6 +170,27 @@ class TestNewSessionCommands:
         assert session_store.get_selected_ai_provider("12345") == "codex"
         reply = await get_reply_text(update)
         assert "Codex" in reply
+
+    @pytest.mark.asyncio
+    async def test_new_force_reply_blank_uses_random_name(self, handlers, session_store):
+        """ForceReply에서 스페이스만 보내면 랜덤 세션명을 사용한다."""
+        reply_to = MagicMock()
+        reply_to.text = "Enter session name (blank = random) (sess_name:opus)"
+        reply_to.message_id = 10
+
+        update = MockTelegram.create_update(text="   ")
+        update.message.reply_to_message = reply_to
+        context = MockTelegram.create_context()
+
+        await handlers.handle_message(update, context)
+
+        session_id = session_store.get_current_session_id("12345", "claude")
+        session_name = session_store.get_session_name(session_id)
+        reply = await get_reply_text(update)
+
+        assert session_name
+        assert session_name.endswith("📚")
+        assert f"<b>Name:</b> {session_name}" in reply
 
     @pytest.mark.asyncio
     async def test_new_opus_session(self, handlers, mock_claude):

@@ -167,12 +167,13 @@ class SessionHandlers(BaseHandler):
             user_id=user_id,
             ai_provider=provider,
             model=model,
-            name=session_name,
+            name=session_name or None,
             first_message="(new session)",
         )
         logger.info(f"New session created: {session_id[:8]}, provider={provider}, model={model}")
 
-        name_line = f"\n- Name: {escape_html(session_name)}" if session_name else ""
+        created_name = self._get_created_session_name(session_id, session_name)
+        name_line = f"\n- Name: {escape_html(created_name)}" if created_name else ""
         await update.message.reply_text(
             f"✅ New session created!\n"
             f"- ID: <code>{session_id[:8]}</code>{name_line}\n"

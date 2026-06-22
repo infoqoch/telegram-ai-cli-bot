@@ -296,6 +296,18 @@ class BaseHandler:
             f"Select a model. Choosing one also switches the current AI:"
         )
 
+    def _get_created_session_name(self, session_id: str, fallback_name: str = "") -> str:
+        """Return the stored session name after creation, with a safe fallback."""
+        try:
+            session_name = self.sessions.get_session_name(session_id)
+        except Exception as exc:
+            logger.debug(f"Failed to fetch created session name: {exc}")
+            return fallback_name
+
+        if isinstance(session_name, str) and session_name.strip():
+            return session_name.strip()
+        return fallback_name.strip()
+
     def _build_session_action_keyboard(self, session_id: str) -> list[list[InlineKeyboardButton]]:
         """Build compact session actions used after AI responses."""
         return [[InlineKeyboardButton(BUTTON_SESSION, callback_data=f"sess:switch:{session_id}")]]

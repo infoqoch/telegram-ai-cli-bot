@@ -4,7 +4,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import uuid4
 
-from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, get_default_model, get_profile_badge, normalize_model
+from src.ai import (
+    DEFAULT_PROVIDER,
+    SUPPORTED_PROVIDERS,
+    get_default_model,
+    get_profile_badge,
+    get_provider_icon,
+    normalize_model,
+)
 from src.logging_config import logger
 from src.repository import Repository
 from src.ui_emoji import ENTITY_AI, ENTITY_SESSION_CURRENT, ENTITY_WORKSPACE, ENTITY_WORKSPACE_INACTIVE
@@ -48,9 +55,8 @@ class SessionService:
     def _generate_session_name(self, user_id: str, ai_provider: str) -> str:
         """Generate a unique random nickname for a session."""
         import random
-        from src.ui_emoji import PROVIDER_ICON_CLAUDE, PROVIDER_ICON_CODEX
 
-        provider_icon = PROVIDER_ICON_CLAUDE if ai_provider == "claude" else PROVIDER_ICON_CODEX
+        provider_icon = get_provider_icon(ai_provider)
 
         existing_names = {
             s.name for s in self._repo.list_sessions(user_id)

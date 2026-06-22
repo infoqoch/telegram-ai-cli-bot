@@ -11,7 +11,7 @@ from src.ai import (
 )
 from src.logging_config import logger, clear_context
 from src.ui_emoji import BUTTON_BACK, BUTTON_NEW_SESSION, BUTTON_REFRESH, BUTTON_SESSION, BUTTON_SESSION_LIST, BUTTON_SWITCH_AI
-from ..constants import get_model_emoji
+from ..constants import MAX_SESSION_NAME_LENGTH, get_model_emoji
 from ..formatters import escape_html
 from .base import BaseHandler
 
@@ -399,20 +399,22 @@ class CallbackHandlers(BaseHandler):
             provider = selected_provider
         model_name = model if is_supported_model(provider, model) else get_default_model(provider)
 
-        session_name = name.strip()[:50] if name.strip() else ""
+        raw_name = name or ""
+        session_name = raw_name.strip()[:MAX_SESSION_NAME_LENGTH] if raw_name.strip() else ""
 
         self._set_selected_ai_provider(user_id, provider)
         session_id = self.sessions.create_session(
             user_id=user_id,
             ai_provider=provider,
             model=model_name,
-            name=session_name,
+            name=session_name or None,
             first_message="(new session)",
         )
         short_id = session_id[:8]
 
         model_emoji = get_model_emoji(model_name)
-        name_line = f"\n<b>Name:</b> {escape_html(session_name)}" if session_name else ""
+        created_name = self._get_created_session_name(session_id, session_name)
+        name_line = f"\n<b>Name:</b> {escape_html(created_name)}" if created_name else ""
 
         keyboard = [[
             InlineKeyboardButton(BUTTON_SESSION, callback_data=f"sess:switch:{session_id}"),
