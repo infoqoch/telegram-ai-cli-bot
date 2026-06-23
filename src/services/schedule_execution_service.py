@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from src.ai import normalize_model
 from src.bot.formatters import escape_html
 from src.logging_config import logger
 from src.network_guard import NetworkUnavailable, network_guard
-from src.schedule_utils import normalize_schedule_type, resolve_provider, resolve_schedule_type
+from src.schedule_utils import resolve_provider, resolve_schedule_type
 
 if TYPE_CHECKING:
     from src.ai import AIRegistry
@@ -63,17 +64,24 @@ class ScheduleExecutionService:
             if self._bot and schedule.chat_id and response:
                 log_id = None
                 if is_ai and self._repo:
+                    provider = resolve_provider(schedule)
+                    model = self._resolve_schedule_model(provider, schedule)
                     log_id = self._repo.insert_schedule_message_log(
                         chat_id=schedule.chat_id,
                         schedule_id=schedule.id,
                         request=schedule.message,
                         response=response,
-                        model=getattr(schedule, "model", "sonnet"),
+                        model=model,
                         workspace_path=getattr(schedule, "workspace_path", None),
                         provider_session_id=provider_session_id,
                     )
                 reply_markup = self._build_session_button(log_id) if log_id else None
-                await self._send_response(schedule.chat_id, schedule.name, response, reply_markup=reply_markup)
+                await self._send_response(
+                    schedule.chat_id,
+                    schedule.name,
+                    response,
+                    reply_markup=reply_markup,
+                )
 
             self._schedule_manager.update_run(schedule.id)
             logger.info(f"Schedule {schedule.id} executed successfully")
@@ -107,16 +115,27 @@ class ScheduleExecutionService:
                 return "__plugin_rich_sent__"
             return result
 
-        workspace_path = schedule.workspace_path if schedule_type == "workspace" and schedule.workspace_path else None
+        workspace_path = (
+            schedule.workspace_path
+            if schedule_type == "workspace" and schedule.workspace_path
+            else None
+        )
         provider = resolve_provider(schedule)
+        model = self._resolve_schedule_model(provider, schedule)
         client = self._ai_registry.get_client(provider)
         text, error, provider_session_id = await client.chat(
             message=schedule.message,
             session_id=None,
-            model=schedule.model,
+            model=model,
             workspace_path=workspace_path,
         )
         return (text or error or "(no response)", provider_session_id)
+
+    @staticmethod
+    def _resolve_schedule_model(provider: str, schedule) -> str:
+        """Return a provider-compatible model key for a persisted schedule."""
+        model = getattr(schedule, "model", None)
+        return normalize_model(provider, model if isinstance(model, str) and model else None)
 
     async def _send_response(
         self,

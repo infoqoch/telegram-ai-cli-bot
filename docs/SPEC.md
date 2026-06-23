@@ -476,6 +476,7 @@ Tasks that run automatically at a specified time. Three types: Chat (general con
 **Add a Chat schedule:** `+ Chat` → hour (00~23h) → minute (5-minute intervals) → `Daily` or `One-time` → model → enter message → register.
 
 - Regular/workspace schedules follow the current AI provider at the time of creation.
+- At execution time, persisted model keys are normalized against the resolved provider; incompatible legacy values fall back to that provider's default profile.
 - Plugin schedules are independent of the AI provider.
 - Complex recurrence patterns are not created directly in the basic UI; instead, the `cron` value is updated later via AI/admin routes.
 

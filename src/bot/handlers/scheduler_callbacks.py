@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.ai import get_profile_label, is_supported_model, is_supported_provider
+from src.ai import (
+    DEFAULT_PROVIDER,
+    get_profile_label,
+    is_supported_model,
+    is_supported_provider,
+    normalize_model,
+)
 from src.constants import AVAILABLE_HOURS
 from src.logging_config import logger
 from src.schedule_utils import build_daily_cron, next_occurrence, normalize_schedule_type, normalize_trigger_type, resolve_provider, resolve_schedule_type
@@ -87,7 +93,10 @@ class SchedulerCallbackHandlers(BaseHandler):
         minute = pending.get("minute", 0)
         workspace_path = pending.get("workspace_path") if schedule_type == "workspace" else None
         ai_provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
-        model = pending.get("model", "sonnet")
+        if not is_supported_provider(ai_provider):
+            ai_provider = DEFAULT_PROVIDER
+        raw_model = pending.get("model")
+        model = normalize_model(ai_provider, raw_model if isinstance(raw_model, str) and raw_model else None)
         name = pending.get("name") or self._default_schedule_name(schedule_type, message, workspace_path)
         run_at_local = pending.get("run_at_local")
         if trigger_type == "once" and not run_at_local:
@@ -704,7 +713,8 @@ class SchedulerCallbackHandlers(BaseHandler):
             await query.edit_message_text("❌ Unsupported model for the selected AI.")
             return
 
-        pending["model"] = model
+        normalized_model = normalize_model(provider, model)
+        pending["model"] = normalized_model
         self._sched_pending[user_id] = pending
         schedule_type = normalize_schedule_type(pending.get("type"))
         trigger_type = normalize_trigger_type(pending.get("trigger_type"))
@@ -715,7 +725,7 @@ class SchedulerCallbackHandlers(BaseHandler):
             f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
             f"Schedule: <b>{'One-time' if trigger_type == 'once' else 'Daily'}</b>\n"
             f"AI: <b>{self._format_provider_display(provider)}</b>\n"
-            f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>){self._format_workspace_path_line(pending)}\n\n"
+            f"Model: <b>{get_profile_label(provider, normalized_model)}</b> (<code>{normalized_model}</code>){self._format_workspace_path_line(pending)}\n\n"
             f"Enter scheduled message below:",
             parse_mode="HTML",
         )
@@ -760,7 +770,6 @@ class SchedulerCallbackHandlers(BaseHandler):
 
     def _register_plugin_schedule(self, user_id: str, chat_id: int, pending: dict) -> str:
         """Persist a plugin schedule and return the confirmation card."""
-        ai_provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
         trigger_type = normalize_trigger_type(pending.get("trigger_type"))
         run_at_local = pending.get("run_at_local")
         schedule = self._schedule_manager.add(
@@ -773,7 +782,7 @@ class SchedulerCallbackHandlers(BaseHandler):
             schedule_type="plugin",
             trigger_type=trigger_type,
             cron_expr=pending.get("cron_expr"),
-            ai_provider=ai_provider,
+            ai_provider=DEFAULT_PROVIDER,
             model="sonnet",
             plugin_name=pending.get("plugin_name"),
             action_name=pending.get("action_name"),
@@ -811,6 +820,12 @@ class SchedulerCallbackHandlers(BaseHandler):
             return ""
         return f"\nPath: <code>{escape_html(workspace_path)}</code>"
 
+    @staticmethod
+    def _resolve_schedule_model(provider: str, schedule) -> str:
+        """Return a provider-compatible model key for schedule display."""
+        model = getattr(schedule, "model", None)
+        return normalize_model(provider, model if isinstance(model, str) and model else None)
+
     def _build_schedule_detail_text(self, schedule) -> str:
         """Build the detail card for one schedule."""
         schedule_type = resolve_schedule_type(schedule)
@@ -830,7 +845,7 @@ class SchedulerCallbackHandlers(BaseHandler):
             lines.append(f"Plugin: <b>{escape_html(getattr(schedule, 'plugin_name', '') or '-')}</b>")
             lines.append(f"Action: <b>{escape_html(getattr(schedule, 'action_name', '') or '-')}</b>")
         else:
-            model = self._string_attr(schedule, "model", fallback="sonnet")
+            model = self._resolve_schedule_model(provider, schedule)
             lines.append(f"AI: <b>{self._format_provider_display(provider)}</b>")
             lines.append(f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)")
             if schedule_type == "workspace" and getattr(schedule, "workspace_path", None):
@@ -856,7 +871,7 @@ class SchedulerCallbackHandlers(BaseHandler):
         """Build the success card for chat/workspace schedules."""
         schedule_type = resolve_schedule_type(schedule, fallback=fallback_type)
         provider = resolve_provider(schedule, fallback=fallback_provider)
-        workspace_path = getattr(schedule, "workspace_path", None) or fallback_workspace_path
+        workspace_path = self._string_attr(schedule, "workspace_path") or fallback_workspace_path
         time_str = self._string_attr(schedule, "time_str")
         next_run_text = self._string_attr(schedule, "next_run_text", fallback=time_str)
         lines = [

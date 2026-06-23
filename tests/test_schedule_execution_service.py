@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from telegram.error import BadRequest, TimedOut
 
+from src.ai import get_default_model
 from src.services.schedule_execution_service import ScheduleExecutionService
 
 
@@ -100,6 +101,33 @@ class TestScheduleExecutionService:
             model="agy-pro-high",
             workspace_path=None,
         )
+
+    @pytest.mark.asyncio
+    async def test_execute_normalizes_incompatible_schedule_model(
+        self, service, mock_ai_registry, mock_repo
+    ):
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "chat"
+        schedule.workspace_path = None
+        schedule.ai_provider = "agy"
+        schedule.message = "테스트"
+        schedule.model = "sonnet"
+        schedule.chat_id = 12345
+        schedule.name = "안티그래비티"
+        expected_model = get_default_model("agy")
+
+        await service.execute(schedule)
+
+        mock_ai_registry.get_client.assert_called_once_with("agy")
+        mock_ai_registry.get_client.return_value.chat.assert_called_once_with(
+            message="테스트",
+            session_id=None,
+            model=expected_model,
+            workspace_path=None,
+        )
+        mock_repo.insert_schedule_message_log.assert_called_once()
+        assert mock_repo.insert_schedule_message_log.call_args.kwargs["model"] == expected_model
 
     @pytest.mark.asyncio
     async def test_execute_plugin_schedule_uses_plugin_action(
