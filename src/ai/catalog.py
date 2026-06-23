@@ -9,13 +9,15 @@ from src.ui_emoji import (
     PROVIDER_BUTTON_CLAUDE,
     PROVIDER_BUTTON_CODEX,
     PROVIDER_BUTTON_GEMINI,
+    PROVIDER_BUTTON_AGY,
     PROVIDER_ICON_CLAUDE,
     PROVIDER_ICON_CODEX,
     PROVIDER_ICON_GEMINI,
+    PROVIDER_ICON_AGY,
 )
 
 
-SUPPORTED_PROVIDERS = ["claude", "codex", "gemini"]
+SUPPORTED_PROVIDERS = ["claude", "codex", "gemini", "agy"]
 DEFAULT_PROVIDER = "claude"
 
 
@@ -37,6 +39,7 @@ PROVIDER_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
     "gemini": "Gemini",
+    "agy": "Antigravity",
 }
 
 
@@ -44,6 +47,7 @@ PROVIDER_ICONS = {
     "claude": PROVIDER_ICON_CLAUDE,
     "codex": PROVIDER_ICON_CODEX,
     "gemini": PROVIDER_ICON_GEMINI,
+    "agy": PROVIDER_ICON_AGY,
 }
 
 
@@ -51,6 +55,7 @@ PROVIDER_BUTTONS = {
     "claude": PROVIDER_BUTTON_CLAUDE,
     "codex": PROVIDER_BUTTON_CODEX,
     "gemini": PROVIDER_BUTTON_GEMINI,
+    "agy": PROVIDER_BUTTON_AGY,
 }
 
 
@@ -147,6 +152,35 @@ MODEL_PROFILES = {
             provider_model="flash-lite",
         ),
     ],
+    "agy": [
+        ModelProfile(
+            key="agy-pro-high",
+            provider="agy",
+            label="Pro High",
+            short_label="Pro High",
+            button_label="Pro High",
+            badge=MODEL_BADGE_TOP,
+            provider_model="Gemini 3.1 Pro (High)",
+        ),
+        ModelProfile(
+            key="agy-flash-high",
+            provider="agy",
+            label="Flash High",
+            short_label="Flash High",
+            button_label="Flash High",
+            badge=MODEL_BADGE_MID,
+            provider_model="Gemini 3.5 Flash (High)",
+        ),
+        ModelProfile(
+            key="agy-flash-low",
+            provider="agy",
+            label="Flash Low",
+            short_label="Flash Low",
+            button_label="Flash Low",
+            badge=MODEL_BADGE_LIGHT,
+            provider_model="Gemini 3.5 Flash (Low)",
+        ),
+    ],
 }
 
 
@@ -161,6 +195,8 @@ def _get_default_model_overrides() -> dict[str, str]:
         overrides["codex"] = settings.default_model_codex
     if settings.default_model_gemini:
         overrides["gemini"] = settings.default_model_gemini
+    if settings.default_model_agy:
+        overrides["agy"] = settings.default_model_agy
     return overrides
 
 
@@ -176,6 +212,15 @@ MODEL_KEY_ALIASES = {
         "gpt55_xhigh": "xhigh",
         "gpt55_high": "high",
         "gpt53_codex_medium": "medium",
+    },
+    "agy": {
+        "gemini-3.5-pro": "agy-pro-high",
+        "gemini-3.5-flash": "agy-flash-high",
+        "gemini-3.5-flash-lite": "agy-flash-low",
+        "agy-pro": "agy-pro-high",
+        "pro-high": "agy-pro-high",
+        "flash-high": "agy-flash-high",
+        "flash-low": "agy-flash-low",
     },
 }
 
@@ -299,6 +344,8 @@ def infer_provider_from_model(model: str | None) -> str:
         or canonical_model in {"xhigh", "high", "medium"}
     ):
         return "codex"
+    if canonical_model.startswith("agy-") or canonical_model.startswith("gemini-3.5"):
+        return "agy"
     if canonical_model.startswith("gemini"):
         return "gemini"
     return DEFAULT_PROVIDER

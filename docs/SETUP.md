@@ -93,6 +93,7 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 | `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
 | `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (`xhigh`/`high`/`medium`; legacy `gpt54_*` aliases still work) |
 | `DEFAULT_MODEL_GEMINI` | (none) | Default Gemini model profile (gemini-pro/gemini-flash/gemini-flash-lite) |
+| `DEFAULT_MODEL_AGY` | (none) | Default Antigravity model profile (`agy-pro-high`/`agy-flash-high`/`agy-flash-low`; legacy `gemini-3.5-*` aliases still work) |
 | `NETWORK_GUARD_FAILURE_THRESHOLD` | `3` | Transient network failures before opening a dependency circuit |
 | `NETWORK_GUARD_RESET_SECONDS` | `120` | Seconds to skip calls for an open dependency circuit before retrying |
 
@@ -129,3 +130,11 @@ For workspace sessions, the bot writes `.gemini/settings.json` automatically the
 The bot writes the Telegram formatting prompt to `GEMINI.md` at the project root on startup. This file is gitignored and regenerated each run.
 
 For workspace sessions, the bot also writes `GEMINI.md` to the workspace directory on first use. If the workspace already has a `GEMINI.md`, the bot will not overwrite it.
+
+## Antigravity Setup
+
+Antigravity is auto-detected at startup if the `agy` CLI is on `PATH`. The bot calls it with `--dangerously-skip-permissions`, text `--print` output, and a 30-minute `--print-timeout`.
+
+Antigravity does not expose a JSON output mode, so the bot stores provider sessions by discovering the local conversation artifacts under `~/.gemini/antigravity-cli/` after the first successful prompt. Existing conversations are resumed with `--conversation <uuid>`.
+
+The bot may create `.agents/mcp.json` in the project or workspace so the plugin bridge is available to Antigravity. `.agents/` is gitignored because it contains machine-specific paths.

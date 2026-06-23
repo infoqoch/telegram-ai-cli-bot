@@ -130,7 +130,7 @@ class MessageHandlers(BaseHandler):
             reply_text = reply_to_message.text or ""
 
             if "sess_name:" in reply_text:
-                sess_match = re.search(r"sess_name:([\w-]+)", reply_text)
+                sess_match = re.search(r"sess_name:([\w.-]+)", reply_text)
                 if sess_match:
                     model = sess_match.group(1)
                     await self._handle_new_session_force_reply(update, chat_id, message, model)

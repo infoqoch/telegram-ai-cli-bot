@@ -38,3 +38,20 @@ def test_codex_legacy_codex_prefixed_key_resolves_to_provider_local_profile():
     """The previous codex_* abstraction remains accepted during migration."""
     assert normalize_model("codex", "codex_high") == "high"
     assert is_supported_model("codex", "codex_xhigh")
+
+
+def test_agy_profiles_use_stable_keys_with_exact_cli_model_names():
+    """Agy profile keys should be provider-local and map to exact CLI labels."""
+    profile = get_profile("agy", "agy-pro-high")
+
+    assert profile.key == "agy-pro-high"
+    assert profile.provider_model == "Gemini 3.1 Pro (High)"
+    assert infer_provider_from_model("agy-pro-high") == "agy"
+
+
+def test_agy_legacy_gemini_35_keys_resolve_to_stable_profiles():
+    """Early Agy keys remain accepted as aliases."""
+    assert normalize_model("agy", "gemini-3.5-pro") == "agy-pro-high"
+    assert normalize_model("agy", "gemini-3.5-flash") == "agy-flash-high"
+    assert normalize_model("agy", "gemini-3.5-flash-lite") == "agy-flash-low"
+    assert is_supported_model("agy", "gemini-3.5-pro")

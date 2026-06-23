@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     default_model_claude: str = Field(default="", alias="DEFAULT_MODEL_CLAUDE", description="Default Claude model (opus/sonnet/haiku)")
     default_model_codex: str = Field(default="", alias="DEFAULT_MODEL_CODEX", description="Default Codex model")
     default_model_gemini: str = Field(default="", alias="DEFAULT_MODEL_GEMINI", description="Default Gemini model (gemini-pro/gemini-flash/gemini-flash-lite)")
+    default_model_agy: str = Field(default="", alias="DEFAULT_MODEL_AGY", description="Default Agy model (agy-pro-high/agy-flash-high/agy-flash-low)")
     
     # Authentication
     require_auth: bool = Field(default=False)

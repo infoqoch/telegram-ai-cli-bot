@@ -198,6 +198,61 @@ class TestLocalSessionDiscoveryService:
         assert sessions[0].title == "하이 코덱스~ raw fallback 확인"
         assert sessions[0].workspace_path == "/tmp/raw-codex"
 
+    def test_list_recent_agy_sessions_extracts_user_request_and_workspace(self, tmp_path):
+        """Agy transcripts and history are normalized into importable sessions."""
+        session_id = "8d6e9031-721c-4368-877d-d8b803012d80"
+        transcript_path = (
+            tmp_path
+            / ".gemini"
+            / "antigravity-cli"
+            / "brain"
+            / session_id
+            / ".system_generated"
+            / "logs"
+            / "transcript.jsonl"
+        )
+        transcript_path.parent.mkdir(parents=True)
+        transcript_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "USER_INPUT",
+                            "content": (
+                                "<USER_REQUEST>\n"
+                                "안티그래비티 세션 가져오기 확인\n"
+                                "</USER_REQUEST>\n"
+                                "<ADDITIONAL_METADATA>ignore</ADDITIONAL_METADATA>"
+                            ),
+                        }
+                    ),
+                    json.dumps({"type": "PLANNER_RESPONSE", "content": "ok"}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+        history_path = tmp_path / ".gemini" / "antigravity-cli" / "history.jsonl"
+        history_path.write_text(
+            json.dumps(
+                {
+                    "conversationId": session_id,
+                    "workspace": "/tmp/agy-project",
+                    "display": "안티그래비티 세션 가져오기 확인",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        service = LocalSessionDiscoveryService(home=tmp_path)
+        sessions = service.list_recent("agy", limit=5)
+
+        assert len(sessions) == 1
+        assert sessions[0].provider_session_id == session_id
+        assert sessions[0].title == "안티그래비티 세션 가져오기 확인"
+        assert sessions[0].workspace_path == "/tmp/agy-project"
+        assert sessions[0].message_count == 1
+
     def test_list_recent_dedupes_index_and_raw_sessions(self, tmp_path):
         """Index sessions are merged with raw metadata instead of duplicated."""
         claude_dir = tmp_path / ".claude" / "projects" / "demo-project"

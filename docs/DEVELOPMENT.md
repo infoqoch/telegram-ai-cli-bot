@@ -83,7 +83,7 @@ Rule: one service should own one runtime story.
 
 - [`src/repository/`](../src/repository): SQLite persistence and adapters.
 - [`src/ai/`](../src/ai): provider registry and shared CLI client base.
-- [`src/claude/`](../src/claude), [`src/codex/`](../src/codex), and [`src/gemini/`](../src/gemini): provider-specific CLI wrappers.
+- [`src/claude/`](../src/claude), [`src/codex/`](../src/codex), [`src/gemini/`](../src/gemini), and [`src/agy/`](../src/agy): provider-specific CLI wrappers.
 - [`src/plugins/`](../src/plugins): plugin runtime and loader.
 - [`prompts/telegram.md`](../prompts/telegram.md): Telegram formatting and response-shaping prompt.
 
@@ -98,15 +98,15 @@ Rule: one service should own one runtime story.
 
 Each provider CLI has a different mechanism for system prompts, MCP, and session management. Reference when adding a new provider:
 
-| Concern | Claude | Codex | Gemini |
-|---------|--------|-------|--------|
-| System prompt | `--system-prompt` flag | `--instructions` flag | `GEMINI.md` file in cwd |
-| MCP config | `--mcp-config` flag | `--mcp-config` flag | `.gemini/settings.json` in cwd |
-| Session resume | `--resume <uuid>` | `--session <id>` | `--resume <uuid>` |
-| Model selection | `--model <name>` | `--model <name>` | `-m <name>` |
-| Auto-approve | `--dangerously-skip-permissions` | `--full-auto` | `--approval-mode yolo` |
-| Output format | `--output-format json` (`result` field) | `--output-format json` | `--output-format json` (`response` field) |
-| Session storage | `~/.claude/projects/` | `~/.codex/` | `~/.gemini/tmp/<project_hash>/chats/` |
+| Concern | Claude | Codex | Gemini | Antigravity |
+|---------|--------|-------|--------|-------------|
+| System prompt | `--system-prompt` flag | `--instructions` flag | `GEMINI.md` file in cwd | Prepended to each `--print` request |
+| MCP config | `--mcp-config` flag | `--mcp-config` flag | `.gemini/settings.json` in cwd | `.agents/mcp.json` in cwd |
+| Session resume | `--resume <uuid>` | `--session <id>` | `--resume <uuid>` | `--conversation <uuid>` |
+| Model selection | `--model <name>` | `--model <name>` | `-m <name>` | `--model <display name>` |
+| Auto-approve | `--dangerously-skip-permissions` | `--full-auto` | `--approval-mode yolo` | `--dangerously-skip-permissions` |
+| Output format | `--output-format json` (`result` field) | `--output-format json` | `--output-format json` (`response` field) | Raw text only |
+| Session storage | `~/.claude/projects/` | `~/.codex/` | `~/.gemini/tmp/<project_hash>/chats/` | `~/.gemini/antigravity-cli/` |
 
 **Adding a new provider:** create `src/<provider>/client.py` subclassing `BaseCLIClient`, register in `src/ai/registry.py` `build_default_registry`, add profiles to `src/ai/catalog.py`, and add the provider icon to `src/ui_emoji.py`.
 

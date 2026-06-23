@@ -1,4 +1,4 @@
-"""Discover recent local Claude/Codex sessions from provider-managed storage."""
+"""Discover recent local provider sessions from provider-managed storage."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ _CODEX_ROLLOUT_ID_RE = re.compile(
 _AGENTS_BLOCK_RE = re.compile(r"^# AGENTS\.md instructions.*?</INSTRUCTIONS>\s*", re.DOTALL)
 _ENVIRONMENT_BLOCK_RE = re.compile(r"<environment_context>.*?</environment_context>\s*", re.DOTALL)
 _LOCAL_COMMAND_CAVEAT_RE = re.compile(r"<local-command-caveat>.*?</local-command-caveat>\s*", re.DOTALL)
+_AGY_USER_REQUEST_RE = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,9 @@ class LocalSessionDiscoveryService:
         self._codex_index_path = self._home / ".codex" / "session_index.jsonl"
         self._codex_sessions_root = self._home / ".codex" / "sessions"
         self._gemini_tmp_root = self._home / ".gemini" / "tmp"
+        self._agy_root = self._home / ".gemini" / "antigravity-cli"
+        self._agy_brain_root = self._agy_root / "brain"
+        self._agy_history_path = self._agy_root / "history.jsonl"
 
     def list_recent(
         self,
@@ -80,7 +84,7 @@ class LocalSessionDiscoveryService:
             return self._load_provider_sessions(provider)
 
         sessions: list[DiscoveredSession] = []
-        for provider_name in ("claude", "codex", "gemini"):
+        for provider_name in ("claude", "codex", "gemini", "agy"):
             sessions.extend(self._load_provider_sessions(provider_name))
         return sessions
 
@@ -91,6 +95,8 @@ class LocalSessionDiscoveryService:
             return self._load_codex_sessions()
         if provider == "gemini":
             return self._load_gemini_sessions()
+        if provider == "agy":
+            return self._load_agy_sessions()
         return []
 
     def _load_claude_sessions(self) -> list[DiscoveredSession]:
@@ -333,6 +339,80 @@ class LocalSessionDiscoveryService:
 
         return list(sessions_by_id.values())
 
+    def _load_agy_sessions(self) -> list[DiscoveredSession]:
+        """Scan ~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl"""
+        sessions_by_id: dict[str, DiscoveredSession] = {}
+        if not self._agy_brain_root.exists():
+            return []
+
+        workspaces_by_id = self._load_agy_history_workspaces()
+        transcript_glob = "*/.system_generated/logs/transcript.jsonl"
+        for transcript_file in self._agy_brain_root.glob(transcript_glob):
+            session_id = transcript_file.parents[2].name
+            if not _UUID_RE.fullmatch(session_id):
+                continue
+
+            title = ""
+            user_count = 0
+
+            try:
+                with transcript_file.open("r", encoding="utf-8") as handle:
+                    for raw_line in handle:
+                        try:
+                            entry = json.loads(raw_line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        if entry.get("type") == "USER_INPUT":
+                            user_count += 1
+                            if not title:
+                                title = self._extract_agy_user_text(entry.get("content"))
+            except OSError:
+                continue
+
+            updated_at = self._path_mtime_to_iso(transcript_file)
+
+            discovered = DiscoveredSession(
+                provider="agy",
+                provider_session_id=session_id,
+                title=title or self._default_title("agy", session_id),
+                updated_at=updated_at,
+                workspace_path=workspaces_by_id.get(session_id),
+                preview=title,
+                message_count=user_count or None,
+            )
+            self._store_discovered_session(sessions_by_id, discovered)
+
+        return list(sessions_by_id.values())
+
+    def _load_agy_history_workspaces(self) -> dict[str, str]:
+        """Return conversationId -> workspace mappings from Agy CLI history."""
+        workspaces: dict[str, str] = {}
+        if not self._agy_history_path.exists():
+            return workspaces
+
+        try:
+            lines = self._agy_history_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return workspaces
+
+        for raw_line in lines:
+            try:
+                entry = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            session_id = entry.get("conversationId")
+            workspace = entry.get("workspace")
+            if (
+                isinstance(session_id, str)
+                and _UUID_RE.fullmatch(session_id)
+                and isinstance(workspace, str)
+            ):
+                workspaces[session_id] = workspace
+        return workspaces
+
     def _store_discovered_session(
         self,
         sessions_by_id: dict[str, DiscoveredSession],
@@ -414,9 +494,23 @@ class LocalSessionDiscoveryService:
             return ""
         return cls._clean_text(stripped)
 
+    @classmethod
+    def _extract_agy_user_text(cls, value: object) -> str:
+        if not isinstance(value, str):
+            return ""
+        match = _AGY_USER_REQUEST_RE.search(value)
+        if match:
+            return cls._clean_text(match.group(1))
+        return cls._extract_meaningful_prompt(value)
+
     @staticmethod
     def _default_title(provider: str, session_id: str) -> str:
-        prefix = {"claude": "Claude", "codex": "Codex", "gemini": "Gemini"}.get(provider, provider.title())
+        prefix = {
+            "claude": "Claude",
+            "codex": "Codex",
+            "gemini": "Gemini",
+            "agy": "Antigravity",
+        }.get(provider, provider.title())
         return f"{prefix} {session_id[:8]}"
 
     @classmethod

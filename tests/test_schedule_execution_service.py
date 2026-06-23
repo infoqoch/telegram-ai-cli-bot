@@ -80,6 +80,28 @@ class TestScheduleExecutionService:
         mock_bot.send_message.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_execute_agy_schedule_uses_agy_client(self, service, mock_ai_registry):
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "chat"
+        schedule.workspace_path = None
+        schedule.ai_provider = "agy"
+        schedule.message = "테스트"
+        schedule.model = "agy-pro-high"
+        schedule.chat_id = 12345
+        schedule.name = "안티그래비티"
+
+        await service.execute(schedule)
+
+        mock_ai_registry.get_client.assert_called_once_with("agy")
+        mock_ai_registry.get_client.return_value.chat.assert_called_once_with(
+            message="테스트",
+            session_id=None,
+            model="agy-pro-high",
+            workspace_path=None,
+        )
+
+    @pytest.mark.asyncio
     async def test_execute_plugin_schedule_uses_plugin_action(
         self, service, mock_plugins, mock_schedule_manager
     ):

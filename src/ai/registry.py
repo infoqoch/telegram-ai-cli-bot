@@ -49,4 +49,12 @@ def build_default_registry(settings) -> AIRegistry:
             timeout=None,
         )
 
+    if shutil.which("agy"):
+        from src.agy.client import AgyClient
+        clients["agy"] = AgyClient(
+            command="agy",
+            system_prompt_file=settings.telegram_prompt_file,
+            timeout=None,
+        )
+
     return AIRegistry(clients)

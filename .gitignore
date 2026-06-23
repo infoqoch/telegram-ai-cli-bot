@@ -46,3 +46,6 @@ plugins/custom/
 # Gemini CLI project config (machine-specific absolute paths)
 .gemini/
 GEMINI.md
+
+# Antigravity CLI project config (machine-specific absolute paths)
+.agents/

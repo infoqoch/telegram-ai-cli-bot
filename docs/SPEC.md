@@ -332,12 +332,16 @@ Users do not need to know the underlying CLI flags. The UI only shows human-read
 | Gemini | `Pro` | `gemini-2.5-pro` |
 | Gemini | `Flash` | `gemini-2.5-flash` |
 | Gemini | `Flash Lite` | `gemini-2.5-flash-lite` |
+| Antigravity | `Pro High` | profile key `agy-pro-high`, current backing `Gemini 3.1 Pro (High)` |
+| Antigravity | `Flash High` | profile key `agy-flash-high`, current backing `Gemini 3.5 Flash (High)` |
+| Antigravity | `Flash Low` | profile key `agy-flash-low`, current backing `Gemini 3.5 Flash (Low)` |
 
 - The profile key is stored in the DB; the actual per-provider CLI flags are interpreted internally.
 - Only UI labels are shown in buttons, session list, `/session`, and `/tasks`.
 - Codex profiles are treated as "model profile" concepts that include reasoning depth.
 - Codex stores provider-local profile keys (`xhigh`, `high`, `medium`) like Claude stores `opus` / `sonnet` / `haiku`; concrete GPT versions are selected inside `src/ai/catalog.py`.
 - Legacy Codex keys such as `codex_high`, `gpt54_high`, and `gpt54_xhigh` are accepted as aliases and normalized to the provider-local keys.
+- Legacy Antigravity keys such as `gemini-3.5-pro` are accepted as aliases and normalized to `agy-*` profile keys.
 
 ### Session Rename (`/rename`)
 
