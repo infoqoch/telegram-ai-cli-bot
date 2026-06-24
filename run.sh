@@ -251,7 +251,7 @@ _start_supervisor() {
 
     LOG_LEVEL="$level" BOT_DATA_DIR="$DATA_DIR" BOT_LOG_DIR="$LOG_DIR" BOT_LOCK_FILE="$LOCK_FILE" \
         BOT_SUPERVISOR_LOCK_FILE="$SUPERVISOR_LOCK_FILE" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build \
-        nohup python -m src.supervisor >> "$boot_log" 2>&1 &
+        nohup python -m src.supervisor >> "$boot_log" 2>&1 < /dev/null &
     local new_pid=$!
     echo "$new_pid" > "$PID_FILE"
 

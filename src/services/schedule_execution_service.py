@@ -115,6 +115,30 @@ class ScheduleExecutionService:
                 return "__plugin_rich_sent__"
             return result
 
+        if schedule_type == "command":
+            import asyncio
+            try:
+                # message 필드에 명령어/스크립트 경로가 저장되어 있다고 가정
+                process = await asyncio.create_subprocess_shell(
+                    schedule.message,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                out_text = stdout.decode('utf-8').strip()
+                err_text = stderr.decode('utf-8').strip()
+                
+                # 출력이 없으면 조용히 종료할 수 있도록 None 반환 (또는 설정에 따라 빈 문자열)
+                if not out_text and not err_text:
+                    return None
+                    
+                result = out_text
+                if err_text:
+                    result += f"\n\n[Errors]\n{err_text}"
+                return result
+            except Exception as e:
+                return f"Command execution failed: {e}"
+
         workspace_path = (
             schedule.workspace_path
             if schedule_type == "workspace" and schedule.workspace_path

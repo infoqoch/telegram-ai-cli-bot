@@ -118,7 +118,11 @@ def resolve_schedule_type(schedule, *, fallback: str = "chat") -> str:
         schedule_type = getattr(schedule, "type", None)
     if not isinstance(schedule_type, str) or not schedule_type:
         schedule_type = fallback
-    return normalize_schedule_type(schedule_type)
+    
+    val = normalize_schedule_type(schedule_type)
+    if val in ("plugin", "workspace", "command"):
+        return val
+    return "chat"
 
 
 def resolve_provider(schedule, *, fallback: str = "claude") -> str:
