@@ -17,6 +17,7 @@ from src.schedule_utils import build_daily_cron, next_occurrence, normalize_sche
 from src.time_utils import format_local_datetime
 from src.ui_emoji import (
     BUTTON_ADD_CHAT,
+    BUTTON_ADD_COMMAND,
     BUTTON_ADD_PLUGIN,
     BUTTON_ADD_WORKSPACE,
     BUTTON_AI_WORK,
@@ -64,7 +65,10 @@ class SchedulerCallbackHandlers(BaseHandler):
         buttons.append([
             InlineKeyboardButton(BUTTON_ADD_CHAT, callback_data="sched:add:chat"),
             InlineKeyboardButton(BUTTON_ADD_WORKSPACE, callback_data="sched:add:workspace"),
+        ])
+        buttons.append([
             InlineKeyboardButton(BUTTON_ADD_PLUGIN, callback_data="sched:add:plugin"),
+            InlineKeyboardButton(BUTTON_ADD_COMMAND, callback_data="aiwork:sched_cmd"),
         ])
         buttons.append([InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:scheduler")])
         nav_row = [InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh")]

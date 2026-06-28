@@ -12,13 +12,20 @@ from .base import BaseHandler
 # Core domain labels (only non-plugin domains)
 CORE_DOMAIN_LABELS = {
     "scheduler": "Scheduler",
+    "sched_cmd": "Command Schedule",
     "workspace": "Workspace",
     "tasks": "Tasks",
     "sessions": "Sessions",
 }
 
+# Mapping of complex domains to one or more physical markdown context files.
+# If a domain is not in this mapping, it loads its own name as a fallback.
+DOMAIN_CONTEXT_MAPPINGS = {
+    "sched_cmd": ["scheduler", "scheduler_command"],
+}
+
 # Core domains with static md context files
-CORE_DOMAINS = {"scheduler", "workspace", "tasks", "sessions"}
+CORE_DOMAINS = {"scheduler", "sched_cmd", "workspace", "tasks", "sessions"}
 
 
 class AiWorkHandlers(BaseHandler):
@@ -43,7 +50,8 @@ class AiWorkHandlers(BaseHandler):
     async def _handle_aiwork_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle aiwork:{domain} callback - show ForceReply prompt."""
         domain = callback_data.split(":", 1)[1] if ":" in callback_data else ""
-        label = self._get_domain_label(domain)
+        primary_domain = domain.split(",")[0]
+        label = self._get_domain_label(primary_domain)
 
         await query.message.reply_text(
             f"✨ <b>{label} - AI Work</b>\n\n"
@@ -62,7 +70,8 @@ class AiWorkHandlers(BaseHandler):
     ) -> None:
         """Create a new session, gather domain context, and dispatch to AI."""
         user_id = str(chat_id)
-        label = self._get_domain_label(domain)
+        primary_domain = domain.split(",")[0]
+        label = self._get_domain_label(primary_domain)
 
         # Create a dedicated session for this AI work
         provider = self._get_selected_ai_provider(user_id)
@@ -96,8 +105,16 @@ class AiWorkHandlers(BaseHandler):
         await self._dispatch_to_ai(update, chat_id, user_id, augmented_message)
 
     async def _get_static_context(self, domain: str) -> str:
-        """Load static context description for a domain."""
-        plugin = self.plugins.get_plugin_by_name(domain) if self.plugins else None
-        if plugin:
-            return plugin._load_ai_context_file()
-        return self._load_core_context(domain)
+        """Load static context description for a domain, supporting multiple comma-separated domains."""
+        parts = domain.split(",")
+        context_text = ""
+        for part in parts:
+            # Map backend pseudo-domains to actual physical files
+            mapped_files = DOMAIN_CONTEXT_MAPPINGS.get(part, [part])
+            for filename in mapped_files:
+                plugin = self.plugins.get_plugin_by_name(filename) if self.plugins else None
+                if plugin:
+                    context_text += plugin._load_ai_context_file() + "\n\n"
+                else:
+                    context_text += self._load_core_context(filename) + "\n\n"
+        return context_text.strip()

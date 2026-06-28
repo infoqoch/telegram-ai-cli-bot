@@ -34,7 +34,13 @@ from src.schedule_utils import (
     trigger_summary,
 )
 from src.time_utils import format_local_datetime
-from src.ui_emoji import ENTITY_AI, ENTITY_PLUGIN, ENTITY_WORKSPACE
+from src.ui_emoji import (
+    ENTITY_AI,
+    ENTITY_BOT,
+    ENTITY_COMMAND,
+    ENTITY_PLUGIN,
+    ENTITY_WORKSPACE,
+)
 
 PERSISTENT_QUEUE_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
 
@@ -181,6 +187,8 @@ class Schedule:
             return ENTITY_WORKSPACE
         if self.schedule_type == "plugin":
             return ENTITY_PLUGIN
+        if self.schedule_type == "command":
+            return ENTITY_COMMAND
         return ENTITY_AI
 
     def to_dict(self) -> dict[str, Any]:

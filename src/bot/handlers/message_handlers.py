@@ -156,7 +156,7 @@ class MessageHandlers(BaseHandler):
                 return
 
             if "aiwork:" in reply_text:
-                aiwork_match = re.search(r"aiwork:(\w+)", reply_text)
+                aiwork_match = re.search(r"aiwork:([\w,-]+)", reply_text)
                 if aiwork_match:
                     domain = aiwork_match.group(1)
                     await self._handle_aiwork_force_reply(update, chat_id, message, domain)
