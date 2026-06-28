@@ -268,6 +268,9 @@ class AgyClient(BaseCLIClient):
         elif session_id:
             logger.warning(f"Invalid UUID for --conversation: {session_id[:16]}")
 
+        if workspace_path:
+            cmd.extend(["--add-dir", workspace_path])
+
         cmd.extend(["--dangerously-skip-permissions"])
         cmd.extend(["--print-timeout", self.print_timeout])
         if log_file:

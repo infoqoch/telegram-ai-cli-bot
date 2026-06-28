@@ -172,8 +172,12 @@ class ScheduleExecutionService:
         """Send a possibly long response with HTML fallback."""
         header_html = f"⏰ <b>{escape_html(schedule_name)}</b>\n\n"
         header_plain = f"⏰ {schedule_name}\n\n"
+        
+        from src.bot.formatters import markdown_to_telegram_html
+        response_html = markdown_to_telegram_html(response)
+        
         max_len = 4000
-        chunks = [response[offset:offset + max_len] for offset in range(0, len(response), max_len)]
+        chunks = [response_html[offset:offset + max_len] for offset in range(0, len(response_html), max_len)]
 
         for i, chunk in enumerate(chunks):
             is_last = i == len(chunks) - 1
@@ -206,7 +210,9 @@ class ScheduleExecutionService:
     ) -> None:
         """Send a plugin rich response (text + reply_markup) with schedule header."""
         header = f"⏰ <b>{escape_html(schedule_name)}</b>\n\n"
-        text = result.get("text", "")
+        raw_text = result.get("text", "")
+        from src.bot.formatters import markdown_to_telegram_html
+        text = markdown_to_telegram_html(raw_text)
         reply_markup = result.get("reply_markup")
 
         try:

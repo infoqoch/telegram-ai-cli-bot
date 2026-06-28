@@ -25,7 +25,7 @@ def make_client(tmp_path: Path, prompt_file: Path | None = None) -> AgyClient:
 
 def test_build_command_uses_exact_model_timeout_log_and_prompt(tmp_path):
     prompt_file = tmp_path / "telegram.md"
-    prompt_file.write_text("Use Telegram HTML only.", encoding="utf-8")
+    prompt_file.write_text("You are free to use standard Markdown formatting.", encoding="utf-8")
     client = make_client(tmp_path, prompt_file)
     log_file = tmp_path / "agy.log"
 
@@ -45,7 +45,7 @@ def test_build_command_uses_exact_model_timeout_log_and_prompt(tmp_path):
     assert ["--print-timeout", "30m"] == cmd[timeout_index:timeout_index + 2]
     assert ["--log-file", str(log_file)] == cmd[log_index:log_index + 2]
     assert cmd[-2] == "--print"
-    assert "Use Telegram HTML only." in cmd[-1]
+    assert "You are free to use standard Markdown formatting." in cmd[-1]
     assert "<USER_REQUEST>\nhello\n</USER_REQUEST>" in cmd[-1]
 
 

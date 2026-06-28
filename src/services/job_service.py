@@ -502,7 +502,8 @@ class JobService:
                     self._repo.set_message_delivery_markup(job_id, custom_delivery_buttons)
                     delivery_markup_json = json.dumps(custom_delivery_buttons, ensure_ascii=False)
             else:
-                delivery_body = response
+                from src.bot.formatters import markdown_to_telegram_html
+                delivery_body = markdown_to_telegram_html(response)
 
             if custom_delivery_text is not None:
                 delivery_text = delivery_body
