@@ -467,7 +467,7 @@ When a workspace is selected: choose `[Session]` (start session) / `[Schedule]` 
 
 ### Concept
 
-Tasks that run automatically at a specified time. Three types: Chat (general conversation), Workspace (project context), Plugin (plugin action). The entire app uses a single local timezone (`APP_TIMEZONE`, default `Asia/Seoul`).
+Tasks that run automatically at a specified time. Four types: Chat (general conversation), Workspace (project context), Plugin (plugin action), Command (OS shell command). The entire app uses a single local timezone (`APP_TIMEZONE`, default `Asia/Seoul`).
 
 ### User Scenarios
 
@@ -499,7 +499,7 @@ System Jobs                                  ← system jobs (hourly_ping, etc.)
   {schedule_info} - {job_name}
 ```
 
-- Type emoji: `💬` Chat, `📂` Workspace, `🔌` Plugin
+- Type emoji: `💬` Chat, `📂` Workspace, `🔌` Plugin, `💻` Command
 - Status: `✅` active, `⏸` inactive
 
 ### Schedule Detail Screen
@@ -550,7 +550,14 @@ Sent to the user upon completion (split if over 4000 characters):
 ```
 
 - `💬 Session` button: switches to the session linked to the execution result. If no session exists yet, registers the provider session from that run as a bot session and switches to it.
-- Plugin schedules have no AI session, so no button is shown.
+- Plugin and Command schedules have no AI session, so no button is shown.
+
+### Command Type Optimization
+
+- If `schedule_type` is `command`, the `message` field is treated as an **OS terminal shell command** rather than a natural language prompt.
+- The bot process executes the command directly in the shell using `asyncio.create_subprocess_shell`.
+- Telegram notification is sent **only if** there is `stdout` or `stderr` output. If empty, the schedule finishes silently.
+- Currently, this type is optimized via direct DB updates to save AI API costs for simple periodic scripts (e.g., cron jobs, crawling).
 
 ---
 
