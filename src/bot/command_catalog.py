@@ -24,7 +24,7 @@ BASE_COMMAND_SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("help", "Show help and guides", menu_label="❓ Help", callback_data="menu:help"),
     CommandSpec("session", "Show the current session"),
     CommandSpec("new", "Start a new AI session", menu_label="🆕 New Session", callback_data="menu:new"),
-    CommandSpec("sl", "Show the session list", menu_label="💬 Sessions", callback_data="menu:sessions"),
+    CommandSpec("sessions", "Show the session list", menu_label="💬 Sessions", callback_data="menu:sessions"),
     CommandSpec("workspace", "Open the workspace hub", menu_label="📂 Workspace", callback_data="menu:workspace"),
     CommandSpec("scheduler", "Open the scheduler hub", menu_label="⏰ Scheduler", callback_data="menu:scheduler"),
     CommandSpec("tasks", "Show active tasks", menu_label="📌 Tasks", callback_data="menu:tasks"),
@@ -35,10 +35,12 @@ BASE_COMMAND_SPECS: tuple[CommandSpec, ...] = (
 
 PUBLISHED_BOT_COMMAND_NAMES: tuple[str, ...] = (
     "menu",
-    "session",
     "new",
-    "sl",
+    "session",
+    "sessions",
     "tasks",
+    "workspace",
+    "scheduler",
 )
 
 
