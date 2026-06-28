@@ -20,9 +20,9 @@
 
 ## Response Format Rules
 
-- All responses use **Telegram HTML** (`<b>`, `<i>`, `<code>`, `<pre>`)
-- Markdown syntax is forbidden (`**`, `*`, `#`, `` ` ``, `>`)
-- If AI responses contain markdown, the `markdown_to_telegram_html()` converter automatically converts them to HTML
+- **System and Plugin Messages**: Must be written natively in **Telegram HTML** (`<b>`, `<i>`, `<code>`, `<pre>`). Markdown syntax is forbidden here.
+- **AI Responses**: AI natively generates Markdown. The `markdown_to_telegram_html()` converter is applied **strictly and exclusively to AI-generated text** to safely convert it into Telegram HTML.
+- **Important**: Never pass System or Plugin messages through the Markdown converter, as it safely escapes existing HTML tags (e.g., `<b>` becomes `&lt;b&gt;`) and will break formatting.
 - Tables are not supported → use bulleted/numbered lists
 - Mobile-optimized: concise text, 4096-character limit (safe margin: 4000 characters)
 - Messages exceeding 4000 characters are automatically split at newline boundaries (or at 4000-character intervals if no newline exists)

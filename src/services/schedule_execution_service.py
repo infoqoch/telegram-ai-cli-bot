@@ -211,8 +211,7 @@ class ScheduleExecutionService:
         """Send a plugin rich response (text + reply_markup) with schedule header."""
         header = f"⏰ <b>{escape_html(schedule_name)}</b>\n\n"
         raw_text = result.get("text", "")
-        from src.bot.formatters import markdown_to_telegram_html
-        text = markdown_to_telegram_html(raw_text)
+        # Plugin messages use HTML natively; do not apply markdown conversion.
         reply_markup = result.get("reply_markup")
 
         try:
@@ -220,7 +219,7 @@ class ScheduleExecutionService:
                 "telegram",
                 self._bot.send_message,
                 chat_id=chat_id,
-                text=f"{header}{text}",
+                text=f"{header}{raw_text}",
                 parse_mode="HTML",
                 reply_markup=reply_markup,
             )
@@ -231,7 +230,7 @@ class ScheduleExecutionService:
                 "telegram",
                 self._bot.send_message,
                 chat_id=chat_id,
-                text=f"⏰ {schedule_name}\n\n{text}",
+                text=f"⏰ {schedule_name}\n\n{raw_text}",
                 reply_markup=reply_markup,
             )
 

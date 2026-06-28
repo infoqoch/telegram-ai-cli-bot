@@ -400,7 +400,11 @@ class CallbackHandlers(BaseHandler):
         model_name = model if is_supported_model(provider, model) else get_default_model(provider)
 
         raw_name = name or ""
-        session_name = raw_name.strip()[:MAX_SESSION_NAME_LENGTH] if raw_name.strip() else ""
+        session_name = raw_name.strip()
+        if session_name == ".":
+            session_name = ""
+        else:
+            session_name = session_name[:MAX_SESSION_NAME_LENGTH] if session_name else ""
 
         self._set_selected_ai_provider(user_id, provider)
         session_id = self.sessions.create_session(

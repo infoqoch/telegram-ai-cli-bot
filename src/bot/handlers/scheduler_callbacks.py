@@ -206,6 +206,7 @@ class SchedulerCallbackHandlers(BaseHandler):
         """Show inactive (disabled / completed once) schedules."""
         schedules = self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
         inactive = [s for s in schedules if not s.enabled]
+        inactive.sort(key=lambda s: s.updated_at or "", reverse=True)
 
         if not inactive:
             await query.answer("No history")

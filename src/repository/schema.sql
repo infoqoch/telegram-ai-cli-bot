@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     last_run TEXT,
     last_error TEXT,
     run_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -208,4 +209,10 @@ CREATE TRIGGER IF NOT EXISTS update_users_timestamp
 AFTER UPDATE ON users
 BEGIN
     UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_schedules_timestamp
+AFTER UPDATE ON schedules
+BEGIN
+    UPDATE schedules SET updated_at = datetime('now') WHERE id = NEW.id;
 END;

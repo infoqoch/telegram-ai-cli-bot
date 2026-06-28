@@ -125,6 +125,7 @@ class Schedule:
     action_name: Optional[str]
     enabled: bool
     created_at: str
+    updated_at: str
     last_run: Optional[str]
     last_error: Optional[str]
     run_count: int
@@ -1107,6 +1108,7 @@ class Repository:
             action_name=action_name,
             enabled=True,
             created_at=now,
+            updated_at=now,
             last_run=None,
             last_error=None,
             run_count=0
@@ -1143,6 +1145,7 @@ class Repository:
             action_name=row["action_name"],
             enabled=bool(row["enabled"]),
             created_at=row["created_at"],
+            updated_at=row["updated_at"],
             last_run=row["last_run"],
             last_error=row["last_error"],
             run_count=row["run_count"]

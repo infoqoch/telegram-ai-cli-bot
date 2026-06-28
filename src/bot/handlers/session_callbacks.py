@@ -406,14 +406,14 @@ class SessionCallbackHandlers(BaseHandler):
             text=f"{model_emoji} <b>{get_profile_label(provider, normalized_model)}</b> session creation\n\n"
                  f"AI: <b>{self._format_provider_display(provider)}</b>\n\n"
                  f"Enter session name.\n"
-                 f"Send a blank or space-only reply to use a random name.\n"
+                 f"Send `.` for a random name.\n"
                  f"Creating this session will also switch the current AI:",
             parse_mode="HTML"
         )
 
         await query.message.reply_text(
-            text=f"Enter session name (blank = random) (sess_name:{normalized_model})",
-            reply_markup=ForceReply(selective=True, input_field_placeholder="Name or space for random")
+            text=f"Enter session name ('.' = random) (sess_name:{normalized_model})",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="Name (or '.' for random)")
         )
 
     async def _handle_new_session_menu_callback(self, query, chat_id: int) -> None:
@@ -459,7 +459,11 @@ class SessionCallbackHandlers(BaseHandler):
         model_name = model if is_supported_model(provider, model) else get_default_model(provider)
 
         raw_name = name or ""
-        session_name = raw_name.strip()[:MAX_SESSION_NAME_LENGTH] if raw_name.strip() else ""
+        session_name = raw_name.strip()
+        if session_name == ".":
+            session_name = ""
+        else:
+            session_name = session_name[:MAX_SESSION_NAME_LENGTH] if session_name else ""
 
         self._set_selected_ai_provider(user_id, provider)
         session_id = self.sessions.create_session(
