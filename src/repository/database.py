@@ -94,6 +94,7 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
     """Add critical columns before executescript creates provider-aware indexes."""
     if _table_exists(conn, "users"):
         _ensure_column(conn, "users", "selected_ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+        _ensure_column(conn, "users", "updated_at", "TEXT NOT NULL DEFAULT (datetime('now'))")
     if _table_exists(conn, "sessions"):
         _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
         _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
@@ -103,6 +104,7 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
         _ensure_column(conn, "schedules", "cron_expr", "TEXT")
         _ensure_column(conn, "schedules", "run_at_local", "TEXT")
+        _ensure_column(conn, "schedules", "updated_at", "TEXT NOT NULL DEFAULT (datetime('now'))")
     if _table_exists(conn, "message_log"):
         _ensure_column(conn, "message_log", "delivery_text", "TEXT")
         _ensure_column(conn, "message_log", "delivery_markup_json", "TEXT")
@@ -116,6 +118,7 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
 def _migrate_schema(conn: sqlite3.Connection) -> None:
     """Apply lightweight in-place schema upgrades for existing local DBs."""
     _ensure_column(conn, "users", "selected_ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+    _ensure_column(conn, "users", "updated_at", "TEXT NOT NULL DEFAULT (datetime('now'))")
     _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
     _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
     _ensure_column(conn, "sessions", "recycled", "INTEGER NOT NULL DEFAULT 0")
@@ -123,6 +126,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "schedules", "trigger_type", "TEXT NOT NULL DEFAULT 'cron'")
     _ensure_column(conn, "schedules", "cron_expr", "TEXT")
     _ensure_column(conn, "schedules", "run_at_local", "TEXT")
+    _ensure_column(conn, "schedules", "updated_at", "TEXT NOT NULL DEFAULT (datetime('now'))")
     _ensure_column(conn, "message_log", "delivery_text", "TEXT")
     _ensure_column(conn, "message_log", "delivery_markup_json", "TEXT")
     _ensure_column(conn, "message_log", "completion_hook_json", "TEXT")
