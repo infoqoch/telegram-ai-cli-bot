@@ -559,6 +559,15 @@ Sent to the user upon completion (split if over 4000 characters):
 - Telegram notification is sent **only if** there is `stdout` or `stderr` output. If empty, the schedule finishes silently.
 - Currently, this type is optimized via direct DB updates to save AI API costs for simple periodic scripts (e.g., cron jobs, crawling).
 
+**Example (DB Update):**
+```sql
+UPDATE schedules 
+SET 
+    schedule_type = 'command',
+    message = 'venv/bin/python plugins/custom/naver_booking/get_availability.py'
+WHERE id = 'naver_booking_check';
+```
+
 ---
 
 ## `/ai` - Direct Query to Current AI
