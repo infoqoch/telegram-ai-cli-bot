@@ -7,6 +7,7 @@ A feature that lets users register and manage AI conversations, workspace tasks,
 - **chat**: Regular AI conversation schedule. Sends a message to the AI at the specified time and receives a response.
 - **workspace**: Workspace-based schedule. Runs an AI task applying the CLAUDE.md rules of a specific project directory.
 - **plugin**: Plugin action schedule. Runs actions provided by plugins such as todo checks or diary reminders (no AI model or message required).
+- **command**: Shell command schedule. Command schedules must be created through the command draft workflow, not by direct DB insertion.
 
 ## Trigger Types (trigger_type)
 - **cron**: Daily repeat (based on hour and minute)
@@ -63,3 +64,5 @@ Use the `query_db` tool when you need to query or modify data. The `{chat_id}` p
 **Important:** After modifying schedule data via `query_db`, call `reload_schedules()` to apply changes to the running scheduler.
 
 After adding, modifying, or deleting schedules via `query_db`, you must call `reload_schedules()` for the changes to take effect in the runtime scheduler. Modifying the DB alone will not affect actual behavior until the bot is restarted.
+
+Do not use direct `query_db` writes for new command schedules. For command schedules, use the `sched_cmd` context and `command_schedule_create_draft` tool so the bot can render a draft, test the command, and register it after user confirmation.

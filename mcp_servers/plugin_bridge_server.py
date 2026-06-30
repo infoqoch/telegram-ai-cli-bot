@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 load_dotenv(_PROJECT_ROOT / ".env")
 
 from mcp.server.fastmcp import FastMCP
+from src.runtime_paths import get_main_lock_path
 
 mcp = FastMCP("bot-plugins")
 
@@ -138,9 +139,9 @@ def reload_schedules() -> str:
     """Send SIGUSR1 to the bot process to trigger schedule hot-reload."""
     import signal
 
-    pid_file = _PROJECT_ROOT / os.getenv("BOT_DATA_DIR", ".data") / "telegram-bot.pid"
+    pid_file = get_main_lock_path()
     if not pid_file.exists():
-        return "ERROR: PID 파일을 찾을 수 없습니다. 봇이 실행 중인지 확인하세요."
+        return "ERROR: main PID 파일을 찾을 수 없습니다. 봇이 실행 중인지 확인하세요."
 
     try:
         pid = int(pid_file.read_text().strip())

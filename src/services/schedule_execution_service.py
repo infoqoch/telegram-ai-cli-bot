@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,6 +12,7 @@ from src.bot.formatters import escape_html
 from src.logging_config import logger
 from src.network_guard import NetworkUnavailable, network_guard
 from src.schedule_utils import resolve_provider, resolve_schedule_type
+from src.services.command_execution_service import CommandExecutionService
 
 if TYPE_CHECKING:
     from src.ai import AIRegistry
@@ -34,14 +36,17 @@ class ScheduleExecutionService:
         self._plugin_loader = plugin_loader
         self._schedule_manager = schedule_manager
         self._repo = repo
+        self._command_runner = CommandExecutionService(default_cwd=self._project_root())
 
     async def execute(self, schedule) -> None:
         """Execute one schedule and persist the outcome."""
         try:
+            schedule_type = resolve_schedule_type(schedule)
             result = await self._run(schedule)
             response = result[0] if isinstance(result, tuple) else result
             provider_session_id = result[1] if isinstance(result, tuple) else None
             is_ai = isinstance(result, tuple)
+            is_command = schedule_type == "command"
 
             # Plugin rich responses are already sent directly
             if response == "__plugin_rich_sent__":
@@ -81,6 +86,7 @@ class ScheduleExecutionService:
                     schedule.name,
                     response,
                     reply_markup=reply_markup,
+                    response_is_html=is_command,
                 )
 
             self._schedule_manager.update_run(schedule.id)
@@ -116,28 +122,11 @@ class ScheduleExecutionService:
             return result
 
         if schedule_type == "command":
-            import asyncio
-            try:
-                # message 필드에 명령어/스크립트 경로가 저장되어 있다고 가정
-                process = await asyncio.create_subprocess_shell(
-                    schedule.message,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await process.communicate()
-                out_text = stdout.decode('utf-8').strip()
-                err_text = stderr.decode('utf-8').strip()
-                
-                # 출력이 없으면 조용히 종료할 수 있도록 None 반환 (또는 설정에 따라 빈 문자열)
-                if not out_text and not err_text:
-                    return None
-                    
-                result = out_text
-                if err_text:
-                    result += f"\n\n[Errors]\n{err_text}"
-                return result
-            except Exception as e:
-                return f"Command execution failed: {e}"
+            result = await self._command_runner.run(
+                schedule.message,
+                cwd=getattr(schedule, "workspace_path", None) or self._project_root(),
+            )
+            return self._command_runner.build_telegram_body(result)
 
         workspace_path = (
             schedule.workspace_path
@@ -168,13 +157,14 @@ class ScheduleExecutionService:
         response: str,
         *,
         reply_markup: Optional[InlineKeyboardMarkup] = None,
+        response_is_html: bool = False,
     ) -> None:
         """Send a possibly long response with HTML fallback."""
         header_html = f"⏰ <b>{escape_html(schedule_name)}</b>\n\n"
         header_plain = f"⏰ {schedule_name}\n\n"
         
         from src.bot.formatters import markdown_to_telegram_html
-        response_html = markdown_to_telegram_html(response)
+        response_html = response if response_is_html else markdown_to_telegram_html(response)
         
         max_len = 4000
         chunks = [response_html[offset:offset + max_len] for offset in range(0, len(response_html), max_len)]
@@ -201,6 +191,10 @@ class ScheduleExecutionService:
                     text=f"{header_plain}{chunk}",
                     reply_markup=chunk_markup,
                 )
+
+    @staticmethod
+    def _project_root() -> str:
+        return str(Path(__file__).resolve().parents[2])
 
     async def _send_plugin_rich_response(
         self,

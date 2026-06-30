@@ -484,6 +484,34 @@ Tasks that run automatically at a specified time. Four types: Chat (general conv
 
 **Add a Plugin schedule:** `+ Plugin` → select plugin → select action → hour → minute → `Daily` or `One-time` → register. (No model/message required)
 
+**Add a Command schedule:** Command Schedule AI creates a draft card instead of registering immediately.
+
+```
+Command schedule draft
+
+Temporary command
+{shell command}
+
+Message
+{expected Telegram output}
+
+Cron
+{cron expression}
+{human-readable schedule}
+
+Script
+{relative script path}
+
+[Run command]
+[Register schedule]
+[Cancel]
+```
+
+- `Run command`: writes the proposed script, runs the exact command once, and sends the command output as a new Telegram message.
+- `Register schedule`: writes the script, inserts the command schedule, and hot-reloads the runtime scheduler.
+- `Cancel`: marks the draft as cancelled. No schedule is registered.
+- The AI must not claim registration is complete before the user taps `Register schedule`.
+
 **Manage schedules:** Click a schedule from the list → detail screen → ON/OFF toggle, change time, delete.
 
 ### Schedule List Screen
@@ -555,11 +583,13 @@ Sent to the user upon completion (split if over 4000 characters):
 ### Command Type Optimization
 
 - If `schedule_type` is `command`, the `message` field is treated as an **OS terminal shell command** rather than a natural language prompt.
-- The bot process executes the command directly in the shell using `asyncio.create_subprocess_shell`.
+- The bot process executes the command directly in the shell using the shared command execution service.
 - Telegram notification is sent **only if** there is `stdout` or `stderr` output. If empty, the schedule finishes silently.
-- Currently, this type is optimized via direct DB updates to save AI API costs for simple periodic scripts (e.g., cron jobs, crawling).
+- `stdout` is treated as Telegram HTML so scripts can intentionally emit `<b>`, `<code>`, and `<pre>` formatting.
+- `stderr` is escaped and appended as an error block.
+- This type is optimized to save AI API costs for simple periodic scripts (e.g., cron jobs, crawling).
 
-**Example (DB Update):**
+**Manual operator example (DB update):**
 ```sql
 UPDATE schedules 
 SET 

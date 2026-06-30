@@ -197,6 +197,27 @@ When adding a new `create_session(workspace_path=...)` call site, pick the strat
 - `chat`: regular AI schedule using the selected provider/model.
 - `workspace`: AI schedule bound to a workspace path.
 - `plugin`: schedule that invokes plugin-owned actions rather than a free-form AI prompt.
+- `command`: local shell command schedule. The command is executed directly by the bot process and its stdout/stderr is delivered to Telegram without an AI call.
+
+### Command Schedule Draft Flow
+
+Command schedules use a draft-first confirmation flow because the final registration must be owned by the bot, not by an AI claim in free-form text.
+
+- The hidden built-in plugin [`plugins/builtin/command_schedule`](../plugins/builtin/command_schedule) owns draft storage, test execution, and final registration callbacks.
+- AI work for command schedules should return either `send_message:seq:<id>` after creating a draft through `command_schedule_create_draft`, or a structured `send_message:command_schedule_draft` JSON payload.
+- The bot validates `script_path`, `command`, and `cron_expr` before creating a draft. Registration happens only after the user taps `Register schedule`.
+- `Run command` writes the script and executes the exact command through [`CommandExecutionService`](../src/services/command_execution_service.py), so the user can inspect the Telegram output before registration.
+- Final schedule execution also uses `CommandExecutionService`; command stdout is treated as Telegram HTML and stderr is escaped inside `<pre>`.
+
+### Scheduler Reload Boundary
+
+The supervisor and the main bot process have separate PID artifacts:
+
+- `.data/telegram-bot.pid`: supervisor PID
+- `.data/telegram-bot-supervisor.lock`: supervisor PID
+- `.data/telegram-bot.lock`: main bot PID
+
+`SIGUSR1` schedule reload is handled by the main bot process only. Runtime reload helpers must read `get_main_lock_path()` / `.data/telegram-bot.lock`; sending `SIGUSR1` to the supervisor will not update in-memory jobs.
 
 ## Plugin System
 

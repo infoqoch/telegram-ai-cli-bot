@@ -2,6 +2,7 @@
 
 from .plugin_storage import (
     RepositoryDiaryStore,
+    RepositoryCommandScheduleDraftStore,
     RepositoryMemoStore,
     RepositoryPluginDatabase,
     RepositoryTodoStore,
@@ -12,6 +13,7 @@ from .workspace_adapter import WorkspaceRegistryAdapter
 
 __all__ = [
     "RepositoryDiaryStore",
+    "RepositoryCommandScheduleDraftStore",
     "RepositoryMemoStore",
     "RepositoryPluginDatabase",
     "RepositoryTodoStore",

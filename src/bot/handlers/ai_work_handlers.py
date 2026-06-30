@@ -102,7 +102,21 @@ class AiWorkHandlers(BaseHandler):
             f"{message}"
         )
 
-        await self._dispatch_to_ai(update, chat_id, user_id, augmented_message)
+        post_completion_hook = None
+        if primary_domain == "sched_cmd":
+            post_completion_hook = {
+                "plugin_name": "command_schedule",
+                "action": "render_draft",
+                "payload": {},
+            }
+
+        await self._dispatch_to_ai(
+            update,
+            chat_id,
+            user_id,
+            augmented_message,
+            post_completion_hook=post_completion_hook,
+        )
 
     async def _get_static_context(self, domain: str) -> str:
         """Load static context description for a domain, supporting multiple comma-separated domains."""

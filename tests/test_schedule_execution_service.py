@@ -294,3 +294,28 @@ class TestScheduleExecutionService:
         mock_bot.send_message.assert_called_once()
         send_call = mock_bot.send_message.call_args
         assert send_call.kwargs.get("reply_markup") is None
+
+    @pytest.mark.asyncio
+    async def test_execute_command_schedule_runs_script_and_sends_html(
+        self, service, mock_bot, mock_ai_registry, mock_repo, tmp_path
+    ):
+        script = tmp_path / "cmd_test.py"
+        script.write_text("print('<b>OK</b> <code>1234</code>')\n", encoding="utf-8")
+
+        schedule = MagicMock()
+        schedule.id = "schedule-command"
+        schedule.type = "command"
+        schedule.schedule_type = "command"
+        schedule.message = f"python {script.name}"
+        schedule.chat_id = 12345
+        schedule.name = "Command Test"
+        schedule.workspace_path = str(tmp_path)
+
+        await service.execute(schedule)
+
+        mock_ai_registry.get_client.assert_not_called()
+        mock_repo.insert_schedule_message_log.assert_not_called()
+        mock_bot.send_message.assert_called_once()
+        send_call = mock_bot.send_message.call_args.kwargs
+        assert send_call["parse_mode"] == "HTML"
+        assert "<b>OK</b> <code>1234</code>" in send_call["text"]

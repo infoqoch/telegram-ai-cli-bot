@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.repository.repository import (
     Diary,
@@ -63,6 +63,90 @@ class RepositoryPluginDatabase:
         conn = _require_conn(self._repo)
         conn.executescript(schema)
         conn.commit()
+
+
+class RepositoryCommandScheduleDraftStore:
+    """Command schedule draft storage exposed to the hidden command plugin."""
+
+    def __init__(self, repo: "Repository"):
+        self._repo = repo
+
+    def create_draft(
+        self,
+        *,
+        chat_id: int,
+        title: str,
+        description: str,
+        script_path: str,
+        script_content: str,
+        command: str,
+        cron_expr: str,
+        cron_description: str,
+    ) -> int:
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            """INSERT INTO command_schedule_drafts
+               (chat_id, title, description, script_path, script_content, command, cron_expr, cron_description)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                chat_id,
+                title,
+                description,
+                script_path,
+                script_content,
+                command,
+                cron_expr,
+                cron_description,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+    def get_draft(self, draft_id: int, chat_id: int) -> Optional[dict[str, Any]]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            "SELECT * FROM command_schedule_drafts WHERE id = ? AND chat_id = ?",
+            (draft_id, chat_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_draft(self, draft_id: int, **updates: Any) -> None:
+        allowed = {"status", "schedule_id", "last_test_output", "last_test_error"}
+        fields = [key for key in updates if key in allowed]
+        if not fields:
+            return
+
+        conn = _require_conn(self._repo)
+        assignments = ", ".join(f"{field} = ?" for field in fields)
+        values = [updates[field] for field in fields]
+        values.append(draft_id)
+        conn.execute(f"UPDATE command_schedule_drafts SET {assignments} WHERE id = ?", values)
+        conn.commit()
+
+    def add_command_schedule(
+        self,
+        *,
+        user_id: str,
+        chat_id: int,
+        name: str,
+        command: str,
+        cron_expr: str,
+        workspace_path: str,
+    ):
+        return self._repo.add_schedule(
+            user_id=user_id,
+            chat_id=chat_id,
+            hour=0,
+            minute=0,
+            message=command,
+            name=name,
+            schedule_type="command",
+            trigger_type="cron",
+            cron_expr=cron_expr,
+            ai_provider="agy",
+            model="agy-flash-high",
+            workspace_path=workspace_path,
+        )
 
 
 class RepositoryMemoStore:
