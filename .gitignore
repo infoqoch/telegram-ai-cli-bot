@@ -29,6 +29,7 @@ bot.db
 
 # Claude Code local-only overrides
 CLAUDE.local.md
+.claude/
 .claude/settings.local.json
 
 # OS

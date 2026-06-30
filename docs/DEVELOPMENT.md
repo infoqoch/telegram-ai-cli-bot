@@ -20,16 +20,16 @@ It is intentionally separate from the root `CLAUDE.md` so the always-loaded Clau
 - [`docs/UI_EMOJI_SYSTEM.md`](./UI_EMOJI_SYSTEM.md): canonical emoji and label mapping for Telegram UI.
 - [`docs/DEVELOPMENT.md`](./DEVELOPMENT.md): architecture, extension patterns, runtime flows, maintainer reference.
 - [`CLAUDE.md`](../CLAUDE.md): compact always-loaded instructions for Claude Code.
-- [`.claude/rules/`](../.claude/rules): path-scoped Claude Code guidance for focused edits.
+- [`.ai/rules/`](../.ai/rules): project-local AI guidance for focused edits.
 
 ## Documentation Strategy
 
 ### Why `DEVELOPMENT.md` Lives In `docs/`
 
-- This file is intentionally not in `.claude/` because it is not meant to be auto-loaded into every Claude Code session.
+- This file is intentionally not in an agent-specific root file because it is not meant to be auto-loaded into every AI session.
 - It is a deep maintainer reference: useful, but too large and too infrequently needed to justify always-on context cost.
 - The compact root [`CLAUDE.md`](../CLAUDE.md) should hold only high-signal rules worth paying for every session.
-- [`.claude/rules/`](../.claude/rules) should hold only path-scoped guidance that deserves automatic loading during focused edits.
+- [`.ai/rules/`](../.ai/rules) should hold focused project guidance without tying the repository to one provider's config directory.
 
 ### Why `SPEC` Stays Detailed
 
