@@ -95,8 +95,8 @@ class TestAppStartup:
         # scheduler_manager.scheduler 패턴이 없어야 함
         assert "scheduler_manager.scheduler" not in content
 
-    def test_build_bot_commands_is_limited_to_five_entries(self):
-        """Telegram slash-command sync should publish only the compact picker set."""
+    def test_build_bot_commands_publishes_primary_navigation(self):
+        """Telegram slash-command sync should publish primary navigation entries."""
         from src.bot.command_catalog import build_bot_commands
 
         commands = build_bot_commands(has_plugins=True, is_admin=True)
@@ -107,4 +107,6 @@ class TestAppStartup:
             "new",
             "sl",
             "tasks",
+            "workspace",
+            "scheduler",
         ]

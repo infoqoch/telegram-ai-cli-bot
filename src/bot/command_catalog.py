@@ -40,6 +40,8 @@ PUBLISHED_BOT_COMMAND_NAMES: tuple[str, ...] = (
     "new",
     "sl",
     "tasks",
+    "workspace",
+    "scheduler",
 )
 
 

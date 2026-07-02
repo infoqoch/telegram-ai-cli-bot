@@ -39,7 +39,7 @@
 
 ## Full Command List
 
-The Telegram slash command picker is automatically synced via API at startup, exposing only the following 5 commands.
+The Telegram slash command picker is automatically synced via API at startup, exposing the primary navigation commands.
 
 | Public picker command | Description |
 |-----------------------|-------------|
@@ -48,6 +48,8 @@ The Telegram slash command picker is automatically synced via API at startup, ex
 | `/new` | Create a new session |
 | `/sl` | Session list |
 | `/tasks` | Active task/queue status |
+| `/workspace` | Workspace management |
+| `/scheduler` | Schedule management |
 
 All other commands are accessed via button hubs or direct input.
 
@@ -68,8 +70,6 @@ All other commands are accessed via button hubs or direct input.
 | `/model_opus`, `/model_sonnet`, `/model_haiku` | Model change shortcuts |
 | `/new_opus`, `/new_sonnet`, `/new_haiku` | Quick session creation by model |
 | `/new_workspace path [model] [name]` | Create a workspace session |
-| `/workspace` | Workspace management |
-| `/scheduler` | Schedule management |
 | `/plugins` | Plugin button hub |
 | `/ai <question>` | Bypass plugins, query the current AI directly |
 | `/chatid` | View my Chat ID |
