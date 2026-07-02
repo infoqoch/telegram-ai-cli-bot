@@ -249,16 +249,28 @@ class AgyClient(BaseCLIClient):
         self._log_dir.mkdir(parents=True, exist_ok=True)
         return self._log_dir / f"agy-{uuid.uuid4().hex}.log"
 
-    def _format_message(self, message: str) -> str:
-        """Embed the Telegram prompt because Agy has no JSON/system-prompt flag."""
-        if not self.system_prompt:
-            return message
-        return (
-            f"{self.system_prompt.strip()}\n\n"
+    def _format_message(self, message: str, workspace_path: Optional[str] = None) -> str:
+        """Embed prompt and execution context because Agy has no system-prompt flag."""
+        working_directory = self._normalize_workspace_key(workspace_path)
+        execution_context = (
+            "<EXECUTION_CONTEXT>\n"
+            f"Intended working directory: {working_directory}\n"
+            "When using shell commands, explicitly change to the intended working directory first "
+            "(for example: cd \"<directory>\" && <command>). Do not rely on the Antigravity "
+            "internal shell current directory.\n"
+            "</EXECUTION_CONTEXT>"
+        )
+
+        parts = []
+        if self.system_prompt:
+            parts.append(self.system_prompt.strip())
+        parts.append(execution_context)
+        parts.append(
             "<USER_REQUEST>\n"
             f"{message}\n"
             "</USER_REQUEST>"
         )
+        return "\n\n".join(parts)
 
     @staticmethod
     def _is_session_not_found(output: str, error: str) -> bool:
@@ -299,7 +311,7 @@ class AgyClient(BaseCLIClient):
         cmd.extend(["--print-timeout", self.print_timeout])
         if log_file:
             cmd.extend(["--log-file", str(log_file)])
-        cmd.extend(["--print", self._format_message(message)])
+        cmd.extend(["--print", self._format_message(message, workspace_path)])
 
         return cmd
 

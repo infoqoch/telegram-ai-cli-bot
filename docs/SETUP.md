@@ -143,4 +143,6 @@ Antigravity is auto-detected at startup if the `agy` CLI is on `PATH`. The bot c
 
 Antigravity does not expose a JSON output mode, so the bot stores provider sessions by discovering the local conversation artifacts under `~/.gemini/antigravity-cli/` after the first successful prompt. Existing conversations are resumed with `--conversation <uuid>`.
 
+Antigravity's internal shell may start from its own working directory rather than the subprocess `cwd`. The bot therefore injects an execution context into every Agy prompt with the intended working directory and instructs shell commands to `cd` there first. Without a workspace this intended directory is the bot project root; with a workspace it is that workspace path.
+
 The bot may create `.agents/mcp.json` in the project or workspace so the plugin bridge is available to Antigravity. `.agents/` is gitignored because it contains machine-specific paths.

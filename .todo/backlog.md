@@ -63,6 +63,7 @@ Observation: previous local notes reported that `agy --print` may hang when inst
 Current guardrail:
 
 - `AgyClient` derives a subprocess timeout from `--print-timeout` plus a short grace period, so non-interactive Agy calls are not allowed to run forever.
+- `AgyClient` injects the intended working directory into every prompt because Agy's internal shell does not reliably start from the subprocess `cwd`.
 
 Next action:
 
@@ -76,7 +77,7 @@ Remaining review notes:
 - New-session binding still depends on local artifact discovery under `~/.gemini/antigravity-cli/`; this is weaker than providers that return a session ID directly.
 - The current implementation avoids binding to an unchanged stale `last_conversations.json` cache, but concurrent external Agy CLI activity can still make discovery ambiguous.
 - Workspace MCP setup writes `.agents/mcp.json` into the target workspace. This is CLI-compatible but provider-specific local state; keep it gitignored and do not generalize it into tracked project rules.
-- Add a lightweight real-CLI smoke test plan before treating Agy parity as complete: `agy models`, one new `--print` call, one `--conversation` resume, and one workspace call with `--add-dir`.
+- Add a lightweight real-CLI smoke test plan before treating Agy parity as complete: `agy models`, one new `--print` call, one `--conversation` resume, and one workspace call with `--add-dir` plus a `pwd`/working-directory assertion.
 
 ## Active: UX And Spec Consistency
 

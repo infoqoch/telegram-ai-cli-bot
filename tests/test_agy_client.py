@@ -46,7 +46,25 @@ def test_build_command_uses_exact_model_timeout_log_and_prompt(tmp_path):
     assert ["--log-file", str(log_file)] == cmd[log_index:log_index + 2]
     assert cmd[-2] == "--print"
     assert "You are free to use standard Markdown formatting." in cmd[-1]
+    assert "<EXECUTION_CONTEXT>" in cmd[-1]
+    assert f"Intended working directory: {Path.cwd().resolve()}" in cmd[-1]
     assert "<USER_REQUEST>\nhello\n</USER_REQUEST>" in cmd[-1]
+
+
+def test_build_command_includes_workspace_execution_context(tmp_path):
+    client = make_client(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    cmd = client._build_command(
+        "hello",
+        model="agy-flash-high",
+        workspace_path=str(workspace),
+    )
+
+    assert "--add-dir" in cmd
+    assert str(workspace) in cmd
+    assert f"Intended working directory: {workspace.resolve()}" in cmd[-1]
 
 
 def test_default_subprocess_timeout_tracks_print_timeout(tmp_path):
