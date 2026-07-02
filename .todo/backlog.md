@@ -70,6 +70,14 @@ Next action:
 - Do not add `.agents/AGENTS.md`; provider-specific rules should not bypass the repository's `.ai/` isolation direction.
 - Prefer process-timeout or command-shaping fixes inside the Antigravity client if the issue still exists.
 
+Remaining review notes:
+
+- Agy session creation is deferred until the first real chat because the CLI does not expose the same explicit session-create flow as Claude/Codex.
+- New-session binding still depends on local artifact discovery under `~/.gemini/antigravity-cli/`; this is weaker than providers that return a session ID directly.
+- The current implementation avoids binding to an unchanged stale `last_conversations.json` cache, but concurrent external Agy CLI activity can still make discovery ambiguous.
+- Workspace MCP setup writes `.agents/mcp.json` into the target workspace. This is CLI-compatible but provider-specific local state; keep it gitignored and do not generalize it into tracked project rules.
+- Add a lightweight real-CLI smoke test plan before treating Agy parity as complete: `agy models`, one new `--print` call, one `--conversation` resume, and one workspace call with `--add-dir`.
+
 ## Active: UX And Spec Consistency
 
 ### Command picker
