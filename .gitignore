@@ -21,6 +21,9 @@ build/
 .data/
 bot.db
 
+# Scheduler-generated local command scripts
+.scheduler/
+
 # IDE
 .idea/
 .vscode/

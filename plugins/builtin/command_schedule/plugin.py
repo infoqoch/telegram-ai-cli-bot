@@ -25,7 +25,7 @@ from src.services.command_execution_service import CommandExecutionService
 _SEQ_RE = re.compile(r"send_message:seq:(\d+)")
 _DRAFT_RE = re.compile(r"send_message:command_schedule_draft\s*(.+)\s*\Z", re.DOTALL)
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-_RUNTIME_SCRIPT_DIR = Path(".data/command_schedules")
+_RUNTIME_SCRIPT_DIR = Path(".scheduler/commands")
 
 
 class CommandSchedulePlugin(Plugin):
@@ -96,7 +96,7 @@ END;
                     "properties": {
                         "title": {"type": "string", "description": "Short user-facing title"},
                         "description": {"type": "string", "description": "What this command does"},
-                        "script_path": {"type": "string", "description": "Suggested relative .py path; stored under .data/command_schedules"},
+                        "script_path": {"type": "string", "description": "Suggested relative .py path; stored under .scheduler/commands"},
                         "script_content": {"type": "string", "description": "Full Python script content"},
                         "command": {"type": "string", "description": "Command to execute the script"},
                         "cron_expr": {"type": "string", "description": "5-field cron expression"},

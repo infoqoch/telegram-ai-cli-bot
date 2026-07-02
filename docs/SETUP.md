@@ -131,6 +131,12 @@ The bot writes the Telegram formatting prompt to `GEMINI.md` at the project root
 
 For workspace sessions, the bot also writes `GEMINI.md` to the workspace directory on first use. If the workspace already has a `GEMINI.md`, the bot will not overwrite it.
 
+## Command Schedule Scripts
+
+AI-created command schedules store their generated Python scripts under `.scheduler/commands/`.
+
+This directory is gitignored by default because those files are local scheduler runtime assets. If you want a command schedule to run version-controlled code, keep that code in a tracked project path or `plugins/custom/`, then create the schedule command so it calls that script explicitly.
+
 ## Antigravity Setup
 
 Antigravity is auto-detected at startup if the `agy` CLI is on `PATH`. The bot calls it with `--dangerously-skip-permissions`, text `--print` output, and a 30-minute `--print-timeout`.

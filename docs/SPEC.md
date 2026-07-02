@@ -511,6 +511,7 @@ Script
 - `Register schedule`: writes the script, inserts the command schedule, and hot-reloads the runtime scheduler.
 - `Cancel`: marks the draft as cancelled. No schedule is registered.
 - The AI must not claim registration is complete before the user taps `Register schedule`.
+- Generated command scripts are stored under `.scheduler/commands/` and are not tracked by git. If the AI proposes `scripts/foo.py`, the bot normalizes it to `.scheduler/commands/scripts/foo.py` before testing or registration.
 
 **Manage schedules:** Click a schedule from the list → detail screen → ON/OFF toggle, change time, delete.
 

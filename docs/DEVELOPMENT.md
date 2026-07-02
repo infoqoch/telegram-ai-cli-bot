@@ -206,6 +206,7 @@ Command schedules use a draft-first confirmation flow because the final registra
 - The hidden built-in plugin [`plugins/builtin/command_schedule`](../plugins/builtin/command_schedule) owns draft storage, test execution, and final registration callbacks.
 - AI work for command schedules should return either `send_message:seq:<id>` after creating a draft through `command_schedule_create_draft`, or a structured `send_message:command_schedule_draft` JSON payload.
 - The bot validates `script_path`, `command`, and `cron_expr` before creating a draft. Registration happens only after the user taps `Register schedule`.
+- Generated command scripts are stored under [`.scheduler/commands/`](../.scheduler/commands) and `.scheduler/` is gitignored. AI-provided paths such as `scripts/foo.py` are treated as suggestions and normalized to `.scheduler/commands/scripts/foo.py`.
 - `Run command` writes the script and executes the exact command through [`CommandExecutionService`](../src/services/command_execution_service.py), so the user can inspect the Telegram output before registration.
 - Final schedule execution also uses `CommandExecutionService`; command stdout is treated as Telegram HTML and stderr is escaped inside `<pre>`.
 
