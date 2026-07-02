@@ -42,7 +42,9 @@ Thumbs.db
 # Custom plugins (personal, not shared)
 plugins/custom/
 .docs-audit/
-.todo/
+.todo/*
+!.todo/
+!.todo/backlog.md
 
 # Gemini CLI project config (machine-specific absolute paths)
 .gemini/
