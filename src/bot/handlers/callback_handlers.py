@@ -149,19 +149,25 @@ class CallbackHandlers(BaseHandler):
             )
             return
 
-        if action == "diag:agy":
+        if action.startswith("diag:provider:"):
             from src.config import get_settings
+            from src.ai import get_provider_label, is_supported_provider
 
             settings = get_settings()
             if settings.admin_chat_id and chat_id != settings.admin_chat_id:
                 await query.message.reply_text("Admin command only.")
                 return
 
+            provider = action.rsplit(":", 1)[-1]
+            if not is_supported_provider(provider):
+                await query.message.reply_text("Unsupported provider.")
+                return
+
             await query.edit_message_text(
-                "Agy 실제 점검을 시작합니다. 잠시만 기다려주세요.",
+                f"{get_provider_label(provider)} 실제 점검을 시작합니다. 잠시만 기다려주세요.",
                 parse_mode="HTML",
             )
-            text = await self._build_agy_smoke_status()
+            text = await self._build_provider_smoke_status(provider)
             await query.edit_message_text(
                 text,
                 reply_markup=self._build_menu_back_markup(),

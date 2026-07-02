@@ -311,7 +311,10 @@ class TestDiagnosticsStatus:
         assert "on failure" not in text
         assert "intent/context" not in text
         assert "not registered" in text
-        assert "🧪 Agy 실제 점검" in button_texts
+        assert "🧪 Claude 점검" in button_texts
+        assert "🧪 Codex 점검" in button_texts
+        assert "🧪 Gemini 점검" in button_texts
+        assert "🧪 Agy 점검" in button_texts
         assert "📚 🧠 Opus" in button_texts
         assert "🤖 🧠 XHigh" in button_texts
 
@@ -329,36 +332,36 @@ class TestDiagnosticsStatus:
         update.message.reply_text.assert_called_once_with("Admin command only.")
 
     @pytest.mark.asyncio
-    async def test_diag_command_runs_agy_smoke_when_requested(self):
+    async def test_diag_command_runs_provider_smoke_when_requested(self):
         handlers = make_handlers()
-        handlers._build_agy_smoke_status = AsyncMock(return_value="<b>Agy 실제 점검</b>")
+        handlers._build_provider_smoke_status = AsyncMock(return_value="<b>Codex 실제 점검</b>")
         settings = SimpleNamespace(admin_chat_id=0)
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.reply_text = AsyncMock()
         context = MagicMock()
-        context.args = ["agy"]
+        context.args = ["codex"]
 
         with patch("src.bot.handlers.admin_handlers.get_settings", return_value=settings):
             await handlers.diag_command(update, context)
 
-        handlers._build_agy_smoke_status.assert_awaited_once()
+        handlers._build_provider_smoke_status.assert_awaited_once_with("codex")
         assert update.message.reply_text.await_count == 2
-        assert update.message.reply_text.await_args_list[1].args[0] == "<b>Agy 실제 점검</b>"
+        assert update.message.reply_text.await_args_list[1].args[0] == "<b>Codex 실제 점검</b>"
 
     @pytest.mark.asyncio
-    async def test_menu_diag_agy_callback_runs_smoke(self):
+    async def test_menu_provider_smoke_callback_runs_smoke(self):
         handlers = make_handlers()
-        handlers._build_agy_smoke_status = AsyncMock(return_value="<b>Agy 실제 점검</b>")
+        handlers._build_provider_smoke_status = AsyncMock(return_value="<b>Gemini 실제 점검</b>")
         settings = SimpleNamespace(admin_chat_id=0)
         query = make_query()
 
         with patch("src.config.get_settings", return_value=settings):
-            await handlers._handle_menu_callback(query, 12345, "menu:diag:agy")
+            await handlers._handle_menu_callback(query, 12345, "menu:diag:provider:gemini")
 
-        handlers._build_agy_smoke_status.assert_awaited_once()
+        handlers._build_provider_smoke_status.assert_awaited_once_with("gemini")
         assert query.edit_message_text.await_count == 2
-        assert query.edit_message_text.await_args_list[1].args[0] == "<b>Agy 실제 점검</b>"
+        assert query.edit_message_text.await_args_list[1].args[0] == "<b>Gemini 실제 점검</b>"
 
 
 # =============================================================================

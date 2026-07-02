@@ -100,14 +100,15 @@ When AI work is not available, the bot shows `동작 안함`, the reason, and th
 
 The help screen also exposes a `시스템 진단` button that opens the same diagnostic view.
 
-`/diag agy` or the `Agy 실제 점검` button runs an explicit Antigravity smoke test. Unlike the default `/diag` screen, this calls the real `agy` CLI and checks:
+`/diag claude`, `/diag codex`, `/diag gemini`, `/diag agy`, or the provider smoke-test buttons run an explicit real-provider smoke test. Unlike the default `/diag` screen, this calls the selected provider CLI and checks:
 
-- `agy models`
 - one new `--print` conversation
 - resume with the created conversation id
 - workspace working-directory handling
 
-Because it invokes a real provider CLI, it is admin-only and only runs after explicit user action.
+The Agy smoke test also checks `agy models`.
+
+Because these checks invoke real provider CLIs, they are admin-only and only run after explicit user action.
 
 ---
 
