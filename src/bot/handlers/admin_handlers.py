@@ -9,10 +9,13 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.ai import get_provider_label
+from src.config import get_settings
 from src.logging_config import logger, clear_context
 from src.plugins.loader import PLUGIN_SURFACE_CATALOG
+from src.services.runtime_diagnostics_service import RuntimeDiagnosticsService
 from src.ui_emoji import BUTTON_AI_WORK, BUTTON_BACK, BUTTON_REFRESH, BUTTON_SESSION_LIST
 from ..constants import MAX_LOCK_STATUS_PREVIEW
+from ..formatters import escape_html
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
@@ -282,6 +285,100 @@ class AdminHandlers(BaseHandler):
             await update.message.reply_text("🔒 Authentication required.\nUse /auth <key> to authenticate.")
 
         clear_context()
+
+    @authorized_only
+    @authenticated_only
+    async def diag_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /diag command."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        logger.info("/diag command received")
+
+        user_id = str(chat_id)
+        settings = get_settings()
+        if settings.admin_chat_id and chat_id != settings.admin_chat_id:
+            await update.message.reply_text("Admin command only.")
+            clear_context()
+            return
+
+        text, keyboard = self._build_diag_status(user_id)
+        await update.message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None,
+        )
+        clear_context()
+
+    def _build_diag_status(self, user_id: str) -> tuple[str, list]:
+        """Build runtime diagnostics text and optional action buttons."""
+        settings = get_settings()
+        service = RuntimeDiagnosticsService(
+            base_dir=settings.base_dir,
+            ai_command=settings.ai_command,
+            prompt_file=settings.telegram_prompt_file,
+        )
+        raw_provider = self._get_raw_selected_ai_provider(user_id)
+        registered = self.ai.supported_providers()
+        provider_rows = service.provider_diagnostics(
+            registered_providers=registered,
+            plugin_loader=self.plugins,
+        )
+        aiwork = service.ai_work_diagnostic(
+            selected_provider=raw_provider,
+            registered_providers=registered,
+            plugin_loader=self.plugins,
+        )
+
+        auth_mode = "restricted" if self.require_auth else "open"
+        aiwork_status = "동작함" if aiwork.ready else "동작 안함"
+        reason = aiwork.reason or "ready"
+
+        lines = [
+            "<b>Diagnostics</b>",
+            "",
+            "<b>Bot</b>",
+            "process      ● running",
+            "database     ● reachable",
+            f"timezone     {escape_html(getattr(settings, 'app_timezone', 'Asia/Seoul'))}",
+            f"auth mode    {auth_mode}",
+            "",
+            "<b>Provider readiness</b>",
+        ]
+
+        for row in provider_rows:
+            marker = "●" if row.ready and row.mcp else ("◐" if row.ready else "×")
+            lines.append(
+                f"{get_provider_label(row.provider):<12} "
+                f"cli {self._mark(row.cli)} -- registry {self._mark(row.registry)} -- "
+                f"prompt {self._mark(row.prompt)} -- mcp {self._mark(row.mcp)}  "
+                f"{marker} {row.label}"
+            )
+
+        lines.extend([
+            "",
+            "<b>AI work</b>",
+            f"default      {self._format_provider_display(raw_provider)}",
+            f"status       <b>{aiwork_status}</b>",
+            f"reason       <code>{escape_html(reason)}</code>",
+            "",
+            "<b>AI work 구성</b>",
+            f"컨텍스트     {self._mark(aiwork.context_ready)}",
+            f"AI 호출      {self._mark(aiwork.provider_call_ready)}",
+            f"완료 처리    {self._mark(aiwork.completion_hook_ready)}",
+            f"실행 버튼    {self._mark(aiwork.action_ui_ready)}",
+            "",
+            "전환 방식    수동 선택",
+        ])
+
+        keyboard = []
+        if not aiwork.ready:
+            keyboard = self._build_new_session_picker_keyboard()
+
+        return "\n".join(lines), keyboard
+
+    @staticmethod
+    def _mark(ok: bool) -> str:
+        return "●" if ok else "○"
 
     def _group_plugins(self) -> dict[str, list]:
         """Return plugins grouped by builtin/custom for launcher UIs."""

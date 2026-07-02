@@ -81,6 +81,22 @@ All other commands are accessed via button hubs or direct input.
 | `/back` | Return to the previous session |
 | `/{plugin}` | Redirects to `/help_{plugin}` instead of showing usage inline |
 | `/reload [name]` | Reload plugin (admin only) |
+| `/diag` | Runtime provider and AI work diagnostics (admin only, not in public picker) |
+
+---
+
+### Runtime Diagnostics
+
+`/diag` is an admin-only runtime check. It is intentionally not published in the public Telegram command picker.
+
+The diagnostic screen reports:
+
+- bot process/database/timezone/auth mode
+- provider readiness as `cli -- registry -- prompt -- mcp`
+- AI work readiness for the currently selected default AI
+- AI work switching mode: manual provider/model selection
+
+When AI work is not available, the bot shows `동작 안함`, the reason, and the same model picker used by `/new`. The user must explicitly choose another provider/model and retry the AI work request.
 
 ---
 

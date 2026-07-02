@@ -2,10 +2,11 @@
 
 from pathlib import Path
 
-from telegram import ForceReply
+from telegram import ForceReply, InlineKeyboardMarkup
 
 from src.ai import get_default_model
 from src.logging_config import logger
+from ..formatters import escape_html
 from .base import BaseHandler
 
 
@@ -74,7 +75,16 @@ class AiWorkHandlers(BaseHandler):
         label = self._get_domain_label(primary_domain)
 
         # Create a dedicated session for this AI work
-        provider = self._get_selected_ai_provider(user_id)
+        provider = self._get_raw_selected_ai_provider(user_id)
+        if not self._is_provider_registered(provider):
+            await self._reply_aiwork_unavailable(
+                update,
+                user_id=user_id,
+                label=label,
+                reason=f"{self._format_provider_display(provider)} is not available in this bot runtime.",
+            )
+            return
+
         model = get_default_model(provider)
         session_name = f"✨ {label} AI"
 
@@ -116,6 +126,7 @@ class AiWorkHandlers(BaseHandler):
             user_id,
             augmented_message,
             post_completion_hook=post_completion_hook,
+            ai_work_context={"label": label, "provider": provider},
         )
 
     async def _get_static_context(self, domain: str) -> str:
@@ -132,3 +143,17 @@ class AiWorkHandlers(BaseHandler):
                 else:
                     context_text += self._load_core_context(filename) + "\n\n"
         return context_text.strip()
+
+    async def _reply_aiwork_unavailable(self, update, *, user_id: str, label: str, reason: str) -> None:
+        """Show an explicit AI work failure with the normal new-session picker."""
+        provider = self._get_raw_selected_ai_provider(user_id)
+        keyboard = self._build_new_session_picker_keyboard()
+        await update.message.reply_text(
+            f"<b>{escape_html(label)} - AI Work</b>\n\n"
+            "Status: <b>동작 안함</b>\n"
+            f"Default AI: <b>{self._format_provider_display(provider)}</b>\n"
+            f"Reason: <code>{escape_html(reason)}</code>\n\n"
+            "Choose another AI/model below, then try the AI work request again.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )

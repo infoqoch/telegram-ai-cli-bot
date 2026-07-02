@@ -253,6 +253,7 @@ class MessageHandlers(BaseHandler):
         message: str,
         delivery_buttons: list[list[dict[str, str]]] | None = None,
         post_completion_hook: dict[str, object] | None = None,
+        ai_work_context: dict[str, str] | None = None,
     ) -> None:
         """Common AI dispatch: session decision → detached job spawn.
 
@@ -260,11 +261,19 @@ class MessageHandlers(BaseHandler):
         """
         if user_id in self._creating_sessions:
             logger.info(f"Session creation in progress - message blocked: user={user_id}")
-            await update.message.reply_text(
-                "<b>Session initializing...</b>\n\n"
-                "Please try again shortly!",
-                parse_mode="HTML"
-            )
+            if ai_work_context:
+                await self._reply_aiwork_unavailable(
+                    update,
+                    user_id=user_id,
+                    label=ai_work_context.get("label", "AI Work"),
+                    reason="Session is initializing. Please try again shortly.",
+                )
+            else:
+                await update.message.reply_text(
+                    "<b>Session initializing...</b>\n\n"
+                    "Please try again shortly!",
+                    parse_mode="HTML"
+                )
             clear_context()
             return
 
@@ -315,8 +324,16 @@ class MessageHandlers(BaseHandler):
                 if post_completion_hook:
                     start_kwargs["post_completion_hook"] = post_completion_hook
                 job_id, start_error = self._start_detached_job(**start_kwargs)
-            except Exception:
-                await update.message.reply_text("❌ Failed to start detached worker. Please try again.")
+            except Exception as exc:
+                if ai_work_context:
+                    await self._reply_aiwork_unavailable(
+                        update,
+                        user_id=user_id,
+                        label=ai_work_context.get("label", "AI Work"),
+                        reason=f"Failed to start detached worker: {exc}",
+                    )
+                else:
+                    await update.message.reply_text("❌ Failed to start detached worker. Please try again.")
                 clear_context()
                 return
 
@@ -330,6 +347,21 @@ class MessageHandlers(BaseHandler):
                     is_new_session=False,
                     workspace_path=workspace_path or "",
                 )
+                clear_context()
+                return
+            if start_error:
+                if ai_work_context:
+                    await self._reply_aiwork_unavailable(
+                        update,
+                        user_id=user_id,
+                        label=ai_work_context.get("label", "AI Work"),
+                        reason=f"Detached worker could not start: {start_error}",
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ Failed to start detached worker: <code>{escape_html(start_error)}</code>",
+                        parse_mode="HTML",
+                    )
                 clear_context()
                 return
 

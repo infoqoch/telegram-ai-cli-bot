@@ -111,6 +111,15 @@ class BaseHandler:
             return provider
         return self.ai.supported_providers()[0]
 
+    def _get_raw_selected_ai_provider(self, user_id: str) -> str:
+        """Return the stored provider selection without runtime fallback."""
+        provider = self.sessions.get_selected_ai_provider(user_id)
+        return provider if is_supported_provider(provider) else DEFAULT_PROVIDER
+
+    def _is_provider_registered(self, provider: str) -> bool:
+        """Return whether the provider is available in the current runtime registry."""
+        return provider in self.ai.supported_providers()
+
     def _set_selected_ai_provider(self, user_id: str, provider: str) -> None:
         """Switch the selected provider."""
         if not is_supported_provider(provider):
@@ -883,6 +892,7 @@ class BaseHandler:
         """Return admin-only operations help."""
         return (
             "<b>Admin Guide</b>\n\n"
+            "/diag - Runtime provider and AI work diagnostics\n"
             "/reload [name] - Reload all plugins or one plugin\n\n"
             "This command is intentionally hidden from the main help."
         )

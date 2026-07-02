@@ -9,6 +9,8 @@
 """
 
 import asyncio
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -205,6 +207,27 @@ class TestDispatchToAi:
         )
 
     @pytest.mark.asyncio
+    async def test_aiwork_dispatch_failure_shows_provider_picker(self, handlers):
+        """AI work 시작 실패는 자동 fallback 대신 명시적 실패와 /new picker를 보여준다."""
+        handlers._start_detached_job = MagicMock(side_effect=Exception("spawn failed"))
+        handlers._reply_aiwork_unavailable = AsyncMock()
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+
+        await handlers._dispatch_to_ai(
+            update,
+            12345,
+            "12345",
+            "hello",
+            ai_work_context={"label": "Command Schedule", "provider": "claude"},
+        )
+
+        handlers._reply_aiwork_unavailable.assert_called_once()
+        assert "spawn failed" in handlers._reply_aiwork_unavailable.call_args.kwargs["reason"]
+
+    @pytest.mark.asyncio
     async def test_dispatch_blocked_during_session_creation(self, handlers):
         """세션 생성 중에는 메시지 차단."""
         handlers._creating_sessions.add("12345")
@@ -260,6 +283,49 @@ class TestDispatchToAi:
 
         await handlers._dispatch_to_ai(update, 12345, "12345", "hello")
         handlers._show_session_selection_ui.assert_called_once()
+
+
+class TestDiagnosticsStatus:
+    """Runtime diagnostics rendering."""
+
+    def test_diag_status_shows_aiwork_failure_and_picker(self):
+        handlers = make_handlers()
+        handlers.sessions.get_selected_ai_provider.return_value = "agy"
+        handlers.plugins = SimpleNamespace(get_plugin_by_name=lambda name: object())
+        root = Path(__file__).resolve().parent.parent
+        settings = SimpleNamespace(
+            base_dir=root,
+            ai_command="claude",
+            telegram_prompt_file=root / "prompts" / "telegram.md",
+            app_timezone="Asia/Seoul",
+        )
+
+        with patch("src.bot.handlers.admin_handlers.get_settings", return_value=settings):
+            text, keyboard = handlers._build_diag_status("12345")
+
+        button_texts = [button.text for row in keyboard for button in row]
+        assert "AI work" in text
+        assert "동작 안함" in text
+        assert "전환 방식    수동 선택" in text
+        assert "automatic fallback" not in text
+        assert "on failure" not in text
+        assert "intent/context" not in text
+        assert "not registered" in text
+        assert "📚 🧠 Opus" in button_texts
+        assert "🤖 🧠 XHigh" in button_texts
+
+    @pytest.mark.asyncio
+    async def test_diag_command_rejects_non_admin_chat_when_admin_is_configured(self):
+        handlers = make_handlers()
+        settings = SimpleNamespace(admin_chat_id=99999)
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+
+        with patch("src.bot.handlers.admin_handlers.get_settings", return_value=settings):
+            await handlers.diag_command(update, MagicMock())
+
+        update.message.reply_text.assert_called_once_with("Admin command only.")
 
 
 # =============================================================================

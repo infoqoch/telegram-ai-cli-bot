@@ -32,6 +32,7 @@ BASE_COMMAND_SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("select_ai", "Switch AI provider", menu_label="🔀 Switch AI", callback_data="menu:ai"),
     CommandSpec("plugins", "Browse the plugin catalog", menu_label="🔌 Plugins", callback_data="menu:plugins", requires_plugins=True),
     CommandSpec("reload", "Reload plugins", admin_only=True),
+    CommandSpec("diag", "Show runtime diagnostics", admin_only=True),
 )
 
 PUBLISHED_BOT_COMMAND_NAMES: tuple[str, ...] = (

@@ -179,6 +179,7 @@ def create_app(settings) -> Application:
     app.add_handler(MessageHandler(filters.Regex(r'^/help_'), handlers.help_topic_command))
     app.add_handler(CommandHandler("auth", handlers.auth_command))
     app.add_handler(CommandHandler("status", handlers.status_command))
+    app.add_handler(CommandHandler("diag", handlers.diag_command))
     app.add_handler(CommandHandler("select_ai", handlers.select_ai_command))
     app.add_handler(CommandHandler("new", handlers.new_session))
     app.add_handler(CommandHandler("new_opus", handlers.new_session_opus))

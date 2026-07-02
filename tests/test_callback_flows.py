@@ -154,6 +154,7 @@ class TestWorkspaceCallbackFlows:
         callbacks = get_callback_data(query)
         assert any("sched_trigger" in c for c in callbacks)
 
+
     @pytest.mark.asyncio
     async def test_ws_sched_model_shows_force_reply(self, handlers):
         """ws:sched_model:{id}:{model} - 메시지 입력 ForceReply."""
@@ -1274,3 +1275,33 @@ class TestScheduleToSessionCallbackFlows:
 
         reply_text = query.message.reply_text.call_args.kwargs["text"]
         assert "No provider session" in reply_text
+
+
+class TestAiWorkFailureFlows:
+    """AI work failure UX."""
+
+    @pytest.mark.asyncio
+    async def test_aiwork_unavailable_uses_new_session_picker(self):
+        handlers = make_handlers()
+        handlers.sessions.get_selected_ai_provider.return_value = "agy"
+
+        update = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        await handlers._reply_aiwork_unavailable(
+            update,
+            user_id="12345",
+            label="Command Schedule",
+            reason="Antigravity is not available",
+        )
+
+        update.message.reply_text.assert_called_once()
+        call = update.message.reply_text.call_args
+        text = call.args[0]
+        markup = call.kwargs["reply_markup"]
+        buttons = [btn.text for row in markup.inline_keyboard for btn in row]
+
+        assert "동작 안함" in text
+        assert "Antigravity is not available" in text
+        assert "📚 🧠 Opus" in buttons
+        assert "🤖 🧠 XHigh" in buttons
