@@ -20,6 +20,18 @@ def test_load_settings_or_exit_uses_config_error_code(monkeypatch):
     assert exc_info.value.code == int(RuntimeExitCode.CONFIG_ERROR)
 
 
+def test_python_version_guard_exits_for_unsupported_version(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        main._ensure_supported_python_version((3, 10, 14))
+
+    assert exc_info.value.code == int(RuntimeExitCode.CONFIG_ERROR)
+    assert "Python 3.11+ is required" in capsys.readouterr().err
+
+
+def test_python_version_guard_accepts_supported_version():
+    main._ensure_supported_python_version((3, 11, 0))
+
+
 def test_main_exits_with_lock_held_code(monkeypatch):
     monkeypatch.setattr(main, "setup_logging", lambda **kwargs: None)
     monkeypatch.setattr(main._process_lock, "acquire", lambda: False)

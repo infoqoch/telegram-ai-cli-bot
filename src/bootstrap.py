@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from src.ai import AIRegistry, build_default_registry
 from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
-from src.claude.client import ClaudeClient
 from src.logging_config import logger
 from src.plugins.loader import PluginLoader
 from src.repository import Repository, init_repository
@@ -45,7 +44,11 @@ def build_bot_runtime(settings) -> BotRuntime:
 
     logger.trace("Initializing AIRegistry")
     ai_registry = build_default_registry(settings)
-    claude_client = ai_registry.get_client("claude")
+    claude_client = (
+        ai_registry.get_client("claude")
+        if "claude" in ai_registry.supported_providers()
+        else ai_registry.get_default_client()
+    )
     logger.trace("AIRegistry initialized")
 
     logger.trace("Initializing AuthManager")
@@ -84,11 +87,7 @@ def build_bot_runtime(settings) -> BotRuntime:
 
     workspace_registry = WorkspaceRegistryAdapter(
         repo=repo,
-        recommendation_client=ClaudeClient(
-            command=settings.ai_command,
-            system_prompt_file=None,
-            timeout=30,
-        ),
+        recommendation_client=claude_client,
     )
     logger.info("Workspace registry adapter initialized")
 

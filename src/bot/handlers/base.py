@@ -107,7 +107,9 @@ class BaseHandler:
     def _get_selected_ai_provider(self, user_id: str) -> str:
         """Return the currently selected provider for a user."""
         provider = self.sessions.get_selected_ai_provider(user_id)
-        return provider if is_supported_provider(provider) else DEFAULT_PROVIDER
+        if is_supported_provider(provider) and provider in self.ai.supported_providers():
+            return provider
+        return self.ai.supported_providers()[0]
 
     def _set_selected_ai_provider(self, user_id: str, provider: str) -> None:
         """Switch the selected provider."""
@@ -126,7 +128,9 @@ class BaseHandler:
     def _get_session_provider(self, session_id: str) -> str:
         """Return provider owning the session."""
         provider = self.sessions.get_session_ai_provider(session_id)
-        return provider if is_supported_provider(provider) else DEFAULT_PROVIDER
+        if is_supported_provider(provider) and provider in self.ai.supported_providers():
+            return provider
+        return self.ai.supported_providers()[0]
 
     def _normalize_model(self, provider: str, model: Optional[str]) -> str:
         """Normalize one provider model/profile key."""

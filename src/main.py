@@ -6,6 +6,32 @@ import signal
 import sys
 from pathlib import Path
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.runtime_exit_codes import RuntimeExitCode
+
+
+MIN_PYTHON_VERSION = (3, 11)
+
+
+def _ensure_supported_python_version(version_info=None) -> None:
+    """Fail fast with a clear message when the interpreter is unsupported."""
+    version = version_info or sys.version_info
+    if tuple(version[:2]) >= MIN_PYTHON_VERSION:
+        return
+
+    required = ".".join(str(part) for part in MIN_PYTHON_VERSION)
+    current = ".".join(str(part) for part in version[:3])
+    print(
+        f"Python {required}+ is required; current interpreter is Python {current}.",
+        file=sys.stderr,
+    )
+    raise SystemExit(int(RuntimeExitCode.CONFIG_ERROR))
+
+
+_ensure_supported_python_version()
+
 from telegram import Update
 from telegram import BotCommandScopeChat
 from telegram.ext import (
@@ -15,9 +41,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.lock import ProcessLock
 from src.runtime_paths import get_main_lock_path
@@ -29,7 +52,6 @@ _process_lock = ProcessLock(get_main_lock_path())
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.network_guard import network_guard
-from src.runtime_exit_codes import RuntimeExitCode
 from src.bootstrap import build_bot_runtime
 from src.bot.command_catalog import build_bot_commands
 from src.scheduler_manager import scheduler_manager
