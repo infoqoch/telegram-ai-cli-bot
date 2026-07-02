@@ -311,6 +311,7 @@ class TestDiagnosticsStatus:
         assert "on failure" not in text
         assert "intent/context" not in text
         assert "not registered" in text
+        assert "🧪 Agy 실제 점검" in button_texts
         assert "📚 🧠 Opus" in button_texts
         assert "🤖 🧠 XHigh" in button_texts
 
@@ -326,6 +327,38 @@ class TestDiagnosticsStatus:
             await handlers.diag_command(update, MagicMock())
 
         update.message.reply_text.assert_called_once_with("Admin command only.")
+
+    @pytest.mark.asyncio
+    async def test_diag_command_runs_agy_smoke_when_requested(self):
+        handlers = make_handlers()
+        handlers._build_agy_smoke_status = AsyncMock(return_value="<b>Agy 실제 점검</b>")
+        settings = SimpleNamespace(admin_chat_id=0)
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.args = ["agy"]
+
+        with patch("src.bot.handlers.admin_handlers.get_settings", return_value=settings):
+            await handlers.diag_command(update, context)
+
+        handlers._build_agy_smoke_status.assert_awaited_once()
+        assert update.message.reply_text.await_count == 2
+        assert update.message.reply_text.await_args_list[1].args[0] == "<b>Agy 실제 점검</b>"
+
+    @pytest.mark.asyncio
+    async def test_menu_diag_agy_callback_runs_smoke(self):
+        handlers = make_handlers()
+        handlers._build_agy_smoke_status = AsyncMock(return_value="<b>Agy 실제 점검</b>")
+        settings = SimpleNamespace(admin_chat_id=0)
+        query = make_query()
+
+        with patch("src.config.get_settings", return_value=settings):
+            await handlers._handle_menu_callback(query, 12345, "menu:diag:agy")
+
+        handlers._build_agy_smoke_status.assert_awaited_once()
+        assert query.edit_message_text.await_count == 2
+        assert query.edit_message_text.await_args_list[1].args[0] == "<b>Agy 실제 점검</b>"
 
 
 # =============================================================================

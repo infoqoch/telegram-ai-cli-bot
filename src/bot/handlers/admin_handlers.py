@@ -12,6 +12,7 @@ from src.ai import get_provider_label
 from src.config import get_settings
 from src.logging_config import logger, clear_context
 from src.plugins.loader import PLUGIN_SURFACE_CATALOG
+from src.services.agy_smoke_test_service import AgySmokeTestService
 from src.services.runtime_diagnostics_service import RuntimeDiagnosticsService
 from src.ui_emoji import BUTTON_AI_WORK, BUTTON_BACK, BUTTON_REFRESH, BUTTON_SESSION_LIST
 from ..constants import MAX_LOCK_STATUS_PREVIEW
@@ -301,6 +302,13 @@ class AdminHandlers(BaseHandler):
             clear_context()
             return
 
+        if context.args and context.args[0].lower() in {"agy", "antigravity"}:
+            await update.message.reply_text("Agy 실제 점검을 시작합니다. 잠시만 기다려주세요.")
+            text = await self._build_agy_smoke_status()
+            await update.message.reply_text(text, parse_mode="HTML")
+            clear_context()
+            return
+
         text, keyboard = self._build_diag_status(user_id)
         await update.message.reply_text(
             text,
@@ -370,15 +378,47 @@ class AdminHandlers(BaseHandler):
             "전환 방식    수동 선택",
         ])
 
-        keyboard = []
+        keyboard = [[InlineKeyboardButton("🧪 Agy 실제 점검", callback_data="menu:diag:agy")]]
         if not aiwork.ready:
-            keyboard = self._build_new_session_picker_keyboard()
+            keyboard.extend(self._build_new_session_picker_keyboard())
 
         return "\n".join(lines), keyboard
 
     @staticmethod
     def _mark(ok: bool) -> str:
         return "●" if ok else "○"
+
+    async def _build_agy_smoke_status(self) -> str:
+        """Run and render the explicit Agy smoke test."""
+        settings = get_settings()
+        service = AgySmokeTestService(
+            base_dir=settings.base_dir,
+            prompt_file=settings.telegram_prompt_file,
+            data_dir=settings.data_dir,
+        )
+        result = await service.run()
+        lines = [
+            "<b>Agy 실제 점검</b>",
+            f"상태         <b>{'통과' if result.ok else '실패'}</b>",
+            f"소요 시간    {result.elapsed_seconds:.1f}s",
+        ]
+        if result.session_id:
+            lines.append(f"세션         <code>{escape_html(result.session_id[:8])}</code>")
+        if result.workspace_path:
+            lines.append(f"워크스페이스 <code>{escape_html(result.workspace_path)}</code>")
+        lines.append("")
+
+        for step in result.steps:
+            lines.append(
+                f"{self._mark(step.ok)} {escape_html(step.name)} - "
+                f"<code>{escape_html(step.detail)}</code>"
+            )
+
+        lines.extend([
+            "",
+            "이 점검은 실제 Agy CLI를 호출합니다.",
+        ])
+        return "\n".join(lines)
 
     def _group_plugins(self) -> dict[str, list]:
         """Return plugins grouped by builtin/custom for launcher UIs."""

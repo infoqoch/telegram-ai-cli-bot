@@ -441,7 +441,10 @@ class BaseHandler:
     def _build_menu_back_markup() -> InlineKeyboardMarkup:
         """Return a simple back-to-menu keyboard."""
         return InlineKeyboardMarkup(
-            [[InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")]]
+            [
+                [InlineKeyboardButton("🩺 시스템 진단", callback_data="menu:diag")],
+                [InlineKeyboardButton(BUTTON_BACK, callback_data="menu:open")],
+            ]
         )
 
     def _build_ai_selector_keyboard(

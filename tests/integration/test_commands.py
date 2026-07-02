@@ -39,12 +39,15 @@ class TestHelpCommand:
         await handlers.help_command(update, context)
 
         reply = await get_reply_text(update)
+        markup = update.message.reply_text.call_args[1]["reply_markup"]
+        button_texts = [button.text for row in markup.inline_keyboard for button in row]
         # 주요 명령어들이 포함되어야 함
         assert "/new" in reply or "/session" in reply or "/help" in reply
         assert "/menu" in reply
         assert "/help_extend" in reply
         assert "/new_haiku_speedy" not in reply
         assert "/reload" not in reply
+        assert "🩺 시스템 진단" in button_texts
 
     @pytest.mark.asyncio
     async def test_help_extend_lists_topics(self, handlers):

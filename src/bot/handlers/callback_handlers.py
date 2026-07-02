@@ -133,6 +133,42 @@ class CallbackHandlers(BaseHandler):
             )
             return
 
+        if action == "diag":
+            from src.config import get_settings
+
+            settings = get_settings()
+            if settings.admin_chat_id and chat_id != settings.admin_chat_id:
+                await query.message.reply_text("Admin command only.")
+                return
+
+            text, keyboard = self._build_diag_status(user_id)
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else self._build_menu_back_markup(),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "diag:agy":
+            from src.config import get_settings
+
+            settings = get_settings()
+            if settings.admin_chat_id and chat_id != settings.admin_chat_id:
+                await query.message.reply_text("Admin command only.")
+                return
+
+            await query.edit_message_text(
+                "Agy 실제 점검을 시작합니다. 잠시만 기다려주세요.",
+                parse_mode="HTML",
+            )
+            text = await self._build_agy_smoke_status()
+            await query.edit_message_text(
+                text,
+                reply_markup=self._build_menu_back_markup(),
+                parse_mode="HTML",
+            )
+            return
+
         if action == "sessions":
             text, buttons = self._build_session_list_view(
                 user_id,

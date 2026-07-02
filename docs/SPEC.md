@@ -98,6 +98,17 @@ The diagnostic screen reports:
 
 When AI work is not available, the bot shows `동작 안함`, the reason, and the same model picker used by `/new`. The user must explicitly choose another provider/model and retry the AI work request.
 
+The help screen also exposes a `시스템 진단` button that opens the same diagnostic view.
+
+`/diag agy` or the `Agy 실제 점검` button runs an explicit Antigravity smoke test. Unlike the default `/diag` screen, this calls the real `agy` CLI and checks:
+
+- `agy models`
+- one new `--print` conversation
+- resume with the created conversation id
+- workspace working-directory handling
+
+Because it invokes a real provider CLI, it is admin-only and only runs after explicit user action.
+
 ---
 
 ## Access Control
