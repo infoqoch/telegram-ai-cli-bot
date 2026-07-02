@@ -25,6 +25,7 @@ from src.services.command_execution_service import CommandExecutionService
 _SEQ_RE = re.compile(r"send_message:seq:(\d+)")
 _DRAFT_RE = re.compile(r"send_message:command_schedule_draft\s*(.+)\s*\Z", re.DOTALL)
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_RUNTIME_SCRIPT_DIR = Path(".data/command_schedules")
 
 
 class CommandSchedulePlugin(Plugin):
@@ -95,7 +96,7 @@ END;
                     "properties": {
                         "title": {"type": "string", "description": "Short user-facing title"},
                         "description": {"type": "string", "description": "What this command does"},
-                        "script_path": {"type": "string", "description": "Relative .py path inside the project"},
+                        "script_path": {"type": "string", "description": "Suggested relative .py path; stored under .data/command_schedules"},
                         "script_content": {"type": "string", "description": "Full Python script content"},
                         "command": {"type": "string", "description": "Command to execute the script"},
                         "cron_expr": {"type": "string", "description": "5-field cron expression"},
@@ -145,9 +146,11 @@ END;
         if not self.store:
             raise ValueError("repository unavailable")
 
-        safe_script_path = self._safe_script_path(script_path)
+        requested_script_path = self._resolve_project_script_path(script_path)
         self._validate_cron(cron_expr)
-        self._validate_command(command, safe_script_path)
+        self._validate_command(command, requested_script_path)
+        safe_script_path = self._runtime_script_path(script_path)
+        safe_command = self._rewrite_command_script(command, safe_script_path)
 
         description_text = (description or "").strip()
         cron_text = cron_description(cron_expr)
@@ -157,7 +160,7 @@ END;
             description=description_text,
             script_path=str(safe_script_path.relative_to(self._project_root())),
             script_content=script_content,
-            command=command.strip(),
+            command=safe_command,
             cron_expr=cron_expr.strip(),
             cron_description=cron_text,
         )
@@ -373,17 +376,33 @@ END;
         return InlineKeyboardMarkup(rows)
 
     def _write_script(self, draft: dict[str, Any]) -> Path:
-        path = self._safe_script_path(draft["script_path"])
+        path = self._resolve_project_script_path(draft["script_path"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(draft["script_content"], encoding="utf-8")
         return path
 
-    def _safe_script_path(self, script_path: str) -> Path:
+    def _resolve_project_script_path(self, script_path: str) -> Path:
         if not script_path or Path(script_path).is_absolute():
             raise ValueError("script_path must be a relative path")
         path = (self._project_root() / script_path).resolve()
         if self._project_root() not in path.parents:
             raise ValueError("script_path must stay inside the project")
+        if path.suffix != ".py":
+            raise ValueError("script_path must point to a .py file")
+        return path
+
+    def _runtime_script_path(self, script_path: str) -> Path:
+        relative = Path(script_path)
+        if relative.is_absolute():
+            raise ValueError("script_path must be a relative path")
+        if any(part == ".." for part in relative.parts):
+            raise ValueError("script_path must stay inside the project")
+        if relative.parts[:2] == _RUNTIME_SCRIPT_DIR.parts:
+            relative = Path(*relative.parts[2:])
+        path = (self._project_root() / _RUNTIME_SCRIPT_DIR / relative).resolve()
+        runtime_root = (self._project_root() / _RUNTIME_SCRIPT_DIR).resolve()
+        if path != runtime_root and runtime_root not in path.parents:
+            raise ValueError("script_path must stay inside command schedule runtime storage")
         if path.suffix != ".py":
             raise ValueError("script_path must point to a .py file")
         return path
@@ -399,6 +418,11 @@ END;
         command_script = (self._project_root() / parts[1]).resolve()
         if command_script != script_path:
             raise ValueError("command script path must match script_path")
+
+    def _rewrite_command_script(self, command: str, script_path: Path) -> str:
+        parts = shlex.split(command)
+        parts[1] = str(script_path.relative_to(self._project_root()))
+        return shlex.join(parts)
 
     @staticmethod
     def _validate_cron(cron_expr: str) -> None:

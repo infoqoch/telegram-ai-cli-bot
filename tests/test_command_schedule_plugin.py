@@ -44,6 +44,7 @@ async def test_create_draft_tool_and_completion_hook_render_buttons(command_plug
         session_id="session",
     )
     assert "1234 test" in rendered["text"]
+    assert ".data/command_schedules/scripts/test_1234.py" in rendered["text"]
     callbacks = [
         button["callback_data"]
         for row in rendered["delivery_buttons"]
@@ -76,7 +77,7 @@ async def test_completion_hook_creates_draft_from_structured_ai_response(command
     )
 
     assert "123 test" in rendered["text"]
-    assert "venv/bin/python scripts/test_123.py" in rendered["text"]
+    assert "venv/bin/python .data/command_schedules/scripts/test_123.py" in rendered["text"]
     callbacks = [
         button["callback_data"]
         for row in rendered["delivery_buttons"]
