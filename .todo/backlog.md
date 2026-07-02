@@ -60,6 +60,10 @@ Next action:
 
 Observation: previous local notes reported that `agy --print` may hang when instructed to restart the bot process.
 
+Current guardrail:
+
+- `AgyClient` derives a subprocess timeout from `--print-timeout` plus a short grace period, so non-interactive Agy calls are not allowed to run forever.
+
 Next action:
 
 - Reproduce with the current version before adding any workaround.

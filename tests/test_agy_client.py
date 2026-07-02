@@ -49,6 +49,55 @@ def test_build_command_uses_exact_model_timeout_log_and_prompt(tmp_path):
     assert "<USER_REQUEST>\nhello\n</USER_REQUEST>" in cmd[-1]
 
 
+def test_default_subprocess_timeout_tracks_print_timeout(tmp_path):
+    client = make_client(tmp_path)
+
+    assert client.timeout == 31 * 60
+
+
+def test_custom_subprocess_timeout_overrides_print_timeout(tmp_path):
+    client = AgyClient(
+        command="agy",
+        timeout=42,
+        print_timeout="5m0s",
+        agy_root=tmp_path / "antigravity-cli",
+        session_create_lock_path=tmp_path / "locks" / "agy.lock",
+        log_dir=tmp_path / "logs",
+        prepare_project_mcp=False,
+    )
+
+    assert client.timeout == 42
+
+
+def test_parse_duration_seconds_accepts_agy_timeout_forms():
+    assert AgyClient._parse_duration_seconds("30m") == 1800
+    assert AgyClient._parse_duration_seconds("5m0s") == 300
+    assert AgyClient._parse_duration_seconds("1h30m5s") == 5405
+    assert AgyClient._parse_duration_seconds("bad") is None
+
+
+def test_resolve_created_session_ignores_unchanged_cached_conversation(tmp_path):
+    client = make_client(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cached_id = "267e6e7f-5f56-4a8a-b8f4-a59797f5e84e"
+
+    db_path = tmp_path / "antigravity-cli" / "conversations" / f"{cached_id}.db"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_text("", encoding="utf-8")
+    cache = tmp_path / "antigravity-cli" / "cache" / "last_conversations.json"
+    cache.parent.mkdir(parents=True)
+    cache.write_text(f'{{"{workspace.resolve()}":"{cached_id}"}}', encoding="utf-8")
+
+    before = client._snapshot_sessions()
+
+    assert client._resolve_created_session_id(
+        before,
+        workspace_path=str(workspace),
+        started_at=db_path.stat().st_mtime + 10,
+    ) is None
+
+
 @pytest.mark.asyncio
 async def test_missing_existing_session_returns_session_not_found(tmp_path):
     client = make_client(tmp_path)

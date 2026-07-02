@@ -139,7 +139,7 @@ This directory is gitignored by default because those files are local scheduler 
 
 ## Antigravity Setup
 
-Antigravity is auto-detected at startup if the `agy` CLI is on `PATH`. The bot calls it with `--dangerously-skip-permissions`, text `--print` output, and a 30-minute `--print-timeout`.
+Antigravity is auto-detected at startup if the `agy` CLI is on `PATH`. The bot calls it with `--dangerously-skip-permissions`, text `--print` output, and a 30-minute `--print-timeout`. The subprocess timeout is set slightly above that print timeout so scheduled or detached Agy jobs cannot hang forever if the CLI fails to exit.
 
 Antigravity does not expose a JSON output mode, so the bot stores provider sessions by discovering the local conversation artifacts under `~/.gemini/antigravity-cli/` after the first successful prompt. Existing conversations are resumed with `--conversation <uuid>`.
 

@@ -28,6 +28,7 @@ _SESSION_NOT_FOUND_RE = re.compile(
 
 _MCP_SERVER_NAME = "bot-plugins"
 _DEFAULT_PRINT_TIMEOUT = "30m"
+_SUBPROCESS_TIMEOUT_GRACE_SECONDS = 60
 
 
 class AgyClient(BaseCLIClient):
@@ -44,7 +45,13 @@ class AgyClient(BaseCLIClient):
         log_dir: Optional[Path] = None,
         prepare_project_mcp: bool = True,
     ):
-        super().__init__(command, system_prompt_file, timeout)
+        effective_timeout = timeout
+        if effective_timeout is None:
+            print_timeout_seconds = self._parse_duration_seconds(print_timeout)
+            if print_timeout_seconds is not None:
+                effective_timeout = print_timeout_seconds + _SUBPROCESS_TIMEOUT_GRACE_SECONDS
+
+        super().__init__(command, system_prompt_file, effective_timeout)
         self.print_timeout = print_timeout
         self._agy_root = agy_root or Path.home() / ".gemini" / "antigravity-cli"
         self._brain_root = self._agy_root / "brain"
@@ -216,10 +223,27 @@ class AgyClient(BaseCLIClient):
                 changed.append((mtime, session_id))
 
         if not changed:
-            return cached_id if cached_id and self._session_exists(cached_id) else None
+            return None
 
         changed.sort(reverse=True)
         return changed[0][1]
+
+    @staticmethod
+    def _parse_duration_seconds(value: str) -> Optional[int]:
+        """Parse Agy duration strings such as 30m, 5m0s, 1h30m."""
+        text = (value or "").strip()
+        if not text:
+            return None
+        match = re.fullmatch(
+            r"(?:(?P<hours>\d+)h)?(?:(?P<minutes>\d+)m)?(?:(?P<seconds>\d+)s)?",
+            text,
+        )
+        if not match or not any(match.groupdict().values()):
+            return None
+        hours = int(match.group("hours") or 0)
+        minutes = int(match.group("minutes") or 0)
+        seconds = int(match.group("seconds") or 0)
+        return hours * 3600 + minutes * 60 + seconds
 
     def _new_log_file(self) -> Path:
         self._log_dir.mkdir(parents=True, exist_ok=True)
