@@ -19,6 +19,7 @@ LOG_DIR="${BOT_LOG_DIR:-$DATA_DIR/logs}"
 APP_LOG_FILE="$LOG_DIR/bot.log"
 DEFAULT_LOG_LEVEL="${LOG_LEVEL:-DEBUG}"
 BOOT_LOG_RETENTION_DAYS="${BOOT_LOG_RETENTION_DAYS:-14}"
+STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-30}"
 LEGACY_PID_FILE="/tmp/telegram-bot.pid"
 LEGACY_LOCK_FILE="/tmp/telegram-bot.lock"
 LEGACY_SUPERVISOR_LOCK_FILE="/tmp/telegram-bot-supervisor.lock"
@@ -257,7 +258,7 @@ _start_supervisor() {
 
     sleep 3
     local main_pids
-    if ps -p "$new_pid" > /dev/null 2>&1 && main_pids=$(_wait_for_main_start "$new_pid" 5); then
+    if ps -p "$new_pid" > /dev/null 2>&1 && main_pids=$(_wait_for_main_start "$new_pid" "$STARTUP_WAIT_SECONDS"); then
         echo "✅ 봇 시작됨 (Supervisor PID: $new_pid)"
         echo "   Main PID   : $main_pids"
         echo "   크래시 시 자동 재시작 활성화"
@@ -454,6 +455,7 @@ case "$1" in
     echo ""
     echo "환경변수:"
     echo "  LOG_LEVEL               - start/restart 기본 로그 레벨"
+    echo "  STARTUP_WAIT_SECONDS    - supervisor 시작 후 main 대기 시간 (기본: 30)"
     echo "  BOT_DATA_DIR            - 런타임 데이터 루트 (기본: $BASE_DIR/.data)"
     echo "  BOT_LOG_DIR             - 로그 디렉토리 (기본: \$BOT_DATA_DIR/logs)"
     echo "  BOOT_LOG_RETENTION_DAYS - boot 로그 보관 일수 (기본: 14)"

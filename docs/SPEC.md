@@ -96,7 +96,7 @@ The diagnostic screen reports:
 - AI work readiness for the currently selected default AI
 - AI work switching mode: manual provider/model selection
 
-When AI work is not available, the bot shows `동작 안함`, the reason, and the same model picker used by `/new`. The user must explicitly choose another provider/model and retry the AI work request.
+When AI work is not available before dispatch, or the selected provider fails during the AI work run, the bot shows `동작 안함`, the failed default AI, the reason, and default-AI selector buttons. The user must explicitly choose another provider and retry the AI work request.
 
 The help screen also exposes a `시스템 진단` button that opens the same diagnostic view.
 
@@ -539,6 +539,7 @@ Script
 - `Register schedule`: writes the script, inserts the command schedule, and hot-reloads the runtime scheduler.
 - `Cancel`: marks the draft as cancelled. No schedule is registered.
 - The AI must not claim registration is complete before the user taps `Register schedule`.
+- Command Schedule AI Work sessions store their domain metadata in `ai_work_sessions`; follow-up messages in that session keep using the saved draft-render completion hook.
 - Generated command scripts are stored under `.scheduler/commands/` and are not tracked by git. If the AI proposes `scripts/foo.py`, the bot normalizes it to `.scheduler/commands/scripts/foo.py` before testing or registration.
 
 **Manage schedules:** Click a schedule from the list → detail screen → ON/OFF toggle, change time, delete.
@@ -608,6 +609,7 @@ Sent to the user upon completion (split if over 4000 characters):
 
 - `💬 Session` button: switches to the session linked to the execution result. If no session exists yet, registers the provider session from that run as a bot session and switches to it.
 - Plugin and Command schedules have no AI session, so no button is shown.
+- Schedule notifications are persisted to `message_log` before Telegram delivery. If Telegram delivery fails after the schedule result is generated, the result remains retryable through the shared delivery retry worker.
 
 ### Command Type Optimization
 

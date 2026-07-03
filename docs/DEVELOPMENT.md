@@ -150,7 +150,7 @@ The Telegram boundary is primarily enforced by [`src/telegram_request.py`](../sr
 
 Transient dependency failures raise `NetworkUnavailable`. Once the threshold is reached, later calls raise `CircuitOpen` without touching the network until the reset window expires. A `CircuitOpen` does not count as a Telegram delivery attempt unless an actual send attempt already happened in the same delivery flow.
 
-Generated detached AI responses are persisted via `store_generated_message()` before Telegram delivery starts. Delivery status then follows this model:
+Generated detached AI responses are persisted via `store_generated_message()` before Telegram delivery starts. Scheduled chat/workspace/plugin/command results that produce a Telegram notification are also inserted into `message_log` before delivery through `insert_schedule_delivery_log()`. Delivery status then follows this model:
 
 - `pending`: generated response exists and delivery is being attempted
 - `sent`: Telegram returned success; retry ignores the row
@@ -208,6 +208,7 @@ Command schedules use a draft-first confirmation flow because the final registra
 - The hidden built-in plugin [`plugins/builtin/command_schedule`](../plugins/builtin/command_schedule) owns draft storage, test execution, and final registration callbacks.
 - AI work for command schedules should return either `send_message:seq:<id>` after creating a draft through `command_schedule_create_draft`, or a structured `send_message:command_schedule_draft` JSON payload.
 - The bot validates `script_path`, `command`, and `cron_expr` before creating a draft. Registration happens only after the user taps `Register schedule`.
+- AI Work sessions persist their domain metadata in `ai_work_sessions`. Command Schedule follow-up messages restore the saved `command_schedule.render_draft` completion hook from that table, so structured draft JSON is rendered as a draft card instead of being delivered as plain chat text.
 - Generated command scripts are stored under [`.scheduler/commands/`](../.scheduler/commands) and `.scheduler/` is gitignored. AI-provided paths such as `scripts/foo.py` are treated as suggestions and normalized to `.scheduler/commands/scripts/foo.py`.
 - `Run command` writes the script and executes the exact command through [`CommandExecutionService`](../src/services/command_execution_service.py), so the user can inspect the Telegram output before registration.
 - Final schedule execution also uses `CommandExecutionService`; command stdout is treated as Telegram HTML and stderr is escaped inside `<pre>`.
