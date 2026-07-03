@@ -13,7 +13,7 @@ from typing import Any, Optional
 from apscheduler.triggers.cron import CronTrigger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.bot.formatters import escape_html
+from src.bot.formatters import escape_html, markdown_to_telegram_html
 from src.logging_config import logger
 from src.plugins.loader import Plugin, PluginMenuEntry, PluginResult, ToolSpec
 from src.repository.adapters import RepositoryCommandScheduleDraftStore
@@ -25,6 +25,7 @@ from src.services.command_execution_service import CommandExecutionService
 _SEQ_RE = re.compile(r"send_message:seq:(\d+)")
 _DRAFT_RE = re.compile(r"send_message:command_schedule_draft\s*(.+)\s*\Z", re.DOTALL)
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_DRAFT_REQUIRED_FIELDS = {"title", "description", "script_path", "script_content", "command", "cron_expr"}
 _RUNTIME_SCRIPT_DIR = Path(".scheduler/commands")
 
 
@@ -194,10 +195,13 @@ END;
                     "text": self._render_draft(draft),
                     "delivery_buttons": self._draft_buttons(draft["id"], include_register=True),
                 }
+            if not self._looks_like_structured_draft(ai_response or ""):
+                return {"text": self._render_plain_ai_response(ai_response or "")}
             return {
                 "text": (
                     "<b>Command schedule draft was not created</b>\n\n"
-                    "AI did not return a valid <code>send_message:seq:&lt;id&gt;</code> token, "
+                    "AI did not return a valid <code>send_message:seq:&lt;id&gt;</code> token "
+                    "or <code>send_message:command_schedule_draft</code> payload, "
                     "so no registration action is available."
                 )
             }
@@ -254,10 +258,25 @@ END;
         if not isinstance(payload, dict):
             return None
 
-        required = {"title", "description", "script_path", "script_content", "command", "cron_expr"}
-        if not required.issubset(payload):
+        if not _DRAFT_REQUIRED_FIELDS.issubset(payload):
             return None
         return payload
+
+    @staticmethod
+    def _looks_like_structured_draft(ai_response: str) -> bool:
+        text = (ai_response or "").strip()
+        if not text:
+            return False
+        if text.startswith("send_message:seq:") or text.startswith("send_message:command_schedule_draft"):
+            return True
+        if text.startswith("{") or _JSON_FENCE_RE.search(text):
+            return True
+        return any(f'"{field}"' in text for field in _DRAFT_REQUIRED_FIELDS)
+
+    @staticmethod
+    def _render_plain_ai_response(ai_response: str) -> str:
+        body = markdown_to_telegram_html(ai_response.strip() or "No draft was created.")
+        return f"<b>Command Schedule AI</b>\n\n{body}"
 
     async def handle_callback_async(self, callback_data: str, chat_id: int) -> dict:
         parts = callback_data.split(":")

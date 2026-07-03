@@ -308,6 +308,47 @@ class TestSessionOperations:
         assert session.provider_session_id == "external-claude-1"
         assert history_count == 1
 
+    def test_ai_work_session_context_roundtrip(self, repo):
+        """AI Work 세션 메타데이터는 세션과 분리된 테이블에 저장된다."""
+        repo.create_session("user1", "sess1", ai_provider="agy", model="agy-pro-high")
+        hook = {
+            "plugin_name": "command_schedule",
+            "action": "render_draft",
+            "payload": {},
+            "ai_work_context": {"label": "Command Schedule", "provider": "agy"},
+        }
+
+        assert repo.set_session_ai_work_context(
+            "sess1",
+            domain="sched_cmd",
+            label="Command Schedule",
+            provider="agy",
+            completion_hook=hook,
+        )
+
+        row = repo.get_session_ai_work_context("sess1")
+
+        assert row is not None
+        assert row["domain"] == "sched_cmd"
+        assert row["label"] == "Command Schedule"
+        assert row["provider"] == "agy"
+        assert '"plugin_name": "command_schedule"' in row["completion_hook_json"]
+
+    def test_ai_work_session_context_deleted_with_session(self, repo):
+        """AI Work 메타데이터는 원 세션 hard delete 시 같이 제거된다."""
+        repo.create_session("user1", "sess1")
+        repo.set_session_ai_work_context(
+            "sess1",
+            domain="sched_cmd",
+            label="Command Schedule",
+            provider="claude",
+            completion_hook=None,
+        )
+
+        repo.hard_delete_session("sess1")
+
+        assert repo.get_session_ai_work_context("sess1") is None
+
 
 class TestHistoryOperations:
     """히스토리 관련 테스트."""

@@ -1,7 +1,8 @@
 """Session service - session management business logic."""
 
+import json
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from src.ai import (
@@ -94,6 +95,46 @@ class SessionService:
         """Get previous session ID."""
         provider = ai_provider or self.get_selected_ai_provider(user_id)
         return self._repo.get_previous_session_id(user_id, provider)
+
+    def set_ai_work_session_context(
+        self,
+        session_id: str,
+        *,
+        domain: str,
+        label: str,
+        provider: str,
+        completion_hook: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """Persist AI Work metadata for follow-up messages in this session."""
+        return self._repo.set_session_ai_work_context(
+            session_id,
+            domain=domain,
+            label=label,
+            provider=provider,
+            completion_hook=completion_hook,
+        )
+
+    def get_ai_work_session_context(self, session_id: str) -> Optional[dict[str, Any]]:
+        """Return parsed AI Work metadata for this session, if any."""
+        row = self._repo.get_session_ai_work_context(session_id)
+        if not row:
+            return None
+
+        completion_hook = None
+        hook_json = row.get("completion_hook_json")
+        if hook_json:
+            try:
+                completion_hook = json.loads(hook_json)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid AI Work completion hook JSON: session={session_id[:8]}")
+
+        return {
+            "session_id": row["session_id"],
+            "domain": row["domain"],
+            "label": row["label"],
+            "provider": row["provider"],
+            "completion_hook": completion_hook,
+        }
 
     def get_selected_ai_provider(self, user_id: str) -> str:
         """Get currently selected AI provider."""

@@ -157,6 +157,40 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_provider_state_provider ON user_provider_state(ai_provider)"
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS ai_work_sessions (
+               session_id TEXT PRIMARY KEY,
+               domain TEXT NOT NULL,
+               label TEXT NOT NULL,
+               provider TEXT NOT NULL,
+               completion_hook_json TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+               FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_work_sessions_domain ON ai_work_sessions(domain)"
+    )
+    conn.execute(
+        """INSERT OR IGNORE INTO ai_work_sessions
+           (session_id, domain, label, provider, completion_hook_json, created_at, updated_at)
+           SELECT s.id,
+                  'sched_cmd',
+                  'Command Schedule',
+                  s.ai_provider,
+                  json_object(
+                      'plugin_name', 'command_schedule',
+                      'action', 'render_draft',
+                      'payload', json_object(),
+                      'ai_work_context', json_object('label', 'Command Schedule', 'provider', s.ai_provider)
+                  ),
+                  datetime('now'),
+                  datetime('now')
+             FROM sessions s
+             JOIN session_history h ON h.session_id = s.id
+            WHERE h.message = '(AI Work: sched_cmd)'"""
+    )
     conn.execute("DROP INDEX IF EXISTS idx_queued_messages_expires_at")
 
     # Historical rows that already have a stored response were necessarily sent successfully

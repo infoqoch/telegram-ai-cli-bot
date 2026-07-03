@@ -53,6 +53,20 @@ CREATE TABLE IF NOT EXISTS user_provider_state (
 
 CREATE INDEX IF NOT EXISTS idx_user_provider_state_provider ON user_provider_state(ai_provider);
 
+-- AI Work session metadata: follow-up messages can restore domain-specific hooks
+CREATE TABLE IF NOT EXISTS ai_work_sessions (
+    session_id TEXT PRIMARY KEY,
+    domain TEXT NOT NULL,
+    label TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    completion_hook_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_work_sessions_domain ON ai_work_sessions(domain);
+
 -- Session history: message history per session
 CREATE TABLE IF NOT EXISTS session_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

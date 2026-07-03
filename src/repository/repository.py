@@ -503,6 +503,41 @@ class Repository:
         ).fetchone()
         return row["previous_session_id"] if row else None
 
+    def set_session_ai_work_context(
+        self,
+        session_id: str,
+        *,
+        domain: str,
+        label: str,
+        provider: str,
+        completion_hook: Optional[Any] = None,
+    ) -> bool:
+        """Store AI Work metadata for follow-up messages in a session."""
+        now = self._now()
+        hook_json = json.dumps(completion_hook, ensure_ascii=False) if completion_hook is not None else None
+        cursor = self._conn.execute(
+            """INSERT INTO ai_work_sessions
+               (session_id, domain, label, provider, completion_hook_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET
+                   domain = excluded.domain,
+                   label = excluded.label,
+                   provider = excluded.provider,
+                   completion_hook_json = excluded.completion_hook_json,
+                   updated_at = excluded.updated_at""",
+            (session_id, domain, label, provider, hook_json, now, now),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_session_ai_work_context(self, session_id: str) -> Optional[dict[str, Any]]:
+        """Return AI Work metadata for a session, if it is an AI Work session."""
+        row = self._conn.execute(
+            "SELECT * FROM ai_work_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def create_session(
         self,
         user_id: str,
@@ -1598,6 +1633,49 @@ class Repository:
                VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, 'sent')""",
             (chat_id, schedule_id, model, workspace_path,
              provider_session_id, request, now, now, response, error),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def insert_schedule_delivery_log(
+        self,
+        *,
+        chat_id: int,
+        schedule_id: str,
+        request: str,
+        response: str,
+        delivery_text: str,
+        model: str = "schedule",
+        workspace_path: Optional[str] = None,
+        provider_session_id: Optional[str] = None,
+        delivery_markup_json: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> int:
+        """Persist a completed schedule result before Telegram delivery."""
+        now = self._now()
+        cursor = self._conn.execute(
+            """INSERT INTO message_log
+               (chat_id, session_id, schedule_id, model, workspace_path,
+                provider_session_id, request, request_at,
+                processed, processed_at, response, error,
+                delivery_text, delivery_markup_json, delivery_status,
+                delivery_attempts, delivery_error, delivered_at)
+               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?,
+                       ?, ?, 'pending', 0, NULL, NULL)""",
+            (
+                chat_id,
+                schedule_id,
+                model,
+                workspace_path,
+                provider_session_id,
+                request,
+                now,
+                now,
+                response,
+                error,
+                delivery_text,
+                delivery_markup_json,
+            ),
         )
         self._conn.commit()
         return cursor.lastrowid or 0

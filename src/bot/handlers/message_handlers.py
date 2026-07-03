@@ -42,6 +42,13 @@ _CORE_KEYWORD_DOMAINS: dict[str, str] = {
 class MessageHandlers(BaseHandler):
     """Message processing handlers."""
 
+    def _get_aiwork_session_completion_hook(self, session_id: str) -> dict[str, object] | None:
+        context = self.sessions.get_ai_work_session_context(session_id)
+        if not context:
+            return None
+        hook = context.get("completion_hook")
+        return hook if isinstance(hook, dict) else None
+
     @authorized_only
     @authenticated_only
     async def ai_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -297,6 +304,8 @@ class MessageHandlers(BaseHandler):
             session_provider = self.sessions.get_session_ai_provider(session_id) or self._get_selected_ai_provider(user_id)
             model = self.sessions.get_session_model(session_id) or get_default_model(session_provider)
             workspace_path = self.sessions.get_workspace_path(session_id)
+            if post_completion_hook is None:
+                post_completion_hook = self._get_aiwork_session_completion_hook(session_id)
 
             if self._is_session_locked(session_id):
                 await self._show_session_selection_ui(

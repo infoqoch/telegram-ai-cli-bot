@@ -74,6 +74,46 @@ class TestSessionService:
         with pytest.raises(TypeError):
             service.create_session("user1", "new_session", "claude", "provider-id")
 
+    def test_ai_work_session_context_roundtrip(self, service, mock_repo):
+        """AI Work 세션 메타데이터는 hook JSON을 파싱해 반환한다."""
+        hook = {
+            "plugin_name": "command_schedule",
+            "action": "render_draft",
+            "payload": {},
+        }
+        service.set_ai_work_session_context(
+            "sess1",
+            domain="sched_cmd",
+            label="Command Schedule",
+            provider="agy",
+            completion_hook=hook,
+        )
+        mock_repo.set_session_ai_work_context.assert_called_once_with(
+            "sess1",
+            domain="sched_cmd",
+            label="Command Schedule",
+            provider="agy",
+            completion_hook=hook,
+        )
+
+        mock_repo.get_session_ai_work_context.return_value = {
+            "session_id": "sess1",
+            "domain": "sched_cmd",
+            "label": "Command Schedule",
+            "provider": "agy",
+            "completion_hook_json": '{"plugin_name":"command_schedule","action":"render_draft","payload":{}}',
+        }
+
+        context = service.get_ai_work_session_context("sess1")
+
+        assert context == {
+            "session_id": "sess1",
+            "domain": "sched_cmd",
+            "label": "Command Schedule",
+            "provider": "agy",
+            "completion_hook": hook,
+        }
+
     def test_delete_session(self, service, mock_repo):
         """Test delete session."""
         mock_repo.soft_delete_session.return_value = True

@@ -85,3 +85,35 @@ async def test_completion_hook_creates_draft_from_structured_ai_response(command
     ]
     assert callbacks[0].startswith("cmdsched:test:")
     assert any(callback.startswith("cmdsched:register:") for callback in callbacks)
+
+
+@pytest.mark.asyncio
+async def test_completion_hook_preserves_plain_ai_clarification(command_plugin):
+    rendered = await command_plugin.handle_ai_completion(
+        "render_draft",
+        7,
+        {},
+        ai_response="입력이 `ㅂ`만 들어왔어요. 원하는 작업을 다시 보내주세요.",
+        ai_error=None,
+        session_id="session",
+    )
+
+    assert "Command Schedule AI" in rendered["text"]
+    assert "입력이" in rendered["text"]
+    assert "<code>ㅂ</code>" in rendered["text"]
+    assert "draft was not created" not in rendered["text"]
+    assert "delivery_buttons" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_completion_hook_rejects_invalid_structured_draft(command_plugin):
+    rendered = await command_plugin.handle_ai_completion(
+        "render_draft",
+        7,
+        {},
+        ai_response='{"title": "missing fields"}',
+        ai_error=None,
+        session_id="session",
+    )
+
+    assert "Command schedule draft was not created" in rendered["text"]
