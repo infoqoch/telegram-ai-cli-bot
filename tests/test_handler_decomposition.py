@@ -423,6 +423,7 @@ class TestDiagnosticsStatus:
         assert "🧪 Claude 점검" in button_texts
         assert "🧪 Codex 점검" in button_texts
         assert "🧪 Gemini 점검" in button_texts
+        assert "📊 Schedule Status" not in button_texts
         assert "🧪 Agy 점검" in button_texts
         callbacks = [button.callback_data for row in keyboard for button in row]
         assert "📚 Claude" in button_texts
@@ -837,6 +838,110 @@ class TestSchedulerCallbackMultiStep:
             await handlers._handle_scheduler_callback(q, 12345, "sched:refresh")
         text = get_text(q)
         assert "Scheduler" in text
+
+    def test_scheduler_keyboard_has_history_button(self, handlers):
+        """스케줄러 메인 키보드에 통합 히스토리 버튼이 있다."""
+        callbacks = [button.callback_data for row in handlers._build_scheduler_keyboard("12345") for button in row]
+        labels = [button.text for row in handlers._build_scheduler_keyboard("12345") for button in row]
+        assert "sched:history" in callbacks
+        assert "sched:status" not in callbacks
+        assert "📋 History (1)" in labels
+
+    @pytest.mark.asyncio
+    async def test_schedule_history_view_includes_status_details(self, handlers):
+        """스케줄 히스토리는 실행 상태와 최근 로그를 함께 보여준다."""
+        handlers.sessions._repo.list_recent_schedule_message_logs.return_value = [
+            {
+                "id": 42,
+                "delivery_status": "failed",
+                "delivery_attempts": 2,
+                "delivery_error": "telegram: TimedOut: Timed out",
+                "error": None,
+            }
+        ]
+        handlers._schedule_manager.get.return_value.last_error = "telegram: TimedOut: Timed out"
+
+        q = make_query()
+        await handlers._handle_scheduler_callback(q, 12345, "sched:history")
+
+        text = get_text(q)
+        callbacks = get_callback_data(q)
+        button_labels = get_buttons(q)
+        assert "Schedule History" in text
+        assert "1. ⚠️ ON" in text
+        assert "Daily" in text
+        assert "telegram delivery timeout" in text
+        assert "latest log #42 failed" in text
+        assert "sched:refresh" in callbacks
+        assert any(label.startswith("1. ✅") for label in button_labels)
+
+    @pytest.mark.asyncio
+    async def test_schedule_status_callback_opens_history_for_compatibility(self, handlers):
+        """기존 status 콜백은 통합 히스토리 화면으로 연결된다."""
+        handlers.sessions._repo.list_recent_schedule_message_logs.return_value = []
+
+        q = make_query()
+        await handlers._handle_scheduler_callback(q, 12345, "sched:status")
+
+        assert "Schedule History" in get_text(q)
+
+    @pytest.mark.asyncio
+    async def test_schedule_status_sorts_enabled_then_latest_last_run(self, handlers):
+        """스케줄 상태판은 ON을 먼저, 같은 상태에서는 최근 실행순으로 보여준다."""
+        old_on = SimpleNamespace(
+            id="sched-old-on",
+            name="Old ON",
+            enabled=True,
+            type="claude",
+            ai_provider="claude",
+            trigger_type="cron",
+            hour=9,
+            minute=0,
+            cron_expr=None,
+            next_run_text="Today 09:00",
+            run_count=3,
+            last_run="2026-07-03T00:00:00+09:00",
+            last_error=None,
+        )
+        new_on = SimpleNamespace(
+            id="sched-new-on",
+            name="New ON",
+            enabled=True,
+            type="claude",
+            ai_provider="claude",
+            trigger_type="cron",
+            hour=10,
+            minute=0,
+            cron_expr=None,
+            next_run_text="Today 10:00",
+            run_count=4,
+            last_run="2026-07-03T03:00:00+09:00",
+            last_error=None,
+        )
+        newer_off = SimpleNamespace(
+            id="sched-newer-off",
+            name="Newer OFF",
+            enabled=False,
+            type="claude",
+            ai_provider="claude",
+            trigger_type="cron",
+            hour=11,
+            minute=0,
+            cron_expr=None,
+            next_run_text="No upcoming run",
+            run_count=5,
+            last_run="2026-07-03T05:00:00+09:00",
+            last_error=None,
+        )
+        handlers._schedule_manager.list_by_user.return_value = [newer_off, old_on, new_on]
+        handlers.sessions._repo.list_recent_schedule_message_logs.return_value = []
+
+        q = make_query()
+        await handlers._handle_scheduler_callback(q, 12345, "sched:history")
+
+        text = get_text(q)
+        assert text.index("New ON") < text.index("Old ON") < text.index("Newer OFF")
+        assert text.index("1. ✅ ON") < text.index("2. ✅ ON") < text.index("3. ○ OFF")
 
 
 # =============================================================================

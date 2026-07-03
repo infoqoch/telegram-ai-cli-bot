@@ -14,7 +14,7 @@ from src.ai import (
 from src.constants import AVAILABLE_HOURS
 from src.logging_config import logger
 from src.schedule_utils import build_daily_cron, next_occurrence, normalize_schedule_type, normalize_trigger_type, resolve_provider, resolve_schedule_type
-from src.time_utils import format_local_datetime
+from src.time_utils import format_local_datetime, parse_local_datetime
 from src.ui_emoji import (
     BUTTON_ADD_CHAT,
     BUTTON_ADD_COMMAND,
@@ -51,8 +51,7 @@ class SchedulerCallbackHandlers(BaseHandler):
         buttons: list[list[InlineKeyboardButton]] = []
         schedules = self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
 
-        active = [s for s in schedules if s.enabled]
-        inactive_count = len(schedules) - len(active)
+        active = [s for s in self._sorted_schedule_history(schedules) if s.enabled]
 
         for schedule in active:
             buttons.append([
@@ -71,9 +70,10 @@ class SchedulerCallbackHandlers(BaseHandler):
             InlineKeyboardButton(BUTTON_ADD_COMMAND, callback_data="aiwork:sched_cmd"),
         ])
         buttons.append([InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:scheduler")])
-        nav_row = [InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh")]
-        if inactive_count > 0:
-            nav_row.append(InlineKeyboardButton(f"📋 History ({inactive_count})", callback_data="sched:history"))
+        nav_row = [
+            InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh"),
+            InlineKeyboardButton(f"📋 History ({len(schedules)})", callback_data="sched:history"),
+        ]
         buttons.append(nav_row)
         return buttons
 
@@ -150,6 +150,8 @@ class SchedulerCallbackHandlers(BaseHandler):
 
         if action == "refresh":
             return await self._sched_refresh(query, user_id)
+        if action == "status":
+            return await self._sched_status(query, user_id)
         if action == "history":
             return await self._sched_history(query, user_id)
         if action.startswith("detail:"):
@@ -207,31 +209,23 @@ class SchedulerCallbackHandlers(BaseHandler):
         await query.answer("Refreshed")
 
     async def _sched_history(self, query, user_id: str) -> None:
-        """Show inactive (disabled / completed once) schedules."""
-        schedules = self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
-        inactive = [s for s in schedules if not s.enabled]
-        inactive.sort(key=lambda s: s.updated_at or "", reverse=True)
-
-        if not inactive:
-            await query.answer("No history")
-            return
-
-        buttons = []
-        for schedule in inactive[:20]:
-            buttons.append([
-                InlineKeyboardButton(
-                    f"⏸ {schedule.type_emoji} {schedule.name[:18]}",
-                    callback_data=f"sched:detail:{schedule.id}",
-                )
-            ])
-        buttons.append([InlineKeyboardButton(BUTTON_SCHEDULE_LIST, callback_data="sched:refresh")])
+        """Show the unified schedule history and health view."""
+        schedules = self._sorted_schedule_history(
+            self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
+        )
+        visible = schedules[:12]
+        buttons = self._build_scheduler_history_keyboard(visible)
 
         await query.edit_message_text(
-            "<b>Schedule History</b>\n\nInactive / completed schedules:",
+            self._build_scheduler_history_text(schedules, visible),
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML",
         )
-        await query.answer()
+        await query.answer("History")
+
+    async def _sched_status(self, query, user_id: str) -> None:
+        """Compatibility route for old status buttons."""
+        await self._sched_history(query, user_id)
 
     async def _sched_detail(self, query, user_id: str, schedule_id: str) -> None:
         """Show detail screen for a single schedule."""
@@ -862,6 +856,188 @@ class SchedulerCallbackHandlers(BaseHandler):
 
         lines.append(f"Runs: {getattr(schedule, 'run_count', 0)}")
         return "\n".join(lines)
+
+    def _build_scheduler_status_text(self, user_id: str) -> str:
+        """Build the unified schedule history text for compatibility."""
+        schedules = self._sorted_schedule_history(
+            self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
+        )
+        return self._build_scheduler_history_text(schedules, schedules[:12])
+
+    def _build_scheduler_history_text(self, schedules: list, visible: list) -> str:
+        """Build a read-only history view with schedule health details."""
+        active_count = sum(1 for schedule in schedules if getattr(schedule, "enabled", False))
+        attention_count = sum(1 for schedule in schedules if self._schedule_needs_attention(schedule))
+
+        lines = [
+            "<b>Schedule History</b>",
+            "",
+            f"total {len(schedules)} | active {active_count} | attention {attention_count}",
+        ]
+
+        if not schedules:
+            lines.append("\nNo schedules registered.")
+            return "\n".join(lines)
+
+        for index, schedule in enumerate(visible, start=1):
+            lines.extend(["", self._format_schedule_status_block(schedule, index=index)])
+
+        hidden_count = len(schedules) - len(visible)
+        if hidden_count > 0:
+            lines.append("")
+            lines.append(f"... and {hidden_count} more. Use detail screens for the rest.")
+
+        return "\n".join(lines)
+
+    def _build_scheduler_history_keyboard(self, schedules: list) -> list[list[InlineKeyboardButton]]:
+        """Build numbered detail buttons matching the history text order."""
+        buttons = []
+        for index, schedule in enumerate(schedules, start=1):
+            buttons.append([
+                InlineKeyboardButton(
+                    self._format_schedule_history_button(schedule, index=index),
+                    callback_data=f"sched:detail:{self._string_attr(schedule, 'id')}",
+                )
+            ])
+        buttons.append([
+            InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:history"),
+            InlineKeyboardButton(BUTTON_SCHEDULE_LIST, callback_data="sched:refresh"),
+        ])
+        return buttons
+
+    def _format_schedule_history_button(self, schedule, *, index: int) -> str:
+        """Return a compact numbered schedule button label."""
+        enabled = bool(getattr(schedule, "enabled", False))
+        marker = "✅" if enabled else "○"
+        type_emoji = self._string_attr(schedule, "type_emoji", fallback=self._schedule_type_emoji(schedule))
+        name = self._string_attr(schedule, "name", fallback="Schedule")[:18]
+        return f"{index}. {marker} {type_emoji} {name}"
+
+    def _sorted_schedule_history(self, schedules: list) -> list:
+        """Sort schedules for the unified history/status view."""
+        return sorted(
+            schedules,
+            key=lambda schedule: (
+                not bool(getattr(schedule, "enabled", False)),
+                -self._schedule_last_run_timestamp(schedule),
+                self._string_attr(schedule, "name").lower(),
+            ),
+        )
+
+    @staticmethod
+    def _schedule_type_emoji(schedule) -> str:
+        """Fallback schedule type marker for button labels."""
+        schedule_type = resolve_schedule_type(schedule)
+        return {
+            "chat": "💬",
+            "claude": "💬",
+            "workspace": "📂",
+            "plugin": "🔌",
+            "command": "💻",
+        }.get(schedule_type, "💬")
+
+    def _format_schedule_status_block(self, schedule, *, index: int | None = None) -> str:
+        """Render one compact schedule status block."""
+        schedule_id = self._string_attr(schedule, "id")
+        schedule_type = resolve_schedule_type(schedule)
+        provider = resolve_provider(schedule)
+        enabled = bool(getattr(schedule, "enabled", False))
+        last_error = self._string_attr(schedule, "last_error")
+        recent_logs = self._recent_schedule_logs(schedule_id, limit=3)
+        latest = recent_logs[0] if recent_logs else {}
+        latest_error = latest.get("delivery_error") or latest.get("error") or ""
+        status_label = self._schedule_status_label(enabled, last_error or latest_error)
+        issue = self._classify_schedule_issue(last_error or latest_error)
+        prefix = f"{index}. " if index is not None else ""
+
+        lines = [
+            f"{prefix}{status_label} <b>{escape_html(self._string_attr(schedule, 'name', fallback='Schedule'))}</b> "
+            f"<code>{escape_html(schedule_id)}</code>",
+            f"type {escape_html(schedule_type)} | ai {escape_html(provider)} | trigger {escape_html(self._resolve_schedule_summary(schedule))}",
+            f"next {escape_html(self._string_attr(schedule, 'next_run_text', fallback='No upcoming run'))}",
+            f"runs {getattr(schedule, 'run_count', 0)} | last {escape_html(self._format_schedule_last_run(schedule))}",
+        ]
+
+        if issue:
+            lines.append(f"issue {escape_html(issue)}")
+
+        if latest:
+            log_status = latest.get("delivery_status") or "not_ready"
+            attempts = latest.get("delivery_attempts")
+            attempts_text = f", attempts {attempts}" if attempts is not None else ""
+            lines.append(f"latest log #{latest.get('id')} {escape_html(str(log_status))}{attempts_text}")
+
+        return "\n".join(lines)
+
+    def _recent_schedule_logs(self, schedule_id: str, *, limit: int) -> list[dict]:
+        """Return recent schedule message logs when a repository is available."""
+        repo = self._repository
+        if not repo or not hasattr(repo, "list_recent_schedule_message_logs"):
+            return []
+        try:
+            rows = repo.list_recent_schedule_message_logs(schedule_id, limit=limit)
+        except Exception as exc:
+            logger.warning(f"Schedule status log lookup failed: schedule_id={schedule_id}, error={exc}")
+            return []
+        return rows if isinstance(rows, list) else []
+
+    @staticmethod
+    def _schedule_status_label(enabled: bool, error_text: str) -> str:
+        """Return a compact status marker."""
+        if enabled and error_text:
+            return "⚠️ ON"
+        if enabled:
+            return "✅ ON"
+        if error_text:
+            return "△ OFF"
+        return "○ OFF"
+
+    def _schedule_needs_attention(self, schedule) -> bool:
+        """Return whether a schedule has a visible issue."""
+        if self._string_attr(schedule, "last_error"):
+            return True
+        recent_logs = self._recent_schedule_logs(self._string_attr(schedule, "id"), limit=1)
+        if not recent_logs:
+            return False
+        latest = recent_logs[0]
+        status = (latest.get("delivery_status") or "").lower()
+        return bool(latest.get("error") or latest.get("delivery_error") or status in {"failed", "abandoned"})
+
+    @staticmethod
+    def _classify_schedule_issue(error_text: str) -> str:
+        """Convert raw runtime errors into operator-facing categories."""
+        normalized = (error_text or "").strip()
+        if not normalized:
+            return ""
+        lower = normalized.lower()
+        if "chat not found" in lower:
+            return "target chat is unavailable"
+        if "timedout" in lower or "timed out" in lower:
+            return "telegram delivery timeout"
+        if "401" in lower or "invalid authentication" in lower:
+            return "provider authentication failed"
+        if "cli_error" in lower:
+            return "provider command failed"
+        if "worker_lost" in lower or "worker stopped" in lower:
+            return "worker stopped before delivery"
+        return normalized[:120]
+
+    def _format_schedule_last_run(self, schedule) -> str:
+        """Format the latest schedule run timestamp."""
+        last_run = self._string_attr(schedule, "last_run")
+        if not last_run:
+            return "never"
+        return format_local_datetime(last_run)
+
+    def _schedule_last_run_timestamp(self, schedule) -> float:
+        """Return latest run timestamp for schedule status sorting."""
+        last_run = self._string_attr(schedule, "last_run")
+        if not last_run:
+            return float("-inf")
+        try:
+            return parse_local_datetime(last_run).timestamp()
+        except (TypeError, ValueError):
+            return float("-inf")
 
     def _build_schedule_registered_text(
         self,

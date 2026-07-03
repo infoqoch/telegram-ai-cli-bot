@@ -433,6 +433,40 @@ class TestScheduleOperations:
         enabled = repo.list_enabled_schedules()
         assert len(enabled) == 1
 
+    def test_list_recent_schedule_message_logs(self, repo):
+        """스케줄별 최근 message_log를 최신순으로 조회."""
+        schedule = repo.add_schedule("user1", 12345, 9, 0, "Msg1", "S1")
+        other = repo.add_schedule("user1", 12345, 10, 0, "Msg2", "S2")
+
+        first_id = repo.insert_schedule_delivery_log(
+            chat_id=12345,
+            schedule_id=schedule.id,
+            request="run 1",
+            response="ok 1",
+            delivery_text="ok 1",
+        )
+        second_id = repo.insert_schedule_delivery_log(
+            chat_id=12345,
+            schedule_id=schedule.id,
+            request="run 2",
+            response="ok 2",
+            delivery_text="ok 2",
+            error="CLI_ERROR",
+        )
+        repo.insert_schedule_delivery_log(
+            chat_id=12345,
+            schedule_id=other.id,
+            request="other",
+            response="other",
+            delivery_text="other",
+        )
+
+        rows = repo.list_recent_schedule_message_logs(schedule.id, limit=2)
+
+        assert [row["id"] for row in rows] == [second_id, first_id]
+        assert rows[0]["schedule_id"] == schedule.id
+        assert rows[0]["error"] == "CLI_ERROR"
+
 
 class TestWorkspaceOperations:
     """워크스페이스 관련 테스트."""

@@ -1688,6 +1688,19 @@ class Repository:
         ).fetchone()
         return dict(row) if row else None
 
+    def list_recent_schedule_message_logs(self, schedule_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Return recent message_log rows for one schedule."""
+        rows = self._conn.execute(
+            """SELECT id, schedule_id, request_at, processed, processed_at, error,
+                      delivery_status, delivery_attempts, delivery_error, delivered_at
+               FROM message_log
+               WHERE schedule_id = ?
+               ORDER BY id DESC
+               LIMIT ?""",
+            (schedule_id, max(1, limit)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_next_pending_message(self, chat_id: int) -> Optional[dict[str, Any]]:
         """Get next unprocessed message for chat. Returns None if queue empty."""
         cursor = self._conn.execute(
