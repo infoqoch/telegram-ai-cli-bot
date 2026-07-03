@@ -18,7 +18,7 @@ A read-only monitoring feature for checking the real-time status of in-progress 
 | processed_at | Processing completion time |
 | response | AI response content |
 | error | Error message |
-| delivery_status | Delivery state (not_ready / pending / delivered / failed) |
+| delivery_status | Delivery state (not_ready / pending / sent / failed / retrying / abandoned) |
 | delivery_attempts | Number of delivery attempts |
 
 ### queued_messages (concurrent request queue)

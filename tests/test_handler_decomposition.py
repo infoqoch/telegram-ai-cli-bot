@@ -133,6 +133,7 @@ class TestDispatchToAi:
         h.sessions.get_session_model.return_value = "sonnet"
         h.sessions.get_session_ai_provider.return_value = "claude"
         h.sessions.get_workspace_path.return_value = None
+        h.sessions.get_ai_work_session_context.return_value = None
         h._is_session_locked = MagicMock(return_value=False)
         h._start_detached_job = MagicMock(return_value=(1, None))
         return h
@@ -207,6 +208,77 @@ class TestDispatchToAi:
         )
 
     @pytest.mark.asyncio
+    async def test_dispatch_adds_command_schedule_hook_for_aiwork_followup(self, handlers):
+        """AI Work 세션의 후속 메시지는 DB 메타데이터의 렌더 훅을 유지한다."""
+        handlers.sessions.get_session_ai_provider.return_value = "agy"
+        handlers.sessions.get_session_model.return_value = "agy-pro-high"
+        hook = {
+            "plugin_name": "command_schedule",
+            "action": "render_draft",
+            "payload": {},
+            "ai_work_context": {"label": "Command Schedule", "provider": "agy"},
+        }
+        handlers.sessions.get_ai_work_session_context.return_value = {
+            "session_id": "session-abc",
+            "domain": "sched_cmd",
+            "label": "Command Schedule",
+            "provider": "agy",
+            "completion_hook": hook,
+        }
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+
+        await handlers._dispatch_to_ai(update, 12345, "12345", "1,2,3,4 중 랜덤 메시지")
+
+        handlers._start_detached_job.assert_called_once_with(
+            chat_id=12345,
+            session_id="session-abc",
+            message="1,2,3,4 중 랜덤 메시지",
+            model="agy-pro-high",
+            workspace_path=None,
+            post_completion_hook=hook,
+        )
+
+    @pytest.mark.asyncio
+    async def test_dispatch_does_not_override_explicit_completion_hook(self, handlers):
+        """명시된 completion hook은 AI Work 세션 자동 hook으로 덮지 않는다."""
+        handlers.sessions.get_ai_work_session_context.return_value = {
+            "session_id": "session-abc",
+            "domain": "sched_cmd",
+            "label": "Command Schedule",
+            "provider": "agy",
+            "completion_hook": {
+                "plugin_name": "command_schedule",
+                "action": "render_draft",
+                "payload": {},
+            },
+        }
+        explicit_hook = {"plugin_name": "question_bank", "action": "render", "payload": {}}
+
+        update = MagicMock()
+        update.effective_chat.id = 12345
+        update.message.reply_text = AsyncMock()
+
+        await handlers._dispatch_to_ai(
+            update,
+            12345,
+            "12345",
+            "hello",
+            post_completion_hook=explicit_hook,
+        )
+
+        handlers._start_detached_job.assert_called_once_with(
+            chat_id=12345,
+            session_id="session-abc",
+            message="hello",
+            model="sonnet",
+            workspace_path=None,
+            post_completion_hook=explicit_hook,
+        )
+
+    @pytest.mark.asyncio
     async def test_aiwork_dispatch_failure_shows_provider_picker(self, handlers):
         """AI work 시작 실패는 자동 fallback 대신 명시적 실패와 /new picker를 보여준다."""
         handlers._start_detached_job = MagicMock(side_effect=Exception("spawn failed"))
@@ -226,6 +298,43 @@ class TestDispatchToAi:
 
         handlers._reply_aiwork_unavailable.assert_called_once()
         assert "spawn failed" in handlers._reply_aiwork_unavailable.call_args.kwargs["reason"]
+
+    @pytest.mark.asyncio
+    async def test_sched_cmd_aiwork_passes_failure_context_with_completion_hook(self, handlers):
+        """Command schedule AI work stores context for runtime provider failures."""
+        handlers.sessions.get_selected_ai_provider.return_value = "claude"
+        handlers.sessions.create_session.return_value = "aiwork-session"
+        handlers._is_provider_registered = MagicMock(return_value=True)
+        handlers._get_static_context = AsyncMock(return_value="context")
+        handlers._dispatch_to_ai = AsyncMock()
+
+        update = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        await handlers._handle_aiwork_force_reply(
+            update,
+            12345,
+            "make command schedule",
+            "sched_cmd",
+        )
+
+        handlers._dispatch_to_ai.assert_called_once()
+        kwargs = handlers._dispatch_to_ai.call_args.kwargs
+        hook = kwargs["post_completion_hook"]
+        assert hook["plugin_name"] == "command_schedule"
+        assert hook["action"] == "render_draft"
+        assert hook["ai_work_context"] == {
+            "label": "Command Schedule",
+            "provider": "claude",
+        }
+        assert kwargs["ai_work_context"] == hook["ai_work_context"]
+        handlers.sessions.set_ai_work_session_context.assert_called_once_with(
+            "aiwork-session",
+            domain="sched_cmd",
+            label="Command Schedule",
+            provider="claude",
+            completion_hook=hook,
+        )
 
     @pytest.mark.asyncio
     async def test_dispatch_blocked_during_session_creation(self, handlers):
@@ -315,8 +424,12 @@ class TestDiagnosticsStatus:
         assert "🧪 Codex 점검" in button_texts
         assert "🧪 Gemini 점검" in button_texts
         assert "🧪 Agy 점검" in button_texts
-        assert "📚 🧠 Opus" in button_texts
-        assert "🤖 🧠 XHigh" in button_texts
+        callbacks = [button.callback_data for row in keyboard for button in row]
+        assert "📚 Claude" in button_texts
+        assert "🤖 Codex" in button_texts
+        assert "ai:select:claude" in callbacks
+        assert "ai:select:codex" in callbacks
+        assert all(not callback.startswith("sess:new:") for callback in callbacks)
 
     @pytest.mark.asyncio
     async def test_diag_command_rejects_non_admin_chat_when_admin_is_configured(self):

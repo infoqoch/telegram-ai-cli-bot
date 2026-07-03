@@ -1,4 +1,6 @@
 """Callback query handlers - router and small utility callbacks."""
+import asyncio
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -18,6 +20,29 @@ from .base import BaseHandler
 
 class CallbackHandlers(BaseHandler):
     """Callback query handlers - router and small utility callbacks."""
+
+    CALLBACK_ACK_TIMEOUT_SECONDS = 2.0
+
+    async def _answer_callback_safely(self, query, callback_data: str) -> None:
+        """Acknowledge a callback without letting Telegram ACK failures block state changes."""
+        try:
+            await asyncio.wait_for(query.answer(), timeout=self.CALLBACK_ACK_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning(f"Callback answer timed out; continuing: callback={callback_data}")
+        except Exception as exc:
+            logger.warning(f"Callback answer failed; continuing: callback={callback_data}, error={exc}")
+
+    def _preselect_ai_provider_from_callback(self, user_id: str, callback_data: str) -> None:
+        """Persist provider choice before callback ACK/edit operations can block."""
+        parts = callback_data.split(":")
+        if len(parts) < 3 or parts[0] != "ai" or parts[1] != "select":
+            return
+        provider = parts[2]
+        try:
+            self._set_selected_ai_provider(user_id, provider)
+            logger.info(f"AI provider preselected: user_id={user_id}, provider={provider}")
+        except ValueError:
+            logger.warning(f"Invalid AI provider selection ignored: user_id={user_id}, provider={provider}")
 
     @staticmethod
     def _resolve_plugin_launcher_back_callback(origin: str) -> str:
@@ -54,7 +79,8 @@ class CallbackHandlers(BaseHandler):
                 await query.answer("🔒 Authentication required.\n/auth <key>", show_alert=True)
                 return
 
-            await query.answer()
+            self._preselect_ai_provider_from_callback(str(chat_id), callback_data)
+            await self._answer_callback_safely(query, callback_data)
 
             if callback_data.startswith("menu:"):
                 await self._handle_menu_callback(query, chat_id, callback_data)

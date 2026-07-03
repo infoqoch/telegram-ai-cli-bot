@@ -385,7 +385,7 @@ class AdminHandlers(BaseHandler):
 
         keyboard = self._build_provider_smoke_keyboard()
         if not aiwork.ready:
-            keyboard.extend(self._build_new_session_picker_keyboard())
+            keyboard.extend(self._build_ai_selector_keyboard(raw_provider))
 
         return "\n".join(lines), keyboard
 

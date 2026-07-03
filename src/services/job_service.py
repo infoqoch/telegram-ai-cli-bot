@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.ai import AIRegistry, get_profile_label, get_provider_label
+from src.ai import AIRegistry, get_profile_label, get_provider_button, get_provider_icon, get_provider_label
 from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
 from src.bot.formatters import split_message, truncate_message
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
@@ -403,6 +403,66 @@ class JobService:
                 return text, delivery_buttons
         return None, None
 
+    def _load_completion_hook(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Decode optional completion metadata for one detached job."""
+        hook_json = job.get("completion_hook_json")
+        if not hook_json:
+            return {}
+        try:
+            hook = json.loads(hook_json)
+        except Exception as exc:
+            logger.warning(f"Detached completion metadata decode failed: {self._format_exception(exc)}")
+            return {}
+        return hook if isinstance(hook, dict) else {}
+
+    def _build_aiwork_failure_delivery(
+        self,
+        *,
+        job: dict[str, Any],
+        provider: str,
+        ai_response: str,
+        ai_error: Optional[str],
+    ) -> tuple[Optional[str], Optional[list[list[dict[str, str]]]]]:
+        """Render explicit AI work failure UI with manual provider/model choices."""
+        if not ai_error:
+            return None, None
+
+        hook = self._load_completion_hook(job)
+        context = hook.get("ai_work_context")
+        if not isinstance(context, dict):
+            return None, None
+
+        label = context.get("label") if isinstance(context.get("label"), str) else "AI Work"
+        failed_provider = context.get("provider") if isinstance(context.get("provider"), str) else provider
+        reason = ai_response or ai_error
+        text = (
+            f"<b>{self._escape_html(label)} - AI Work</b>\n\n"
+            "Status: <b>동작 안함</b>\n"
+            f"Default AI: <b>{self._format_provider_display(failed_provider)}</b>\n"
+            f"Reason: <code>{self._escape_html(reason)}</code>\n\n"
+            "아래에서 기본 AI를 바꾼 뒤 AI work 요청을 다시 시도하세요."
+        )
+        return text, self._build_aiwork_provider_selector_buttons(failed_provider)
+
+    @staticmethod
+    def _format_provider_display(provider: str) -> str:
+        """Return provider label with icon for worker-rendered messages."""
+        return f"{get_provider_icon(provider)} {get_provider_label(provider)}"
+
+    @classmethod
+    def _build_aiwork_provider_selector_buttons(cls, current_provider: str) -> list[list[dict[str, str]]]:
+        """Build retry-safe default-AI selector buttons."""
+        row: list[dict[str, str]] = []
+        for provider in ("claude", "codex", "gemini", "agy"):
+            label = get_provider_button(provider)
+            if provider == current_provider:
+                label = f"• {label}"
+            row.append({
+                "text": label,
+                "callback_data": f"ai:select:{provider}",
+            })
+        return [row]
+
     async def _send_completion_notice(
         self,
         *,
@@ -489,13 +549,20 @@ class JobService:
             )
             delivery_markup_json = job.get("delivery_markup_json")
 
-            custom_delivery_text, custom_delivery_buttons = await self._apply_completion_hook(
-                job,
-                session_id=session_id,
-                chat_id=chat_id,
+            custom_delivery_text, custom_delivery_buttons = self._build_aiwork_failure_delivery(
+                job=job,
+                provider=provider,
                 ai_response=response,
                 ai_error=stored_error,
             )
+            if custom_delivery_text is None:
+                custom_delivery_text, custom_delivery_buttons = await self._apply_completion_hook(
+                    job,
+                    session_id=session_id,
+                    chat_id=chat_id,
+                    ai_response=response,
+                    ai_error=stored_error,
+                )
             if custom_delivery_text is not None:
                 delivery_body = custom_delivery_text
                 if custom_delivery_buttons is not None:

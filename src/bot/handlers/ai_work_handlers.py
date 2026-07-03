@@ -87,6 +87,15 @@ class AiWorkHandlers(BaseHandler):
 
         model = get_default_model(provider)
         session_name = f"✨ {label} AI"
+        ai_work_meta = {"label": label, "provider": provider}
+        post_completion_hook = {"ai_work_context": ai_work_meta}
+        if primary_domain == "sched_cmd":
+            post_completion_hook = {
+                "plugin_name": "command_schedule",
+                "action": "render_draft",
+                "payload": {},
+                "ai_work_context": ai_work_meta,
+            }
 
         session_id = self.sessions.create_session(
             user_id=user_id,
@@ -94,6 +103,13 @@ class AiWorkHandlers(BaseHandler):
             model=model,
             name=session_name,
             first_message=f"(AI Work: {domain})",
+        )
+        self.sessions.set_ai_work_session_context(
+            session_id,
+            domain=primary_domain,
+            label=label,
+            provider=provider,
+            completion_hook=post_completion_hook,
         )
 
         await update.message.reply_text(
@@ -112,21 +128,13 @@ class AiWorkHandlers(BaseHandler):
             f"{message}"
         )
 
-        post_completion_hook = None
-        if primary_domain == "sched_cmd":
-            post_completion_hook = {
-                "plugin_name": "command_schedule",
-                "action": "render_draft",
-                "payload": {},
-            }
-
         await self._dispatch_to_ai(
             update,
             chat_id,
             user_id,
             augmented_message,
             post_completion_hook=post_completion_hook,
-            ai_work_context={"label": label, "provider": provider},
+            ai_work_context=ai_work_meta,
         )
 
     async def _get_static_context(self, domain: str) -> str:
@@ -145,15 +153,15 @@ class AiWorkHandlers(BaseHandler):
         return context_text.strip()
 
     async def _reply_aiwork_unavailable(self, update, *, user_id: str, label: str, reason: str) -> None:
-        """Show an explicit AI work failure with the normal new-session picker."""
+        """Show an explicit AI work failure with a default-AI selector."""
         provider = self._get_raw_selected_ai_provider(user_id)
-        keyboard = self._build_new_session_picker_keyboard()
+        keyboard = self._build_ai_selector_keyboard(provider)
         await update.message.reply_text(
             f"<b>{escape_html(label)} - AI Work</b>\n\n"
             "Status: <b>동작 안함</b>\n"
             f"Default AI: <b>{self._format_provider_display(provider)}</b>\n"
             f"Reason: <code>{escape_html(reason)}</code>\n\n"
-            "Choose another AI/model below, then try the AI work request again.",
+            "아래에서 기본 AI를 바꾼 뒤 AI work 요청을 다시 시도하세요.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )

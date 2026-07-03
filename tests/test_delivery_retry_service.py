@@ -62,6 +62,35 @@ async def test_retry_failed_deliveries_restores_inline_buttons(repo):
 
 
 @pytest.mark.asyncio
+async def test_retry_failed_deliveries_handles_schedule_delivery_log(repo):
+    log_id = repo.insert_schedule_delivery_log(
+        chat_id=12345,
+        schedule_id="schedule-1",
+        request="scheduled prompt",
+        response="scheduled response",
+        delivery_text="⏰ <b>Schedule</b>\n\nscheduled response",
+        model="command",
+    )
+    repo.mark_message_delivery_failed(log_id, "telegram timeout")
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    service = DeliveryRetryService(repo)
+
+    result = await service.retry_failed_deliveries(bot)
+
+    assert result == 1
+    row = repo.get_message_log(log_id)
+    assert row["schedule_id"] == "schedule-1"
+    assert row["processed"] == 2
+    assert row["delivery_status"] == "sent"
+    assert row["delivery_attempts"] == 1
+    send_call = bot.send_message.await_args_list[-1]
+    assert send_call.kwargs["chat_id"] == 12345
+    assert "scheduled response" in send_call.kwargs["text"]
+
+
+@pytest.mark.asyncio
 async def test_retry_failed_deliveries_does_not_plain_fallback_on_network_error(repo):
     repo._conn.execute(
         """INSERT INTO message_log

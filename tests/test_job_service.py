@@ -181,6 +181,75 @@ async def test_run_job_uses_plugin_completion_hook_for_final_delivery(repo, sess
 
 
 @pytest.mark.asyncio
+async def test_run_job_aiwork_provider_error_shows_default_ai_selector(repo, session_service):
+    """AI work provider failures render explicit failure UI with default-AI buttons."""
+    session_service.create_session(
+        "12345",
+        "sess1",
+        model="opus",
+        name="Command Schedule AI",
+        ai_provider="claude",
+    )
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="[Context - Command Schedule]\nmake a schedule",
+        model="opus",
+    )
+    repo.set_message_completion_hook(
+        job_id,
+        {
+            "ai_work_context": {
+                "label": "Command Schedule",
+                "provider": "claude",
+            },
+        },
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(
+        return_value=ChatResponse(
+            text="Failed to authenticate. API Error: 401 Invalid authentication credentials",
+            error=ChatError.CLI_ERROR,
+            session_id="provider-session",
+        )
+    )
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    saved = repo.get_message_log(job_id)
+    assert saved["error"] == "CLI_ERROR"
+    assert "Command Schedule - AI Work" in saved["delivery_text"]
+    assert "동작 안함" in saved["delivery_text"]
+    assert "📚 Claude" in saved["delivery_text"]
+    assert "401 Invalid authentication credentials" in saved["delivery_text"]
+
+    sent_call = fake_bot.send_message.await_args_list[-1]
+    markup = sent_call.kwargs["reply_markup"]
+    callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert "ai:select:codex" in callbacks
+    assert "ai:select:agy" in callbacks
+    assert "sess:new:xhigh" not in callbacks
+    assert "🤖 Codex" in labels
+    assert "🌌 Antigravity" in labels
+    assert "💬 Session" in labels
+
+
+@pytest.mark.asyncio
 async def test_run_job_drains_persistent_queue(repo, session_service):
     """Detached worker keeps processing queued messages in the same session."""
     session_service.create_session("12345", "sess1", model="sonnet", name="테스트")

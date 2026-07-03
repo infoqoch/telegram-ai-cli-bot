@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, TimedOut
 
 from src.ai import get_default_model
@@ -42,7 +43,7 @@ class TestScheduleExecutionService:
     @pytest.fixture
     def mock_repo(self):
         repo = MagicMock()
-        repo.insert_schedule_message_log.return_value = 42
+        repo.insert_schedule_delivery_log.return_value = 42
         return repo
 
     @pytest.fixture
@@ -126,8 +127,8 @@ class TestScheduleExecutionService:
             model=expected_model,
             workspace_path=None,
         )
-        mock_repo.insert_schedule_message_log.assert_called_once()
-        assert mock_repo.insert_schedule_message_log.call_args.kwargs["model"] == expected_model
+        mock_repo.insert_schedule_delivery_log.assert_called_once()
+        assert mock_repo.insert_schedule_delivery_log.call_args.kwargs["model"] == expected_model
 
     @pytest.mark.asyncio
     async def test_execute_plugin_schedule_uses_plugin_action(
@@ -177,7 +178,7 @@ class TestScheduleExecutionService:
 
     @pytest.mark.asyncio
     async def test_execute_does_not_plain_fallback_on_network_error(
-        self, service, mock_bot, mock_schedule_manager
+        self, service, mock_bot, mock_schedule_manager, mock_repo
     ):
         mock_bot.send_message = AsyncMock(side_effect=TimedOut("Timed out"))
         schedule = MagicMock()
@@ -195,6 +196,7 @@ class TestScheduleExecutionService:
         assert mock_bot.send_message.await_count == 1
         mock_schedule_manager.update_run.assert_called_once()
         assert "telegram:" in mock_schedule_manager.update_run.call_args.kwargs["last_error"]
+        mock_repo.mark_message_delivery_failed.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_records_error_when_plugin_missing(
@@ -216,11 +218,10 @@ class TestScheduleExecutionService:
         mock_bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    async def test_execute_inserts_message_log_for_ai_schedule(
+    async def test_execute_inserts_delivery_log_for_ai_schedule(
         self, service, mock_repo, mock_bot, mock_schedule_manager
     ):
-        """AI 스케줄 실행 시 message_log에 INSERT하고 Session 버튼을 포함한다."""
+        """AI 스케줄 실행 시 message_log에 pending delivery를 저장하고 Session 버튼을 포함한다."""
         schedule = MagicMock()
         schedule.id = "schedule-1"
         schedule.type = "chat"
@@ -233,15 +234,20 @@ class TestScheduleExecutionService:
 
         await service.execute(schedule)
 
-        mock_repo.insert_schedule_message_log.assert_called_once_with(
-            chat_id=12345,
-            schedule_id="schedule-1",
-            request="안녕",
-            response="응답 텍스트",
-            model="sonnet",
-            workspace_path=None,
-            provider_session_id="provider-sess-uuid",
-        )
+        mock_repo.insert_schedule_delivery_log.assert_called_once()
+        kwargs = mock_repo.insert_schedule_delivery_log.call_args.kwargs
+        assert kwargs["chat_id"] == 12345
+        assert kwargs["schedule_id"] == "schedule-1"
+        assert kwargs["request"] == "안녕"
+        assert kwargs["response"] == "응답 텍스트"
+        assert kwargs["model"] == "sonnet"
+        assert kwargs["workspace_path"] is None
+        assert kwargs["provider_session_id"] == "provider-sess-uuid"
+        assert "⏰ <b>테스트</b>" in kwargs["delivery_text"]
+        assert "응답 텍스트" in kwargs["delivery_text"]
+        mock_repo.set_message_delivery_markup.assert_called_once()
+        mock_repo.mark_message_delivered.assert_called_once_with(42)
+        mock_repo.increment_delivery_attempts.assert_called_once_with(42)
         # Session button should be in the response
         send_call = mock_bot.send_message.call_args
         markup = send_call.kwargs.get("reply_markup")
@@ -250,10 +256,10 @@ class TestScheduleExecutionService:
         assert "resp:sched:42" in callbacks
 
     @pytest.mark.asyncio
-    async def test_execute_plugin_schedule_no_message_log(
+    async def test_execute_plugin_schedule_persists_delivery_log(
         self, service, mock_repo, mock_schedule_manager
     ):
-        """플러그인 스케줄은 message_log에 INSERT하지 않는다."""
+        """플러그인 스케줄도 전송 재시도를 위해 message_log에 저장한다."""
         schedule = MagicMock()
         schedule.id = "schedule-1"
         schedule.type = "plugin"
@@ -261,10 +267,130 @@ class TestScheduleExecutionService:
         schedule.action_name = "daily_wrap"
         schedule.chat_id = 12345
         schedule.name = "플러그인"
+        schedule.message = ""
 
         await service.execute(schedule)
 
-        mock_repo.insert_schedule_message_log.assert_not_called()
+        mock_repo.insert_schedule_delivery_log.assert_called_once()
+        kwargs = mock_repo.insert_schedule_delivery_log.call_args.kwargs
+        assert kwargs["chat_id"] == 12345
+        assert kwargs["schedule_id"] == "schedule-1"
+        assert kwargs["request"] == ""
+        assert kwargs["response"] == "플러그인 응답"
+        assert kwargs["model"] == "plugin"
+        mock_schedule_manager.update_run.assert_called_once_with("schedule-1")
+
+    @pytest.mark.asyncio
+    async def test_execute_plugin_rich_schedule_persists_retry_markup(
+        self, service, mock_plugins, mock_repo, mock_bot
+    ):
+        """플러그인 rich response 버튼도 retry 가능한 JSON으로 저장한다."""
+        mock_plugins.get_plugin_by_name.return_value = MagicMock(
+            execute_scheduled_action=AsyncMock(
+                return_value={
+                    "text": "<b>리치 응답</b>",
+                    "reply_markup": InlineKeyboardMarkup([[
+                        InlineKeyboardButton("열기", callback_data="plugin:open"),
+                    ]]),
+                }
+            )
+        )
+        schedule = MagicMock()
+        schedule.id = "schedule-rich"
+        schedule.type = "plugin"
+        schedule.plugin_name = "todo"
+        schedule.action_name = "daily_wrap"
+        schedule.chat_id = 12345
+        schedule.name = "리치"
+        schedule.message = ""
+
+        await service.execute(schedule)
+
+        kwargs = mock_repo.insert_schedule_delivery_log.call_args.kwargs
+        assert kwargs["delivery_markup_json"] == '[[{"text": "열기", "callback_data": "plugin:open"}]]'
+        assert "<b>리치 응답</b>" in kwargs["delivery_text"]
+        send_call = mock_bot.send_message.call_args
+        callbacks = [
+            btn.callback_data
+            for row in send_call.kwargs["reply_markup"].inline_keyboard
+            for btn in row
+        ]
+        assert callbacks == ["plugin:open"]
+
+    @pytest.mark.asyncio
+    async def test_execute_schedule_delivery_failure_preserves_log_for_retry(
+        self, service, mock_bot, mock_repo, mock_schedule_manager
+    ):
+        """Telegram 전송 실패 시 schedule delivery 로그를 failed로 남긴다."""
+        mock_bot.send_message = AsyncMock(side_effect=TimedOut("Timed out"))
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "chat"
+        schedule.ai_provider = "claude"
+        schedule.message = "안녕"
+        schedule.model = "sonnet"
+        schedule.chat_id = 12345
+        schedule.name = "테스트"
+        schedule.workspace_path = None
+
+        await service.execute(schedule)
+
+        mock_repo.insert_schedule_delivery_log.assert_called_once()
+        mock_repo.increment_delivery_attempts.assert_called_once_with(42)
+        mock_repo.mark_message_delivery_failed.assert_called_once()
+        mock_repo.mark_message_delivered.assert_not_called()
+        assert "telegram:" in mock_schedule_manager.update_run.call_args.kwargs["last_error"]
+
+    @pytest.mark.asyncio
+    async def test_execute_command_schedule_runs_script_persists_and_sends_html(
+        self, service, mock_bot, mock_ai_registry, mock_repo, tmp_path
+    ):
+        script = tmp_path / "cmd_test.py"
+        script.write_text("print('<b>OK</b> <code>1234</code>')\n", encoding="utf-8")
+
+        schedule = MagicMock()
+        schedule.id = "schedule-command"
+        schedule.type = "command"
+        schedule.schedule_type = "command"
+        schedule.message = f"python {script.name}"
+        schedule.chat_id = 12345
+        schedule.name = "Command Test"
+        schedule.workspace_path = str(tmp_path)
+
+        await service.execute(schedule)
+
+        mock_ai_registry.get_client.assert_not_called()
+        mock_repo.insert_schedule_delivery_log.assert_called_once()
+        kwargs = mock_repo.insert_schedule_delivery_log.call_args.kwargs
+        assert kwargs["model"] == "command"
+        assert "<b>OK</b> <code>1234</code>" in kwargs["delivery_text"]
+        mock_repo.mark_message_delivered.assert_called_once_with(42)
+        mock_bot.send_message.assert_called_once()
+        send_call = mock_bot.send_message.call_args.kwargs
+        assert send_call["parse_mode"] == "HTML"
+        assert "<b>OK</b> <code>1234</code>" in send_call["text"]
+
+    @pytest.mark.asyncio
+    async def test_execute_command_schedule_with_empty_output_stays_silent(
+        self, service, mock_bot, mock_ai_registry, mock_repo, tmp_path
+    ):
+        script = tmp_path / "cmd_empty.py"
+        script.write_text("pass\n", encoding="utf-8")
+
+        schedule = MagicMock()
+        schedule.id = "schedule-command"
+        schedule.type = "command"
+        schedule.schedule_type = "command"
+        schedule.message = f"python {script.name}"
+        schedule.chat_id = 12345
+        schedule.name = "Command Test"
+        schedule.workspace_path = str(tmp_path)
+
+        await service.execute(schedule)
+
+        mock_ai_registry.get_client.assert_not_called()
+        mock_repo.insert_schedule_delivery_log.assert_not_called()
+        mock_bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_execute_no_repo_still_sends_response(
@@ -294,28 +420,3 @@ class TestScheduleExecutionService:
         mock_bot.send_message.assert_called_once()
         send_call = mock_bot.send_message.call_args
         assert send_call.kwargs.get("reply_markup") is None
-
-    @pytest.mark.asyncio
-    async def test_execute_command_schedule_runs_script_and_sends_html(
-        self, service, mock_bot, mock_ai_registry, mock_repo, tmp_path
-    ):
-        script = tmp_path / "cmd_test.py"
-        script.write_text("print('<b>OK</b> <code>1234</code>')\n", encoding="utf-8")
-
-        schedule = MagicMock()
-        schedule.id = "schedule-command"
-        schedule.type = "command"
-        schedule.schedule_type = "command"
-        schedule.message = f"python {script.name}"
-        schedule.chat_id = 12345
-        schedule.name = "Command Test"
-        schedule.workspace_path = str(tmp_path)
-
-        await service.execute(schedule)
-
-        mock_ai_registry.get_client.assert_not_called()
-        mock_repo.insert_schedule_message_log.assert_not_called()
-        mock_bot.send_message.assert_called_once()
-        send_call = mock_bot.send_message.call_args.kwargs
-        assert send_call["parse_mode"] == "HTML"
-        assert "<b>OK</b> <code>1234</code>" in send_call["text"]

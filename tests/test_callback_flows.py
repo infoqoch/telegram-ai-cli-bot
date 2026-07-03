@@ -636,6 +636,43 @@ class TestSessionCallbackFlows:
         assert "menu:open" in callbacks
 
     @pytest.mark.asyncio
+    async def test_ai_select_persists_even_when_callback_ack_fails(self, handlers):
+        """Telegram callback ACK timeout must not block provider selection."""
+        query = make_query()
+        query.data = "ai:select:agy"
+        query.answer = AsyncMock(side_effect=TimeoutError("ack timeout"))
+        update = MagicMock()
+        update.callback_query = query
+        context = MagicMock()
+        handlers.sessions.get_current_session_id.return_value = None
+
+        await handlers.callback_query_handler(update, context)
+
+        handlers.sessions.select_ai_provider.assert_called_with("12345", "agy")
+        assert query.edit_message_text.called
+
+    @pytest.mark.asyncio
+    async def test_ai_select_persists_even_when_callback_ack_hangs(self, handlers):
+        """Provider selection should persist even if Telegram never ACKs the callback."""
+        query = make_query()
+        query.data = "ai:select:agy"
+
+        async def hanging_answer():
+            await asyncio.sleep(60)
+
+        query.answer = AsyncMock(side_effect=hanging_answer)
+        update = MagicMock()
+        update.callback_query = query
+        context = MagicMock()
+        handlers.sessions.get_current_session_id.return_value = None
+
+        with patch.object(handlers, "CALLBACK_ACK_TIMEOUT_SECONDS", 0.001):
+            await handlers.callback_query_handler(update, context)
+
+        handlers.sessions.select_ai_provider.assert_any_call("12345", "agy")
+        assert query.edit_message_text.called
+
+    @pytest.mark.asyncio
     async def test_menu_plugins_renders_dynamic_buttons(self, handlers):
         """`menu:plugins` should render compact text plus dynamic plugin buttons."""
         memo = MagicMock()
@@ -1281,7 +1318,7 @@ class TestAiWorkFailureFlows:
     """AI work failure UX."""
 
     @pytest.mark.asyncio
-    async def test_aiwork_unavailable_uses_new_session_picker(self):
+    async def test_aiwork_unavailable_uses_default_ai_selector(self):
         handlers = make_handlers()
         handlers.sessions.get_selected_ai_provider.return_value = "agy"
 
@@ -1303,5 +1340,9 @@ class TestAiWorkFailureFlows:
 
         assert "동작 안함" in text
         assert "Antigravity is not available" in text
-        assert "📚 🧠 Opus" in buttons
-        assert "🤖 🧠 XHigh" in buttons
+        callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        assert "📚 Claude" in buttons
+        assert "🤖 Codex" in buttons
+        assert "ai:select:claude" in callbacks
+        assert "ai:select:codex" in callbacks
+        assert all(not callback.startswith("sess:new:") for callback in callbacks)
