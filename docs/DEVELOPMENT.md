@@ -201,6 +201,25 @@ When adding a new `create_session(workspace_path=...)` call site, pick the strat
 - `plugin`: schedule that invokes plugin-owned actions rather than a free-form AI prompt.
 - `command`: local shell command schedule. The command is executed directly by the bot process and its stdout/stderr is delivered to Telegram without an AI call.
 
+### Schedule Execution Records
+
+Schedule execution state is split across two tables:
+
+- `schedule_runs`: append-only execution outcomes for every completed schedule run.
+- `message_log`: Telegram delivery/response records only when a run produced a message.
+
+Use `schedule_runs` to answer whether the scheduler actually ran. Use `message_log` to inspect generated content, delivery attempts, retry state, and response-to-session callbacks.
+
+`schedule_runs.status` values:
+
+- `success`: execution completed and, when applicable, delivery was accepted.
+- `no_output`: execution completed intentionally without a Telegram message.
+- `warning`: execution completed but the plugin reported an operator-visible warning.
+- `delivery_failed`: execution produced a message, but Telegram delivery failed.
+- `failed`: execution itself failed before a normal result was produced.
+
+Plugin scheduled actions remain backward-compatible with `str`, `dict`, or `None` returns. A dict may additionally include `run_status`, `summary`, and `error`; this metadata is written to `schedule_runs` without changing Telegram delivery behavior. Calendar scheduled actions use this to record Google Calendar configuration/query issues as `warning` instead of silently appearing as `no_output`.
+
 ### Command Schedule Draft Flow
 
 Command schedules use a draft-first confirmation flow because the final registration must be owned by the bot, not by an AI claim in free-form text.
