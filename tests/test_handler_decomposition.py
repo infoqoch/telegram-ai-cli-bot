@@ -930,6 +930,29 @@ class TestSchedulerCallbackMultiStep:
         assert "latest run #7 no_output | result none" in text
         assert "latest log #43" not in text
 
+    @pytest.mark.asyncio
+    async def test_schedule_history_marks_warning_run_as_attention(self, handlers):
+        """최신 실행 warning은 History에서 attention으로 표시한다."""
+        handlers.sessions._repo.list_recent_schedule_runs.return_value = [
+            {
+                "id": 8,
+                "status": "warning",
+                "result_type": "plugin",
+                "message_log_id": None,
+                "error": "No such file or directory: credential.json",
+                "summary": "Google Calendar query failed",
+            }
+        ]
+        handlers.sessions._repo.list_recent_schedule_message_logs.return_value = []
+
+        q = make_query()
+        await handlers._handle_scheduler_callback(q, 12345, "sched:history")
+
+        text = get_text(q)
+        assert "1. ⚠️ ON" in text
+        assert "issue Google Calendar query failed" in text
+        assert "latest run #8 warning | result plugin" in text
+
     def test_schedule_issue_classification_variants(self, handlers):
         """대표 실패 문자열을 운영자용 issue로 분류한다."""
         classify = handlers._classify_schedule_issue

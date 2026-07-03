@@ -192,7 +192,12 @@ class Plugin(ABC):
         chat_id: int,
         schedule: Optional["Schedule"] = None,
     ) -> str | dict | None:
-        """스케줄된 액션 실행. str(HTML), dict(text, reply_markup), 또는 None(전송 스킵) 반환."""
+        """스케줄된 액션 실행.
+
+        Return str(HTML), dict(text, reply_markup), or None(skip delivery).
+        Dict responses may include run_status/summary/error metadata for
+        schedule_runs without changing delivery behavior.
+        """
         del schedule
         raise NotImplementedError(f"Action '{action_name}' not implemented")
 

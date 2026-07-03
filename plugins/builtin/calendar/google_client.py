@@ -110,6 +110,7 @@ class GoogleCalendarClient:
                     orderBy="startTime",
                 ),
             )
+            self.last_error = ""
             return [self._parse_event(item) for item in result.get("items", [])]
         except NetworkUnavailable:
             raise

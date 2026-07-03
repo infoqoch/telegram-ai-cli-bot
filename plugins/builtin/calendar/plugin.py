@@ -839,7 +839,9 @@ class CalendarPlugin(Plugin):
         tz = get_app_timezone()
         start = datetime(target.year, target.month, target.day, tzinfo=tz)
         end = start + timedelta(days=1)
-        events = self._gcal.list_events(start, end)
+        events, warning = self._list_events_for_scheduled_run(start, end)
+        if warning:
+            return warning
 
         if not events:
             return {
@@ -877,7 +879,9 @@ class CalendarPlugin(Plugin):
     def _build_reminder(self, now: datetime, minutes: int, label: str) -> str | dict:
         """Check for events starting within the given window and send reminders."""
         end = now + timedelta(minutes=minutes)
-        events = self._gcal.list_events(now, end)
+        events, warning = self._list_events_for_scheduled_run(now, end)
+        if warning:
+            return warning
 
         # Filter: only timed events (not all-day), not already reminded
         to_remind = []
@@ -908,4 +912,27 @@ class CalendarPlugin(Plugin):
                 [InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:calendar")],
                 [InlineKeyboardButton("📅 Open Calendar", callback_data="cal:hub")],
             ]),
+        }
+
+    def _list_events_for_scheduled_run(self, start: datetime, end: datetime) -> tuple[list[CalendarEvent], Optional[dict]]:
+        """Return events or schedule-run warning metadata for scheduled actions."""
+        if not self._gcal.available:
+            return [], self._scheduled_warning("Google Calendar is not configured")
+        try:
+            events = self._gcal.list_events(start, end)
+        except NetworkUnavailable as exc:
+            return [], self._scheduled_warning("Google Calendar network unavailable", str(exc))
+
+        if self._gcal.last_error:
+            return [], self._scheduled_warning("Google Calendar query failed", self._gcal.last_error)
+        return events, None
+
+    @staticmethod
+    def _scheduled_warning(summary: str, error: Optional[str] = None) -> dict:
+        """Build metadata-only scheduled action warning."""
+        return {
+            "text": None,
+            "run_status": "warning",
+            "summary": summary,
+            "error": error or summary,
         }

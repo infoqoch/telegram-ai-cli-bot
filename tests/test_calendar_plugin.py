@@ -456,6 +456,33 @@ class TestCalendarScheduledActions:
         assert "No events" in result["text"]
 
     @pytest.mark.asyncio
+    async def test_morning_briefing_calendar_not_configured_returns_warning(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.available = False
+
+        result = await plugin.execute_scheduled_action("morning_briefing", 1)
+
+        assert isinstance(result, dict)
+        assert result["text"] is None
+        assert result["run_status"] == "warning"
+        assert result["summary"] == "Google Calendar is not configured"
+        mock_gcal.list_events.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_morning_briefing_calendar_query_error_returns_warning(self):
+        plugin, mock_gcal = _make_plugin()
+        mock_gcal.list_events.return_value = []
+        mock_gcal.last_error = "No such file or directory: credential.json"
+
+        result = await plugin.execute_scheduled_action("morning_briefing", 1)
+
+        assert isinstance(result, dict)
+        assert result["text"] is None
+        assert result["run_status"] == "warning"
+        assert result["summary"] == "Google Calendar query failed"
+        assert "credential.json" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_evening_summary(self):
         plugin, mock_gcal = _make_plugin()
         mock_gcal.list_events.return_value = [

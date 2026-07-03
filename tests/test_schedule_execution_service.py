@@ -253,6 +253,41 @@ class TestScheduleExecutionService:
         mock_bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_execute_records_plugin_warning_without_message_log(
+        self, service, mock_plugins, mock_repo, mock_bot, mock_schedule_manager
+    ):
+        """플러그인 warning 메타데이터는 전송 없이 schedule_runs에 남긴다."""
+        mock_plugins.get_plugin_by_name.return_value = MagicMock(
+            execute_scheduled_action=AsyncMock(
+                return_value={
+                    "text": None,
+                    "run_status": "warning",
+                    "summary": "Google Calendar query failed",
+                    "error": "credential file missing",
+                }
+            )
+        )
+        schedule = MagicMock()
+        schedule.id = "schedule-warning"
+        schedule.type = "plugin"
+        schedule.plugin_name = "calendar"
+        schedule.action_name = "reminder_10m"
+        schedule.chat_id = 12345
+        schedule.name = "캘린더"
+
+        await service.execute(schedule)
+
+        mock_schedule_manager.update_run.assert_called_once_with("schedule-warning")
+        mock_repo.insert_schedule_delivery_log.assert_not_called()
+        mock_repo.insert_schedule_run.assert_called_once()
+        kwargs = mock_repo.insert_schedule_run.call_args.kwargs
+        assert kwargs["status"] == "warning"
+        assert kwargs["result_type"] == "plugin"
+        assert kwargs["summary"] == "Google Calendar query failed"
+        assert kwargs["error"] == "credential file missing"
+        mock_bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_execute_inserts_delivery_log_for_ai_schedule(
         self, service, mock_repo, mock_bot, mock_schedule_manager
     ):

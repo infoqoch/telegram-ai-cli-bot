@@ -32,6 +32,9 @@ class _ScheduleRunResult:
     is_ai: bool = False
     response_is_html: bool = False
     reply_markup: Optional[InlineKeyboardMarkup] = None
+    run_status: Optional[str] = None
+    run_summary: Optional[str] = None
+    run_error: Optional[str] = None
 
 
 class ScheduleExecutionService:
@@ -67,12 +70,14 @@ class ScheduleExecutionService:
             # None = intentional silence (e.g., reminder with no upcoming events)
             if response is None:
                 self._schedule_manager.update_run(schedule.id)
+                run_status = run_result.run_status or "no_output"
                 self._record_schedule_run(
                     schedule.id,
                     started_at=started_at,
-                    status="no_output",
-                    result_type="none",
-                    summary="no notification needed",
+                    status=run_status,
+                    result_type=result_type if run_result.run_status else "none",
+                    error=run_result.run_error,
+                    summary=run_result.run_summary or ("no notification needed" if run_status == "no_output" else None),
                 )
                 run_recorded = True
                 logger.info(f"Schedule {schedule.id} executed (no notification needed)")
@@ -143,9 +148,11 @@ class ScheduleExecutionService:
             self._record_schedule_run(
                 schedule.id,
                 started_at=started_at,
-                status="success",
+                status=run_result.run_status or "success",
                 result_type=result_type,
                 message_log_id=log_id,
+                error=run_result.run_error,
+                summary=run_result.run_summary,
             )
             run_recorded = True
             logger.info(f"Schedule {schedule.id} executed successfully")
@@ -187,6 +194,9 @@ class ScheduleExecutionService:
                     response=result.get("text", ""),
                     response_is_html=True,
                     reply_markup=result.get("reply_markup"),
+                    run_status=self._normalize_run_status(result.get("run_status")),
+                    run_summary=self._optional_string(result.get("summary")),
+                    run_error=self._optional_string(result.get("error")),
                 )
             return _ScheduleRunResult(response=result)
 
@@ -230,6 +240,19 @@ class ScheduleExecutionService:
     def _now() -> str:
         """Return current UTC timestamp."""
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _normalize_run_status(value) -> Optional[str]:
+        """Return a supported plugin-provided run status."""
+        if not isinstance(value, str):
+            return None
+        status = value.strip().lower()
+        return status if status in {"success", "no_output", "warning", "delivery_failed", "failed"} else None
+
+    @staticmethod
+    def _optional_string(value) -> Optional[str]:
+        """Return a non-empty string or None."""
+        return value if isinstance(value, str) and value.strip() else None
 
     @staticmethod
     def _schedule_result_type(schedule_type: str, run_result: Optional[_ScheduleRunResult] = None) -> str:

@@ -1061,6 +1061,13 @@ class SchedulerCallbackHandlers(BaseHandler):
             return SchedulerCallbackHandlers._classify_schedule_issue(error) or "schedule execution failed"
         if status == "delivery_failed":
             return SchedulerCallbackHandlers._classify_schedule_issue(error) or "delivery failed"
+        if status == "warning":
+            summary = str(latest_run.get("summary") or "").strip()
+            return (
+                summary
+                or SchedulerCallbackHandlers._classify_schedule_issue(error)
+                or "schedule warning"
+            )
         return ""
 
     @staticmethod
