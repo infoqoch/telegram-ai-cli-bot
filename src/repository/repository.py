@@ -1691,8 +1691,9 @@ class Repository:
     def list_recent_schedule_message_logs(self, schedule_id: str, limit: int = 5) -> list[dict[str, Any]]:
         """Return recent message_log rows for one schedule."""
         rows = self._conn.execute(
-            """SELECT id, schedule_id, request_at, processed, processed_at, error,
-                      delivery_status, delivery_attempts, delivery_error, delivered_at
+            """SELECT id, schedule_id, request, request_at, processed, processed_at,
+                      response, error, delivery_text, delivery_status,
+                      delivery_attempts, delivery_error, delivered_at
                FROM message_log
                WHERE schedule_id = ?
                ORDER BY id DESC

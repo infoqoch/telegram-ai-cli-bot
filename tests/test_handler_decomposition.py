@@ -876,6 +876,39 @@ class TestSchedulerCallbackMultiStep:
         assert any(label.startswith("1. ✅") for label in button_labels)
 
     @pytest.mark.asyncio
+    async def test_schedule_history_detects_provider_auth_failure_in_sent_log(self, handlers):
+        """전송 자체는 성공해도 provider 인증 실패 응답이면 attention으로 표시한다."""
+        handlers.sessions._repo.list_recent_schedule_message_logs.return_value = [
+            {
+                "id": 43,
+                "delivery_status": "sent",
+                "delivery_attempts": 1,
+                "delivery_error": None,
+                "error": "CLI_ERROR",
+                "delivery_text": "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                "response": "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+            }
+        ]
+
+        q = make_query()
+        await handlers._handle_scheduler_callback(q, 12345, "sched:history")
+
+        text = get_text(q)
+        assert "1. ⚠️ ON" in text
+        assert "provider authentication failed" in text
+        assert "latest log #43 sent, attempts 1" in text
+
+    def test_schedule_issue_classification_variants(self, handlers):
+        """대표 실패 문자열을 운영자용 issue로 분류한다."""
+        classify = handlers._classify_schedule_issue
+
+        assert classify("", {"delivery_status": "abandoned"}) == "delivery abandoned after retries"
+        assert classify("", {"delivery_status": "failed", "delivery_error": "CircuitOpen: telegram: circuit open"}) == "telegram delivery circuit open"
+        assert classify("", {"delivery_status": "failed", "delivery_error": "NetworkUnavailable: telegram: all connection attempts failed"}) == "telegram network unavailable"
+        assert classify("worker_lost", {}) == "worker stopped before delivery"
+        assert classify("", {"delivery_status": "failed"}) == "delivery failed"
+
+    @pytest.mark.asyncio
     async def test_schedule_status_callback_opens_history_for_compatibility(self, handlers):
         """기존 status 콜백은 통합 히스토리 화면으로 연결된다."""
         handlers.sessions._repo.list_recent_schedule_message_logs.return_value = []

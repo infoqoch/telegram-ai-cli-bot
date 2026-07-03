@@ -465,6 +465,9 @@ class TestScheduleOperations:
 
         assert [row["id"] for row in rows] == [second_id, first_id]
         assert rows[0]["schedule_id"] == schedule.id
+        assert rows[0]["request"] == "run 2"
+        assert rows[0]["response"] == "ok 2"
+        assert rows[0]["delivery_text"] == "ok 2"
         assert rows[0]["error"] == "CLI_ERROR"
 
 

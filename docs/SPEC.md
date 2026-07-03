@@ -544,7 +544,7 @@ Script
 
 **Manage schedules:** Click a schedule from the list → detail screen → ON/OFF toggle, change time, delete.
 
-**Inspect schedule history:** `/scheduler` → `History` shows a unified read-only schedule history and health dashboard. It lists total/active/attention counts, each visible schedule's next run, run count, last run, recent delivery status, and a normalized issue label such as target chat unavailable, Telegram timeout, provider authentication failure, provider command failure, or worker stopped. The history view sorts ON schedules first, then by latest last run. Numbered detail buttons match the numbered message order.
+**Inspect schedule history:** `/scheduler` → `History` shows a unified read-only schedule history and health dashboard. It lists total/active/attention counts, each visible schedule's next run, run count, last run, recent delivery status, and a normalized issue label such as target chat unavailable, Telegram timeout/network/circuit failure, provider authentication failure, provider command failure, command timeout/failure, delivery abandoned after retries, or worker stopped. The history view sorts ON schedules first, then by latest last run. Numbered detail buttons match the numbered message order.
 
 ### Schedule List Screen
 

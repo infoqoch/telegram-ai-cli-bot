@@ -945,9 +945,8 @@ class SchedulerCallbackHandlers(BaseHandler):
         last_error = self._string_attr(schedule, "last_error")
         recent_logs = self._recent_schedule_logs(schedule_id, limit=3)
         latest = recent_logs[0] if recent_logs else {}
-        latest_error = latest.get("delivery_error") or latest.get("error") or ""
-        status_label = self._schedule_status_label(enabled, last_error or latest_error)
-        issue = self._classify_schedule_issue(last_error or latest_error)
+        issue = self._classify_schedule_issue(last_error, latest)
+        status_label = self._schedule_status_label(enabled, issue)
         prefix = f"{index}. " if index is not None else ""
 
         lines = [
@@ -1001,25 +1000,63 @@ class SchedulerCallbackHandlers(BaseHandler):
             return False
         latest = recent_logs[0]
         status = (latest.get("delivery_status") or "").lower()
-        return bool(latest.get("error") or latest.get("delivery_error") or status in {"failed", "abandoned"})
+        return bool(
+            self._classify_schedule_issue("", latest)
+            or status in {"failed", "abandoned"}
+        )
 
     @staticmethod
-    def _classify_schedule_issue(error_text: str) -> str:
+    def _classify_schedule_issue(error_text: str, latest_log: dict | None = None) -> str:
         """Convert raw runtime errors into operator-facing categories."""
-        normalized = (error_text or "").strip()
+        parts = [error_text or ""]
+        status = ""
+        if latest_log:
+            status = str(latest_log.get("delivery_status") or "").strip().lower()
+            parts.extend([
+                str(latest_log.get("error") or ""),
+                str(latest_log.get("delivery_error") or ""),
+                str(latest_log.get("response") or ""),
+                str(latest_log.get("delivery_text") or ""),
+            ])
+
+        normalized = "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+        if status == "abandoned":
+            return "delivery abandoned after retries"
+        if status == "retrying":
+            return "delivery retry in progress"
+        if status == "failed" and not normalized:
+            return "delivery failed"
         if not normalized:
             return ""
         lower = normalized.lower()
-        if "chat not found" in lower:
+        if (
+            "chat not found" in lower
+            or "bot was blocked" in lower
+            or "forbidden" in lower
+        ):
             return "target chat is unavailable"
-        if "timedout" in lower or "timed out" in lower:
+        if "max retry attempts exceeded" in lower:
+            return "delivery abandoned after retries"
+        if "circuitopen" in lower or "circuit open" in lower:
+            return "telegram delivery circuit open"
+        if "networkunavailable" in lower or "all connection attempts failed" in lower:
+            return "telegram network unavailable"
+        if "telegram" in lower and ("timedout" in lower or "timed out" in lower or "timeout" in lower):
             return "telegram delivery timeout"
-        if "401" in lower or "invalid authentication" in lower:
+        if "command timed out" in lower:
+            return "command timed out"
+        if "response timed out" in lower or "provider_timeout" in lower:
+            return "provider response timeout"
+        if "401" in lower or "invalid authentication" in lower or "failed to authenticate" in lower:
             return "provider authentication failed"
-        if "cli_error" in lower:
-            return "provider command failed"
         if "worker_lost" in lower or "worker stopped" in lower:
             return "worker stopped before delivery"
+        if "cli_error" in lower:
+            return "provider command failed"
+        if "command failed" in lower or "exit code" in lower or "non-zero" in lower:
+            return "command failed"
+        if status == "failed":
+            return "delivery failed"
         return normalized[:120]
 
     def _format_schedule_last_run(self, schedule) -> str:
