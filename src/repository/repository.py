@@ -1688,6 +1688,51 @@ class Repository:
         ).fetchone()
         return dict(row) if row else None
 
+    def insert_schedule_run(
+        self,
+        *,
+        schedule_id: str,
+        started_at: str,
+        status: str,
+        result_type: str,
+        finished_at: Optional[str] = None,
+        message_log_id: Optional[int] = None,
+        error: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> int:
+        """Append one schedule execution outcome."""
+        cursor = self._conn.execute(
+            """INSERT INTO schedule_runs
+               (schedule_id, started_at, finished_at, status, result_type,
+                message_log_id, error, summary)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                schedule_id,
+                started_at,
+                finished_at or self._now(),
+                status,
+                result_type,
+                message_log_id,
+                error,
+                summary,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def list_recent_schedule_runs(self, schedule_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Return recent schedule execution outcomes."""
+        rows = self._conn.execute(
+            """SELECT id, schedule_id, started_at, finished_at, status, result_type,
+                      message_log_id, error, summary, created_at
+               FROM schedule_runs
+               WHERE schedule_id = ?
+               ORDER BY id DESC
+               LIMIT ?""",
+            (schedule_id, max(1, limit)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_recent_schedule_message_logs(self, schedule_id: str, limit: int = 5) -> list[dict[str, Any]]:
         """Return recent message_log rows for one schedule."""
         rows = self._conn.execute(

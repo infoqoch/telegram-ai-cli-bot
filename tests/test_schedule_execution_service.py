@@ -197,6 +197,9 @@ class TestScheduleExecutionService:
         mock_schedule_manager.update_run.assert_called_once()
         assert "telegram:" in mock_schedule_manager.update_run.call_args.kwargs["last_error"]
         mock_repo.mark_message_delivery_failed.assert_called_once()
+        mock_repo.insert_schedule_run.assert_called_once()
+        assert mock_repo.insert_schedule_run.call_args.kwargs["status"] == "delivery_failed"
+        assert mock_repo.insert_schedule_run.call_args.kwargs["message_log_id"] == 42
 
     @pytest.mark.asyncio
     async def test_execute_records_error_when_plugin_missing(
@@ -215,6 +218,38 @@ class TestScheduleExecutionService:
 
         mock_schedule_manager.update_run.assert_called_once()
         assert mock_schedule_manager.update_run.call_args.kwargs["last_error"] == "Plugin 'missing' not found"
+        mock_bot.send_message.assert_not_called()
+        mock_repo = service._repo
+        mock_repo.insert_schedule_run.assert_called_once()
+        assert mock_repo.insert_schedule_run.call_args.kwargs["status"] == "failed"
+        assert mock_repo.insert_schedule_run.call_args.kwargs["result_type"] == "plugin"
+
+    @pytest.mark.asyncio
+    async def test_execute_records_no_output_run_without_message_log(
+        self, service, mock_plugins, mock_repo, mock_bot, mock_schedule_manager
+    ):
+        """응답이 없는 정상 실행은 message_log 없이 schedule_runs에 no_output으로 남긴다."""
+        mock_plugins.get_plugin_by_name.return_value = MagicMock(
+            execute_scheduled_action=AsyncMock(return_value=None)
+        )
+        schedule = MagicMock()
+        schedule.id = "schedule-empty"
+        schedule.type = "plugin"
+        schedule.plugin_name = "calendar"
+        schedule.action_name = "upcoming"
+        schedule.chat_id = 12345
+        schedule.name = "캘린더"
+
+        await service.execute(schedule)
+
+        mock_schedule_manager.update_run.assert_called_once_with("schedule-empty")
+        mock_repo.insert_schedule_delivery_log.assert_not_called()
+        mock_repo.insert_schedule_run.assert_called_once()
+        kwargs = mock_repo.insert_schedule_run.call_args.kwargs
+        assert kwargs["schedule_id"] == "schedule-empty"
+        assert kwargs["status"] == "no_output"
+        assert kwargs["result_type"] == "none"
+        assert kwargs["message_log_id"] is None
         mock_bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
@@ -248,6 +283,10 @@ class TestScheduleExecutionService:
         mock_repo.set_message_delivery_markup.assert_called_once()
         mock_repo.mark_message_delivered.assert_called_once_with(42)
         mock_repo.increment_delivery_attempts.assert_called_once_with(42)
+        mock_repo.insert_schedule_run.assert_called_once()
+        assert mock_repo.insert_schedule_run.call_args.kwargs["status"] == "success"
+        assert mock_repo.insert_schedule_run.call_args.kwargs["result_type"] == "ai"
+        assert mock_repo.insert_schedule_run.call_args.kwargs["message_log_id"] == 42
         # Session button should be in the response
         send_call = mock_bot.send_message.call_args
         markup = send_call.kwargs.get("reply_markup")

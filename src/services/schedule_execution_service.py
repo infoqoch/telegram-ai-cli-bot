@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -53,14 +54,27 @@ class ScheduleExecutionService:
 
     async def execute(self, schedule) -> None:
         """Execute one schedule and persist the outcome."""
+        started_at = self._now()
+        run_recorded = False
+        schedule_type = resolve_schedule_type(schedule)
+        result_type = self._schedule_result_type(schedule_type)
+        log_id = None
         try:
-            schedule_type = resolve_schedule_type(schedule)
             run_result = await self._run(schedule)
             response = run_result.response
+            result_type = self._schedule_result_type(schedule_type, run_result)
 
             # None = intentional silence (e.g., reminder with no upcoming events)
             if response is None:
                 self._schedule_manager.update_run(schedule.id)
+                self._record_schedule_run(
+                    schedule.id,
+                    started_at=started_at,
+                    status="no_output",
+                    result_type="none",
+                    summary="no notification needed",
+                )
+                run_recorded = True
                 logger.info(f"Schedule {schedule.id} executed (no notification needed)")
                 return
 
@@ -71,7 +85,6 @@ class ScheduleExecutionService:
                 response = "(No response content)"
 
             if self._bot and schedule.chat_id and response:
-                log_id = None
                 reply_markup = run_result.reply_markup
                 delivery_markup_json = self._serialize_reply_markup(reply_markup)
                 delivery_text = self._build_delivery_text(
@@ -112,15 +125,41 @@ class ScheduleExecutionService:
                 except Exception as exc:
                     if self._repo and log_id:
                         self._repo.mark_message_delivery_failed(log_id, str(exc))
+                    self._record_schedule_run(
+                        schedule.id,
+                        started_at=started_at,
+                        status="delivery_failed",
+                        result_type=result_type,
+                        message_log_id=log_id,
+                        error=str(exc),
+                    )
+                    run_recorded = True
                     raise
 
                 if self._repo and log_id:
                     self._repo.mark_message_delivered(log_id)
 
             self._schedule_manager.update_run(schedule.id)
+            self._record_schedule_run(
+                schedule.id,
+                started_at=started_at,
+                status="success",
+                result_type=result_type,
+                message_log_id=log_id,
+            )
+            run_recorded = True
             logger.info(f"Schedule {schedule.id} executed successfully")
         except Exception as exc:
             self._schedule_manager.update_run(schedule.id, last_error=str(exc))
+            if not run_recorded:
+                self._record_schedule_run(
+                    schedule.id,
+                    started_at=started_at,
+                    status="failed",
+                    result_type=result_type,
+                    message_log_id=log_id,
+                    error=str(exc),
+                )
             logger.error(f"Schedule {schedule.id} failed: {exc}")
 
     async def _run(self, schedule) -> _ScheduleRunResult:
@@ -186,6 +225,50 @@ class ScheduleExecutionService:
         """Return a provider-compatible model key for a persisted schedule."""
         model = getattr(schedule, "model", None)
         return normalize_model(provider, model if isinstance(model, str) and model else None)
+
+    @staticmethod
+    def _now() -> str:
+        """Return current UTC timestamp."""
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _schedule_result_type(schedule_type: str, run_result: Optional[_ScheduleRunResult] = None) -> str:
+        """Return the schedule run result category."""
+        if run_result and run_result.is_ai:
+            return "ai"
+        if schedule_type == "plugin":
+            return "plugin"
+        if schedule_type == "command":
+            return "command"
+        return "message"
+
+    def _record_schedule_run(
+        self,
+        schedule_id: str,
+        *,
+        started_at: str,
+        status: str,
+        result_type: str,
+        message_log_id: Optional[int] = None,
+        error: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> None:
+        """Persist one schedule run without affecting execution behavior."""
+        if not self._repo or not hasattr(self._repo, "insert_schedule_run"):
+            return
+        try:
+            self._repo.insert_schedule_run(
+                schedule_id=schedule_id,
+                started_at=started_at,
+                finished_at=self._now(),
+                status=status,
+                result_type=result_type,
+                message_log_id=message_log_id,
+                error=error,
+                summary=summary,
+            )
+        except Exception as exc:
+            logger.warning(f"Schedule run record failed: schedule_id={schedule_id}, error={exc}")
 
     def _build_delivery_text(
         self,

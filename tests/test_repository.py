@@ -470,6 +470,50 @@ class TestScheduleOperations:
         assert rows[0]["delivery_text"] == "ok 2"
         assert rows[0]["error"] == "CLI_ERROR"
 
+    def test_insert_and_list_recent_schedule_runs(self, repo):
+        """스케줄 실행 이력을 message_log와 별도로 최신순 조회한다."""
+        schedule = repo.add_schedule("user1", 12345, 9, 0, "Msg1", "S1")
+        other = repo.add_schedule("user1", 12345, 10, 0, "Msg2", "S2")
+        log_id = repo.insert_schedule_delivery_log(
+            chat_id=12345,
+            schedule_id=schedule.id,
+            request="run",
+            response="ok",
+            delivery_text="ok",
+        )
+
+        first_id = repo.insert_schedule_run(
+            schedule_id=schedule.id,
+            started_at="2026-07-03T00:00:00+00:00",
+            finished_at="2026-07-03T00:00:01+00:00",
+            status="no_output",
+            result_type="none",
+            summary="no notification needed",
+        )
+        second_id = repo.insert_schedule_run(
+            schedule_id=schedule.id,
+            started_at="2026-07-03T01:00:00+00:00",
+            finished_at="2026-07-03T01:00:01+00:00",
+            status="success",
+            result_type="ai",
+            message_log_id=log_id,
+        )
+        repo.insert_schedule_run(
+            schedule_id=other.id,
+            started_at="2026-07-03T02:00:00+00:00",
+            status="failed",
+            result_type="plugin",
+            error="other",
+        )
+
+        rows = repo.list_recent_schedule_runs(schedule.id, limit=2)
+
+        assert [row["id"] for row in rows] == [second_id, first_id]
+        assert rows[0]["status"] == "success"
+        assert rows[0]["result_type"] == "ai"
+        assert rows[0]["message_log_id"] == log_id
+        assert rows[1]["status"] == "no_output"
+
 
 class TestWorkspaceOperations:
     """워크스페이스 관련 테스트."""

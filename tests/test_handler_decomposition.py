@@ -898,6 +898,38 @@ class TestSchedulerCallbackMultiStep:
         assert "provider authentication failed" in text
         assert "latest log #43 sent, attempts 1" in text
 
+    @pytest.mark.asyncio
+    async def test_schedule_history_prefers_latest_run_over_older_log(self, handlers):
+        """최신 실행이 no_output이면 이전 message_log 실패를 현재 issue로 보지 않는다."""
+        handlers.sessions._repo.list_recent_schedule_runs.return_value = [
+            {
+                "id": 7,
+                "status": "no_output",
+                "result_type": "none",
+                "message_log_id": None,
+                "error": None,
+                "summary": "no notification needed",
+            }
+        ]
+        handlers.sessions._repo.list_recent_schedule_message_logs.return_value = [
+            {
+                "id": 43,
+                "delivery_status": "failed",
+                "delivery_attempts": 2,
+                "delivery_error": "telegram: TimedOut: Timed out",
+                "error": None,
+            }
+        ]
+
+        q = make_query()
+        await handlers._handle_scheduler_callback(q, 12345, "sched:history")
+
+        text = get_text(q)
+        assert "1. ✅ ON" in text
+        assert "telegram delivery timeout" not in text
+        assert "latest run #7 no_output | result none" in text
+        assert "latest log #43" not in text
+
     def test_schedule_issue_classification_variants(self, handlers):
         """대표 실패 문자열을 운영자용 issue로 분류한다."""
         classify = handlers._classify_schedule_issue

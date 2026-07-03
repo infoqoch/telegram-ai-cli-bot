@@ -114,6 +114,26 @@ CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
 CREATE INDEX IF NOT EXISTS idx_schedules_ai_provider ON schedules(ai_provider);
 CREATE INDEX IF NOT EXISTS idx_schedules_trigger_type ON schedules(trigger_type);
 
+-- Schedule runs: append-only execution outcomes independent of message delivery logs
+CREATE TABLE IF NOT EXISTS schedule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    result_type TEXT NOT NULL,
+    message_log_id INTEGER,
+    error TEXT,
+    summary TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_log_id) REFERENCES message_log(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule_id ON schedule_runs(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_finished_at ON schedule_runs(finished_at DESC);
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_status ON schedule_runs(status);
+
 -- Workspaces table: registered project directories
 CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,

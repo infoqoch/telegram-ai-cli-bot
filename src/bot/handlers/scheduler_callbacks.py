@@ -944,8 +944,14 @@ class SchedulerCallbackHandlers(BaseHandler):
         enabled = bool(getattr(schedule, "enabled", False))
         last_error = self._string_attr(schedule, "last_error")
         recent_logs = self._recent_schedule_logs(schedule_id, limit=3)
+        recent_runs = self._recent_schedule_runs(schedule_id, limit=1)
+        latest_run = recent_runs[0] if recent_runs else {}
         latest = recent_logs[0] if recent_logs else {}
-        issue = self._classify_schedule_issue(last_error, latest)
+        run_log = self._schedule_run_message_log(latest_run, recent_logs)
+        issue = (
+            self._classify_schedule_issue(last_error, run_log if latest_run else latest)
+            or self._classify_schedule_run_issue(latest_run)
+        )
         status_label = self._schedule_status_label(enabled, issue)
         prefix = f"{index}. " if index is not None else ""
 
@@ -960,11 +966,15 @@ class SchedulerCallbackHandlers(BaseHandler):
         if issue:
             lines.append(f"issue {escape_html(issue)}")
 
-        if latest:
-            log_status = latest.get("delivery_status") or "not_ready"
-            attempts = latest.get("delivery_attempts")
+        if latest_run:
+            lines.append(self._format_schedule_run_line(latest_run))
+
+        display_log = run_log if latest_run else latest
+        if display_log:
+            log_status = display_log.get("delivery_status") or "not_ready"
+            attempts = display_log.get("delivery_attempts")
             attempts_text = f", attempts {attempts}" if attempts is not None else ""
-            lines.append(f"latest log #{latest.get('id')} {escape_html(str(log_status))}{attempts_text}")
+            lines.append(f"latest log #{display_log.get('id')} {escape_html(str(log_status))}{attempts_text}")
 
         return "\n".join(lines)
 
@@ -979,6 +989,37 @@ class SchedulerCallbackHandlers(BaseHandler):
             logger.warning(f"Schedule status log lookup failed: schedule_id={schedule_id}, error={exc}")
             return []
         return rows if isinstance(rows, list) else []
+
+    def _recent_schedule_runs(self, schedule_id: str, *, limit: int) -> list[dict]:
+        """Return recent schedule run outcomes when a repository is available."""
+        repo = self._repository
+        if not repo or not hasattr(repo, "list_recent_schedule_runs"):
+            return []
+        try:
+            rows = repo.list_recent_schedule_runs(schedule_id, limit=limit)
+        except Exception as exc:
+            logger.warning(f"Schedule run lookup failed: schedule_id={schedule_id}, error={exc}")
+            return []
+        return rows if isinstance(rows, list) else []
+
+    @staticmethod
+    def _schedule_run_message_log(latest_run: dict, recent_logs: list[dict]) -> dict:
+        """Return the message log that belongs to the latest run, if available."""
+        if not latest_run:
+            return {}
+        message_log_id = latest_run.get("message_log_id")
+        if message_log_id is None:
+            return {}
+        return next((row for row in recent_logs if row.get("id") == message_log_id), {})
+
+    def _format_schedule_run_line(self, latest_run: dict) -> str:
+        """Render one compact schedule run line."""
+        status = escape_html(str(latest_run.get("status") or "unknown"))
+        result_type = escape_html(str(latest_run.get("result_type") or "unknown"))
+        run_id = latest_run.get("id")
+        message_log_id = latest_run.get("message_log_id")
+        log_text = f" | log #{message_log_id}" if message_log_id is not None else ""
+        return f"latest run #{run_id} {status} | result {result_type}{log_text}"
 
     @staticmethod
     def _schedule_status_label(enabled: bool, error_text: str) -> str:
@@ -996,6 +1037,10 @@ class SchedulerCallbackHandlers(BaseHandler):
         if self._string_attr(schedule, "last_error"):
             return True
         recent_logs = self._recent_schedule_logs(self._string_attr(schedule, "id"), limit=1)
+        recent_runs = self._recent_schedule_runs(self._string_attr(schedule, "id"), limit=1)
+        latest_run = recent_runs[0] if recent_runs else {}
+        if latest_run and self._classify_schedule_run_issue(latest_run):
+            return True
         if not recent_logs:
             return False
         latest = recent_logs[0]
@@ -1004,6 +1049,19 @@ class SchedulerCallbackHandlers(BaseHandler):
             self._classify_schedule_issue("", latest)
             or status in {"failed", "abandoned"}
         )
+
+    @staticmethod
+    def _classify_schedule_run_issue(latest_run: dict | None) -> str:
+        """Convert a schedule run row into an operator-facing issue."""
+        if not latest_run:
+            return ""
+        status = str(latest_run.get("status") or "").strip().lower()
+        error = str(latest_run.get("error") or "").strip()
+        if status == "failed":
+            return SchedulerCallbackHandlers._classify_schedule_issue(error) or "schedule execution failed"
+        if status == "delivery_failed":
+            return SchedulerCallbackHandlers._classify_schedule_issue(error) or "delivery failed"
+        return ""
 
     @staticmethod
     def _classify_schedule_issue(error_text: str, latest_log: dict | None = None) -> str:
