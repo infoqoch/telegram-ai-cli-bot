@@ -54,7 +54,12 @@ class TestCodexClient:
 
     def test_build_command_includes_project_mcp_overrides(self, client):
         """Codex commands should expose the shared project-local MCP bridge."""
-        cmd = client._build_command("Hello", session_id=None, model="xhigh", workspace_path=None)
+        cmd = client._build_command(
+            "Hello",
+            session_id=None,
+            model="sol-xhigh",
+            workspace_path=None,
+        )
 
         import sys
         root = Path(__file__).resolve().parents[1]
@@ -66,13 +71,18 @@ class TestCodexClient:
         assert expected_command in cmd
         assert expected_args in cmd
         assert "-m" in cmd
-        assert cmd[cmd.index("-m") + 1] == "gpt-5.5"
+        assert cmd[cmd.index("-m") + 1] == "gpt-5.6-sol"
         assert 'model_reasoning_effort="xhigh"' in cmd
 
     def test_build_command_skips_mcp_overrides_without_config(self, client):
         """Codex should not emit MCP config overrides when no project config exists."""
         with patch.object(CodexClient, "_load_project_mcp_servers", return_value={}):
-            cmd = client._build_command("Hello", session_id=None, model="xhigh", workspace_path=None)
+            cmd = client._build_command(
+                "Hello",
+                session_id=None,
+                model="sol-xhigh",
+                workspace_path=None,
+            )
 
         assert not any(part.startswith("mcp_servers.") for part in cmd)
 
@@ -80,8 +90,20 @@ class TestCodexClient:
         """Legacy saved profile keys should route to the current Codex model."""
         cmd = client._build_command("Hello", session_id=None, model="gpt54_high", workspace_path=None)
 
-        assert cmd[cmd.index("-m") + 1] == "gpt-5.5"
+        assert cmd[cmd.index("-m") + 1] == "gpt-5.6-sol"
         assert 'model_reasoning_effort="high"' in cmd
+
+    def test_build_command_uses_terra_xhigh_profile(self, client):
+        """Terra XHigh should pass both the model and explicit reasoning."""
+        cmd = client._build_command(
+            "Hello",
+            session_id=None,
+            model="terra-xhigh",
+            workspace_path=None,
+        )
+
+        assert cmd[cmd.index("-m") + 1] == "gpt-5.6-terra"
+        assert 'model_reasoning_effort="xhigh"' in cmd
 
     @pytest.mark.asyncio
     async def test_run_command_sanitizes_cli_env(self, client, monkeypatch):
@@ -144,7 +166,7 @@ class TestCodexClient:
             "_run_command",
             side_effect=fake_run_command,
         ):
-            response = await client.chat("Hello", session_id=None, model="xhigh")
+            response = await client.chat("Hello", session_id=None, model="sol-xhigh")
 
         assert response.text == "ok"
         assert response.session_id == "thread-1"
@@ -178,7 +200,7 @@ class TestCodexClient:
             "_run_command",
             side_effect=fake_run_command,
         ):
-            response = await client.chat("Hello", session_id="thread-1", model="xhigh")
+            response = await client.chat("Hello", session_id="thread-1", model="sol-xhigh")
 
         config_values = [
             captured["cmd"][index + 1]

@@ -91,7 +91,7 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 | `BOT_LOG_DIR` | `.data/logs/` | Log file directory |
 | `BOT_MAIN_MENU_PLUGINS` | (none) | Comma-separated plugin names to promote to the main menu |
 | `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
-| `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (`xhigh`/`high`/`medium`; legacy `gpt54_*` aliases still work) |
+| `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (`sol-xhigh`/`sol-high`/`terra-xhigh`; legacy `xhigh`/`high`/`medium` and `gpt54_*` aliases still work) |
 | `DEFAULT_MODEL_GEMINI` | (none) | Default Gemini model profile (gemini-pro/gemini-flash/gemini-flash-lite) |
 | `DEFAULT_MODEL_AGY` | (none) | Default Antigravity model profile (`agy-pro-high`/`agy-flash-high`/`agy-flash-low`; legacy `gemini-3.5-*` aliases still work) |
 | `NETWORK_GUARD_FAILURE_THRESHOLD` | `3` | Transient network failures before opening a dependency circuit |

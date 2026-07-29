@@ -243,7 +243,7 @@ async def test_run_job_aiwork_provider_error_shows_default_ai_selector(repo, ses
     labels = [btn.text for row in markup.inline_keyboard for btn in row]
     assert "ai:select:codex" in callbacks
     assert "ai:select:agy" in callbacks
-    assert "sess:new:xhigh" not in callbacks
+    assert "sess:new:sol-xhigh" not in callbacks
     assert "🤖 Codex" in labels
     assert "🌌 Antigravity" in labels
     assert "💬 Session" in labels

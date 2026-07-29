@@ -104,8 +104,12 @@ class TestWorkspaceCallbackFlows:
         """
         handlers.sessions._repo.find_session_by_workspace.return_value = None
         query = make_query()
-        # Codex model token — provider inferred from "high".
-        await handlers._handle_workspace_callback(query, 12345, "ws:sess_model:ws001:high")
+        # Codex model token — provider inferred from "sol-high".
+        await handlers._handle_workspace_callback(
+            query,
+            12345,
+            "ws:sess_model:ws001:sol-high",
+        )
 
         # The repo lookup must be called with the codex provider explicitly.
         call_args = handlers.sessions._repo.find_session_by_workspace.call_args
@@ -493,7 +497,7 @@ class TestSessionCallbackFlows:
         assert "📥 Import Local" in buttons
         assert "☑️ Multi Delete" in buttons
         assert "📚 🧠 Opus" not in buttons
-        assert "🤖 🧠 XHigh" not in buttons
+        assert "🤖 🧠 Sol XHigh" not in buttons
 
     @pytest.mark.asyncio
     async def test_sess_new_opens_model_picker(self, handlers):
@@ -508,9 +512,9 @@ class TestSessionCallbackFlows:
         assert "📚 🧠 Opus" in buttons
         assert "📚 🚀 Sonnet" in buttons
         assert "📚 ⚡ Haiku" in buttons
-        assert "🤖 🧠 XHigh" in buttons
-        assert "🤖 🚀 High" in buttons
-        assert "🤖 ⚡ Medium" in buttons
+        assert "🤖 🧠 Sol XHigh" in buttons
+        assert "🤖 🚀 Sol High" in buttons
+        assert "🤖 ⚡ Terra XHigh" in buttons
 
     @pytest.mark.asyncio
     async def test_sess_new_force_reply(self, handlers):
@@ -525,12 +529,12 @@ class TestSessionCallbackFlows:
     async def test_sess_new_codex_selection_switches_provider(self, handlers):
         """Codex 모델 선택 시 current AI도 Codex로 동기화된다."""
         query = make_query()
-        await handlers._handle_new_session_callback(query, 12345, "high")
+        await handlers._handle_new_session_callback(query, 12345, "sol-high")
 
         handlers.sessions.select_ai_provider.assert_called_once_with("12345", "codex")
         text = get_text(query)
         assert "🤖 Codex" in text
-        assert "High" in text
+        assert "Sol High" in text
 
     @pytest.mark.asyncio
     async def test_sess_switch(self, handlers):

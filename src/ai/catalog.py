@@ -91,34 +91,34 @@ MODEL_PROFILES = {
     ],
     "codex": [
         ModelProfile(
-            key="xhigh",
+            key="sol-xhigh",
             provider="codex",
-            label="XHigh",
-            short_label="XHigh",
-            button_label="XHigh",
+            label="Sol XHigh",
+            short_label="Sol XHigh",
+            button_label="Sol XHigh",
             badge=MODEL_BADGE_TOP,
-            provider_model="gpt-5.5",
+            provider_model="gpt-5.6-sol",
             reasoning_effort="xhigh",
         ),
         ModelProfile(
-            key="high",
+            key="sol-high",
             provider="codex",
-            label="High",
-            short_label="High",
-            button_label="High",
+            label="Sol High",
+            short_label="Sol High",
+            button_label="Sol High",
             badge=MODEL_BADGE_MID,
-            provider_model="gpt-5.5",
+            provider_model="gpt-5.6-sol",
             reasoning_effort="high",
         ),
         ModelProfile(
-            key="medium",
+            key="terra-xhigh",
             provider="codex",
-            label="Medium",
-            short_label="Medium",
-            button_label="Medium",
+            label="Terra XHigh",
+            short_label="Terra XHigh",
+            button_label="Terra XHigh",
             badge=MODEL_BADGE_LIGHT,
-            provider_model="gpt-5.3-codex",
-            reasoning_effort="medium",
+            provider_model="gpt-5.6-terra",
+            reasoning_effort="xhigh",
         ),
     ],
     "gemini": [
@@ -204,14 +204,17 @@ MODEL_KEY_ALIASES = {
     "codex": {
         # Keep existing DB/session/env values working after moving Codex keys to
         # provider-local profiles. The concrete CLI model can now change independently.
-        "codex_xhigh": "xhigh",
-        "codex_high": "high",
-        "codex_medium": "medium",
-        "gpt54_xhigh": "xhigh",
-        "gpt54_high": "high",
-        "gpt55_xhigh": "xhigh",
-        "gpt55_high": "high",
-        "gpt53_codex_medium": "medium",
+        "xhigh": "sol-xhigh",
+        "high": "sol-high",
+        "medium": "terra-xhigh",
+        "codex_xhigh": "sol-xhigh",
+        "codex_high": "sol-high",
+        "codex_medium": "terra-xhigh",
+        "gpt54_xhigh": "sol-xhigh",
+        "gpt54_high": "sol-high",
+        "gpt55_xhigh": "sol-xhigh",
+        "gpt55_high": "sol-high",
+        "gpt53_codex_medium": "terra-xhigh",
     },
     "agy": {
         "gemini-3.5-pro": "agy-pro-high",
@@ -341,7 +344,7 @@ def infer_provider_from_model(model: str | None) -> str:
     if (
         model.startswith("gpt")
         or model.startswith("codex")
-        or canonical_model in {"xhigh", "high", "medium"}
+        or canonical_model in {"sol-xhigh", "sol-high", "terra-xhigh"}
     ):
         return "codex"
     if canonical_model.startswith("agy-") or canonical_model.startswith("gemini-3.5"):

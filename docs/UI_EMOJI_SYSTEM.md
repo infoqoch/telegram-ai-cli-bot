@@ -21,9 +21,9 @@ Core rule:
 | Provider | `🤖` | Codex provider | `src/ai/catalog.py` | Reserved for Codex only |
 | Provider | `💎` | Gemini provider | `src/ui_emoji.py` | Gemini family marker |
 | App/System | `🖥️` | CLI AI Bot / shell-facing app identity | `src/ui_emoji.py` | Avoids collision with Codex |
-| Model tier | `🧠` | Top tier | `src/ai/catalog.py` | Opus / XHigh |
-| Model tier | `🚀` | Mid tier | `src/ai/catalog.py` | Sonnet / High |
-| Model tier | `⚡` | Light tier | `src/ai/catalog.py` | Haiku / Medium |
+| Model tier | `🧠` | Top tier | `src/ai/catalog.py` | Opus / Sol XHigh |
+| Model tier | `🚀` | Mid tier | `src/ai/catalog.py` | Sonnet / Sol High |
+| Model tier | `⚡` | Light tier | `src/ai/catalog.py` | Haiku / Terra XHigh |
 
 ### Core Entities
 

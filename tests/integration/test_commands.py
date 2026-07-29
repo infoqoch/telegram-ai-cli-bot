@@ -159,14 +159,14 @@ class TestNewSessionCommands:
         assert "📚 🧠 Opus" in button_texts
         assert "📚 🚀 Sonnet" in button_texts
         assert "📚 ⚡ Haiku" in button_texts
-        assert "🤖 🧠 XHigh" in button_texts
-        assert "🤖 🚀 High" in button_texts
-        assert "🤖 ⚡ Medium" in button_texts
+        assert "🤖 🧠 Sol XHigh" in button_texts
+        assert "🤖 🚀 Sol High" in button_texts
+        assert "🤖 ⚡ Terra XHigh" in button_texts
 
     @pytest.mark.asyncio
     async def test_new_codex_profile_switches_selected_provider(self, handlers, session_store):
-        """`/new high` should create a Codex session and persist Codex as current AI."""
-        update, context = create_command_update("new", args=["high"])
+        """`/new sol-high` should create a Codex session and persist Codex as current AI."""
+        update, context = create_command_update("new", args=["sol-high"])
 
         await handlers.new_session(update, context)
 
@@ -311,7 +311,7 @@ class TestSessionManagement:
         assert "🤖 🧠 <b>Codex 세션</b> 📍" in reply
         assert reply.count("📍") == 1
         assert "🆕 New Session" in button_texts
-        assert "🤖 🧠 XHigh" not in button_texts
+        assert "🤖 🧠 Sol XHigh" not in button_texts
 
     @pytest.mark.asyncio
     async def test_switch_session(self, handlers, session_store):
