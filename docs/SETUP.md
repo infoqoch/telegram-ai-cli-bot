@@ -161,7 +161,7 @@ Network calls are grouped by dependency, not by feature. A Google Calendar outag
 - `google_calendar`: Google Calendar API calls from the Calendar plugin
 - `weather`: Weather and geocoding API calls from the Weather plugin
 
-When the Telegram circuit is open, the long-polling request waits until the circuit retry window instead of immediately throwing the same error in a tight loop. Delivery requests still fail fast so persisted delivery retry state remains authoritative. Application logs rotate at 100 MB by default, retain 14 days, and compress rotated files.
+When the Telegram circuit is open, the long-polling request waits until the circuit retry window instead of immediately throwing the same error in a tight loop. A failed polling probe is recorded as a compact NetworkGuard warning; PTB's duplicate full traceback is suppressed. Delivery requests still fail fast so persisted delivery retry state remains authoritative. Application logs rotate at 100 MB by default, retain 14 days, and compress rotated files.
 
 When a circuit is open, the bot skips calls to that dependency until the reset window expires. Telegram delivery retry does not consume retry attempts while the Telegram circuit is already open, because no real network send was attempted.
 

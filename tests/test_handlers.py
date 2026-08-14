@@ -10,6 +10,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram.error import NetworkError as TelegramNetworkError
 
 from src.bot.handlers import BotHandlers
 from src.bot.constants import MAX_MESSAGE_LENGTH
@@ -363,6 +364,19 @@ class TestBotHandlers:
         call_kwargs = context.bot.send_message.call_args[1]
         assert "Internal error details" not in call_kwargs["text"]
         assert "error occurred" in call_kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_error_handler_suppresses_polling_network_failure(self, handlers):
+        context = MagicMock()
+        context.error = TelegramNetworkError("telegram unavailable")
+        context.bot.send_message = AsyncMock()
+
+        with patch("src.bot.handlers.base.logger") as mock_logger:
+            await handlers.error_handler(None, context)
+
+        mock_logger.error.assert_not_called()
+        mock_logger.trace.assert_not_called()
+        context.bot.send_message.assert_not_awaited()
 
 
 class TestSendMessageToChat:

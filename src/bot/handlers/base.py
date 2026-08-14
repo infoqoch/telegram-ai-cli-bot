@@ -21,6 +21,7 @@ from src.ai import (
     normalize_model,
 )
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
+from src.network_guard import is_transient_network_error
 from src.plugins.loader import PLUGIN_SURFACE_CATALOG, PLUGIN_SURFACE_MAIN_MENU, PluginInteraction
 from src.ui_emoji import (
     BUTTON_AI_WORK,
@@ -1055,6 +1056,13 @@ class BaseHandler:
         chat_id = update.effective_chat.id if update and update.effective_chat else "unknown"
         if chat_id != "unknown":
             self._setup_request_context(chat_id)
+
+        # Polling network failures are already summarized by NetworkGuard. PTB
+        # reports the same failure again through the application error callback;
+        # suppress that duplicate instead of emitting another log or traceback.
+        if update is None and is_transient_network_error(context.error):
+            clear_context()
+            return
 
         error_type = type(context.error).__name__
         error_msg = str(context.error)

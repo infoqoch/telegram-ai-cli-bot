@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from telegram.error import NetworkError as TelegramNetworkError
 from telegram.request import BaseRequest
 
 from src.network_guard import CircuitOpen, NetworkUnavailable, network_guard
@@ -109,3 +110,17 @@ async def test_polling_request_waits_for_open_circuit_before_retrying():
     assert result == (200, b'{"ok":true,"result":true}')
     assert calls == 2
     assert waits == [7.0]
+
+
+@pytest.mark.asyncio
+async def test_polling_request_translates_network_failure_for_ptb_retry_loop():
+    request = GuardedTelegramRequest(
+        FakeRequest(TimeoutError("offline")),
+        wait_for_open_circuit=True,
+    )
+
+    with pytest.raises(TelegramNetworkError, match=r"telegram: NetworkError:.*offline"):
+        await request.post("https://example.invalid")
+
+    snapshot = network_guard.snapshot("telegram")
+    assert snapshot.failures == 1

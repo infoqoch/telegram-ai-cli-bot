@@ -6,9 +6,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from telegram.error import NetworkError as TelegramNetworkError
 from telegram.request import BaseRequest, HTTPXRequest
 
-from src.network_guard import CircuitOpen, NetworkGuard, network_guard
+from src.network_guard import CircuitOpen, NetworkGuard, NetworkUnavailable, network_guard
 
 
 class GuardedTelegramRequest(BaseRequest):
@@ -54,6 +55,13 @@ class GuardedTelegramRequest(BaseRequest):
                     raise
                 snapshot = self._guard.snapshot(self._dependency)
                 await self._sleep(max(snapshot.seconds_until_retry, 0.1))
+            except NetworkUnavailable as exc:
+                if not self._wait_for_open_circuit:
+                    raise
+                # PTB handles TelegramError subclasses through its polling retry
+                # callback. Translating here avoids its generic-exception path,
+                # which logs a full traceback for every circuit probe.
+                raise TelegramNetworkError(str(exc)) from None
 
     async def do_request(
         self,

@@ -150,7 +150,7 @@ The Telegram boundary is primarily enforced by [`src/telegram_request.py`](../sr
 
 Transient dependency failures raise `NetworkUnavailable`. Once the threshold is reached, later calls raise `CircuitOpen` without touching the network until the reset window expires. A `CircuitOpen` does not count as a Telegram delivery attempt unless an actual send attempt already happened in the same delivery flow.
 
-The `getUpdates` request uses the same circuit state but waits asynchronously for an open circuit's retry window before trying again. This prevents PTB polling from producing an unbounded traceback loop while preserving fail-fast behavior for response delivery and its database-backed retry flow.
+The `getUpdates` request uses the same circuit state but waits asynchronously for an open circuit's retry window before trying again. Polling-only `NetworkUnavailable` errors are translated back to PTB `NetworkError` instances so PTB uses its retry callback instead of its generic full-traceback path; the application error handler then suppresses that duplicate because NetworkGuard already emitted the compact warning. This prevents PTB polling from producing an unbounded traceback loop while preserving fail-fast behavior for response delivery and its database-backed retry flow.
 
 Generated detached AI responses are persisted via `store_generated_message()` before Telegram delivery starts. Scheduled chat/workspace/plugin/command results that produce a Telegram notification are also inserted into `message_log` before delivery through `insert_schedule_delivery_log()`. Delivery status then follows this model:
 
