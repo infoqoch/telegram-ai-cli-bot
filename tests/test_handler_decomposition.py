@@ -300,6 +300,30 @@ class TestDispatchToAi:
         assert "spawn failed" in handlers._reply_aiwork_unavailable.call_args.kwargs["reason"]
 
     @pytest.mark.asyncio
+    async def test_aiwork_callback_describes_current_context_without_log_reference(self, handlers):
+        """Regular AI Work must not claim that an execution result was selected."""
+        query = MagicMock()
+        query.message.reply_text = AsyncMock()
+
+        await handlers._handle_aiwork_callback(query, 12345, "aiwork:workspace")
+
+        text = query.message.reply_text.call_args.args[0]
+        assert "Current Workspace data will be sent to AI." in text
+        assert "selected execution result" not in text
+
+    @pytest.mark.asyncio
+    async def test_aiwork_callback_describes_selected_execution_when_log_is_bound(self, handlers):
+        """Execution-bound AI Work should disclose the selected result context."""
+        query = MagicMock()
+        query.message.reply_text = AsyncMock()
+
+        await handlers._handle_aiwork_callback(query, 12345, "aiwork:sched_cmd:42")
+
+        text = query.message.reply_text.call_args.args[0]
+        assert "selected execution result" in text
+        assert "aiwork:sched_cmd:42" in text
+
+    @pytest.mark.asyncio
     async def test_sched_cmd_aiwork_passes_failure_context_with_completion_hook(self, handlers):
         """Command schedule AI work stores context for runtime provider failures."""
         handlers.sessions.get_selected_ai_provider.return_value = "claude"
@@ -335,6 +359,82 @@ class TestDispatchToAi:
             provider="claude",
             completion_hook=hook,
         )
+
+    @pytest.mark.asyncio
+    async def test_sched_cmd_aiwork_includes_selected_execution_context(self, handlers):
+        """A command-result AI Work shortcut binds the exact message_log result."""
+        handlers.sessions.get_selected_ai_provider.return_value = "claude"
+        handlers.sessions.create_session.return_value = "aiwork-session"
+        handlers._is_provider_registered = MagicMock(return_value=True)
+        handlers._get_static_context = AsyncMock(return_value="static context")
+        handlers._dispatch_to_ai = AsyncMock()
+        handlers.sessions._repo.get_message_log.return_value = {
+            "id": 42,
+            "chat_id": 12345,
+            "schedule_id": "sched-1",
+            "workspace_path": "/tmp/project",
+            "request": "python tracker.py",
+            "response": "parcel arrived",
+            "delivery_text": "⏰ Parcel tracker\n\nparcel arrived",
+            "execution_context_json": (
+                '{"kind":"command_schedule","script_path":"tracker.py",'
+                '"script_sha256":"abc123","script_content":"print(\\"parcel arrived\\")",'
+                '"script_truncated":false}'
+            ),
+        }
+        schedule = MagicMock()
+        schedule.name = "Parcel tracker"
+        handlers.sessions._repo.get_schedule.return_value = schedule
+
+        update = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        await handlers._handle_aiwork_force_reply(
+            update,
+            12345,
+            "When will it arrive?",
+            "sched_cmd:42",
+        )
+
+        dispatched_message = handlers._dispatch_to_ai.call_args.args[3]
+        assert "static context" in dispatched_message
+        assert "Parcel tracker" in dispatched_message
+        assert "python tracker.py" in dispatched_message
+        assert 'print("parcel arrived")' in dispatched_message
+        assert "parcel arrived" in dispatched_message
+        assert "⏰ Parcel tracker" in dispatched_message
+        assert "When will it arrive?" in dispatched_message
+        handlers.sessions.set_ai_work_session_context.assert_called_once_with(
+            "aiwork-session",
+            domain="sched_cmd",
+            label="Command Schedule",
+            provider="claude",
+            completion_hook=handlers._dispatch_to_ai.call_args.kwargs["post_completion_hook"],
+            source_log_id=42,
+        )
+
+    @pytest.mark.asyncio
+    async def test_sched_cmd_aiwork_rejects_foreign_execution_context(self, handlers):
+        """A message-log reference from another chat cannot enter AI context."""
+        handlers.sessions._repo.get_message_log.return_value = {
+            "id": 42,
+            "chat_id": 99999,
+            "schedule_id": "sched-1",
+        }
+        handlers._dispatch_to_ai = AsyncMock()
+        update = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        await handlers._handle_aiwork_force_reply(
+            update,
+            12345,
+            "inspect this",
+            "sched_cmd:42",
+        )
+
+        handlers._dispatch_to_ai.assert_not_called()
+        handlers.sessions.create_session.assert_not_called()
+        assert "unavailable" in update.message.reply_text.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_dispatch_blocked_during_session_creation(self, handlers):

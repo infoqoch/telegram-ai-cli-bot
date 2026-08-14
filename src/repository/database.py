@@ -109,6 +109,7 @@ def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "message_log", "delivery_text", "TEXT")
         _ensure_column(conn, "message_log", "delivery_markup_json", "TEXT")
         _ensure_column(conn, "message_log", "completion_hook_json", "TEXT")
+        _ensure_column(conn, "message_log", "execution_context_json", "TEXT")
         _ensure_column(conn, "message_log", "delivery_status", "TEXT NOT NULL DEFAULT 'not_ready'")
         _ensure_column(conn, "message_log", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "message_log", "delivery_error", "TEXT")
@@ -130,6 +131,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "message_log", "delivery_text", "TEXT")
     _ensure_column(conn, "message_log", "delivery_markup_json", "TEXT")
     _ensure_column(conn, "message_log", "completion_hook_json", "TEXT")
+    _ensure_column(conn, "message_log", "execution_context_json", "TEXT")
     _ensure_column(conn, "message_log", "delivery_status", "TEXT NOT NULL DEFAULT 'not_ready'")
     _ensure_column(conn, "message_log", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "message_log", "delivery_error", "TEXT")
@@ -164,11 +166,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
                label TEXT NOT NULL,
                provider TEXT NOT NULL,
                completion_hook_json TEXT,
+               source_log_id INTEGER,
                created_at TEXT NOT NULL DEFAULT (datetime('now')),
                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-               FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+               FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+               FOREIGN KEY (source_log_id) REFERENCES message_log(id) ON DELETE SET NULL
            )"""
     )
+    _ensure_column(conn, "ai_work_sessions", "source_log_id", "INTEGER")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_ai_work_sessions_domain ON ai_work_sessions(domain)"
     )

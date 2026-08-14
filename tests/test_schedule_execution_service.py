@@ -1,6 +1,8 @@
 """Unit tests for schedule execution runtime service."""
 
 import asyncio
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -438,11 +440,59 @@ class TestScheduleExecutionService:
         kwargs = mock_repo.insert_schedule_delivery_log.call_args.kwargs
         assert kwargs["model"] == "command"
         assert "<b>OK</b> <code>1234</code>" in kwargs["delivery_text"]
+        execution_context = json.loads(kwargs["execution_context_json"])
+        assert execution_context["script_path"] == script.name
+        assert "print('<b>OK</b>" in execution_context["script_content"]
+        assert len(execution_context["script_sha256"]) == 64
+        assert execution_context["script_truncated"] is False
         mock_repo.mark_message_delivered.assert_called_once_with(42)
         mock_bot.send_message.assert_called_once()
         send_call = mock_bot.send_message.call_args.kwargs
         assert send_call["parse_mode"] == "HTML"
         assert "<b>OK</b> <code>1234</code>" in send_call["text"]
+        callbacks = [
+            button.callback_data
+            for row in send_call["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        assert callbacks == ["aiwork:sched_cmd:42"]
+        mock_repo.set_message_delivery_markup.assert_called_once_with(
+            42,
+            [[{"text": "✨ AI Work", "callback_data": "aiwork:sched_cmd:42"}]],
+        )
+
+    @pytest.mark.asyncio
+    async def test_command_snapshot_read_failure_does_not_block_execution(
+        self, service, mock_bot, mock_repo, tmp_path, monkeypatch
+    ):
+        """Snapshot collection is best-effort; the scheduled command must still run."""
+        script = tmp_path / "cmd_read_error.py"
+        script.write_text("print('still runs')\n", encoding="utf-8")
+        original_read_bytes = Path.read_bytes
+
+        def fail_snapshot_read(path):
+            if path == script:
+                raise PermissionError("snapshot denied")
+            return original_read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", fail_snapshot_read)
+
+        schedule = MagicMock()
+        schedule.id = "schedule-command"
+        schedule.type = "command"
+        schedule.schedule_type = "command"
+        schedule.message = f"python {script.name}"
+        schedule.chat_id = 12345
+        schedule.name = "Command Test"
+        schedule.workspace_path = str(tmp_path)
+
+        await service.execute(schedule)
+
+        kwargs = mock_repo.insert_schedule_delivery_log.call_args.kwargs
+        execution_context = json.loads(kwargs["execution_context_json"])
+        assert "snapshot denied" in execution_context["script_error"]
+        assert "still runs" in kwargs["response"]
+        mock_bot.send_message.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_command_schedule_with_empty_output_stays_silent(

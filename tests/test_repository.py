@@ -317,6 +317,11 @@ class TestSessionOperations:
             "payload": {},
             "ai_work_context": {"label": "Command Schedule", "provider": "agy"},
         }
+        source_log_id = repo.enqueue_message(
+            chat_id=12345,
+            session_id="sess1",
+            request="python tracker.py",
+        )
 
         assert repo.set_session_ai_work_context(
             "sess1",
@@ -324,6 +329,7 @@ class TestSessionOperations:
             label="Command Schedule",
             provider="agy",
             completion_hook=hook,
+            source_log_id=source_log_id,
         )
 
         row = repo.get_session_ai_work_context("sess1")
@@ -332,6 +338,7 @@ class TestSessionOperations:
         assert row["domain"] == "sched_cmd"
         assert row["label"] == "Command Schedule"
         assert row["provider"] == "agy"
+        assert row["source_log_id"] == source_log_id
         assert '"plugin_name": "command_schedule"' in row["completion_hook_json"]
 
     def test_ai_work_session_context_deleted_with_session(self, repo):

@@ -511,21 +511,24 @@ class Repository:
         label: str,
         provider: str,
         completion_hook: Optional[Any] = None,
+        source_log_id: Optional[int] = None,
     ) -> bool:
         """Store AI Work metadata for follow-up messages in a session."""
         now = self._now()
         hook_json = json.dumps(completion_hook, ensure_ascii=False) if completion_hook is not None else None
         cursor = self._conn.execute(
             """INSERT INTO ai_work_sessions
-               (session_id, domain, label, provider, completion_hook_json, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               (session_id, domain, label, provider, completion_hook_json,
+                source_log_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(session_id) DO UPDATE SET
                    domain = excluded.domain,
                    label = excluded.label,
                    provider = excluded.provider,
                    completion_hook_json = excluded.completion_hook_json,
+                   source_log_id = excluded.source_log_id,
                    updated_at = excluded.updated_at""",
-            (session_id, domain, label, provider, hook_json, now, now),
+            (session_id, domain, label, provider, hook_json, source_log_id, now, now),
         )
         self._conn.commit()
         return cursor.rowcount > 0
@@ -1649,6 +1652,7 @@ class Repository:
         workspace_path: Optional[str] = None,
         provider_session_id: Optional[str] = None,
         delivery_markup_json: Optional[str] = None,
+        execution_context_json: Optional[str] = None,
         error: Optional[str] = None,
     ) -> int:
         """Persist a completed schedule result before Telegram delivery."""
@@ -1658,10 +1662,10 @@ class Repository:
                (chat_id, session_id, schedule_id, model, workspace_path,
                 provider_session_id, request, request_at,
                 processed, processed_at, response, error,
-                delivery_text, delivery_markup_json, delivery_status,
+                delivery_text, delivery_markup_json, execution_context_json, delivery_status,
                 delivery_attempts, delivery_error, delivered_at)
                VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?,
-                       ?, ?, 'pending', 0, NULL, NULL)""",
+                       ?, ?, ?, 'pending', 0, NULL, NULL)""",
             (
                 chat_id,
                 schedule_id,
@@ -1675,6 +1679,7 @@ class Repository:
                 error,
                 delivery_text,
                 delivery_markup_json,
+                execution_context_json,
             ),
         )
         self._conn.commit()

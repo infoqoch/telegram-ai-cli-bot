@@ -104,6 +104,7 @@ class SessionService:
         label: str,
         provider: str,
         completion_hook: Optional[dict[str, Any]] = None,
+        source_log_id: Optional[int] = None,
     ) -> bool:
         """Persist AI Work metadata for follow-up messages in this session."""
         return self._repo.set_session_ai_work_context(
@@ -112,6 +113,7 @@ class SessionService:
             label=label,
             provider=provider,
             completion_hook=completion_hook,
+            source_log_id=source_log_id,
         )
 
     def get_ai_work_session_context(self, session_id: str) -> Optional[dict[str, Any]]:
@@ -133,6 +135,7 @@ class SessionService:
             "domain": row["domain"],
             "label": row["label"],
             "provider": row["provider"],
+            "source_log_id": row.get("source_log_id"),
             "completion_hook": completion_hook,
         }
 

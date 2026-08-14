@@ -87,6 +87,7 @@ class TestSessionService:
             label="Command Schedule",
             provider="agy",
             completion_hook=hook,
+            source_log_id=None,
         )
         mock_repo.set_session_ai_work_context.assert_called_once_with(
             "sess1",
@@ -94,6 +95,7 @@ class TestSessionService:
             label="Command Schedule",
             provider="agy",
             completion_hook=hook,
+            source_log_id=None,
         )
 
         mock_repo.get_session_ai_work_context.return_value = {
@@ -101,6 +103,7 @@ class TestSessionService:
             "domain": "sched_cmd",
             "label": "Command Schedule",
             "provider": "agy",
+            "source_log_id": 42,
             "completion_hook_json": '{"plugin_name":"command_schedule","action":"render_draft","payload":{}}',
         }
 
@@ -111,6 +114,7 @@ class TestSessionService:
             "domain": "sched_cmd",
             "label": "Command Schedule",
             "provider": "agy",
+            "source_log_id": 42,
             "completion_hook": hook,
         }
 

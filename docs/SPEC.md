@@ -541,6 +541,10 @@ Script
 - The AI must not claim registration is complete before the user taps `Register schedule`.
 - Command Schedule AI Work sessions store their domain metadata in `ai_work_sessions`; follow-up messages in that session keep using the saved draft-render completion hook.
 - Generated command scripts are stored under `.scheduler/commands/` and are not tracked by git. If the AI proposes `scripts/foo.py`, the bot normalizes it to `.scheduler/commands/scripts/foo.py` before testing or registration.
+- A delivered command schedule result includes an `[✨ AI Work]` button bound to that specific execution. The resulting AI Work prompt includes the executed command, the execution-time Python script snapshot (up to 100,000 bytes), raw command output, and final Telegram delivery text so the user can ask about or revise the exact result.
+- The execution reference is accepted only when its `message_log` row belongs to the current chat. Missing, expired, or foreign execution references are rejected before an AI session is created.
+- Script snapshot collection is best-effort. A missing, unreadable, or unsupported script does not block the scheduled command; AI Work receives the command result together with a snapshot-unavailable note.
+- Regular AI Work entries without an execution reference send current domain data only and do not claim that an execution result was selected.
 
 **Manage schedules:** Click a schedule from the list → detail screen → ON/OFF toggle, change time, delete.
 

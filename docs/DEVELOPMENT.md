@@ -232,6 +232,18 @@ Command schedules use a draft-first confirmation flow because the final registra
 - `Run command` writes the script and executes the exact command through [`CommandExecutionService`](../src/services/command_execution_service.py), so the user can inspect the Telegram output before registration.
 - Final schedule execution also uses `CommandExecutionService`; command stdout is treated as Telegram HTML and stderr is escaped inside `<pre>`.
 
+### Command Schedule Result AI Work
+
+Delivered command schedule results expose an AI Work shortcut tied to the exact `message_log` row:
+
+- Before command execution, [`command_execution_snapshot.py`](../src/services/command_execution_snapshot.py) makes a best-effort snapshot of the first Python script path in the command. The snapshot stores the command, resolved workspace, relative script path, SHA-256, up to 100,000 bytes of script content, and truncation/error metadata in `message_log.execution_context_json`.
+- Snapshot collection is auxiliary. Parse, path, permission, and file-read failures are converted to `script_error`; they must never prevent `CommandExecutionService` from running the scheduled command or delivering its output.
+- The command result remains in `message_log.response`, while the fully formatted Telegram message remains in `delivery_text`. `execution_context_json` contains execution context and the script snapshot, not an AI response.
+- The delivery button uses `aiwork:sched_cmd:<log_id>`. `AiWorkHandlers` verifies that the referenced row belongs to the requesting chat before creating a session, then supplies the stored script, raw output, delivery text, schedule metadata, and user question to the selected AI provider.
+- `ai_work_sessions.source_log_id` records which execution seeded the AI Work session. Follow-up behavior still comes from the persisted Command Schedule completion hook.
+- Legacy rows without `execution_context_json` attempt a best-effort read of the current script and report an explicit snapshot note when that fallback is unavailable.
+- Script SHA-256 currently identifies the captured content; it does not deduplicate rows. Each delivered command run owns its snapshot so the context remains stable if the source file changes later.
+
 ### Scheduler Reload Boundary
 
 The supervisor and the main bot process have separate PID artifacts:

@@ -15,6 +15,7 @@ from src.bot.formatters import escape_html, markdown_to_telegram_html, split_mes
 from src.logging_config import logger
 from src.network_guard import CircuitOpen, NetworkUnavailable, network_guard
 from src.schedule_utils import resolve_provider, resolve_schedule_type
+from src.services.command_execution_snapshot import build_command_execution_snapshot
 from src.services.command_execution_service import CommandExecutionService
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ class _ScheduleRunResult:
     is_ai: bool = False
     response_is_html: bool = False
     reply_markup: Optional[InlineKeyboardMarkup] = None
+    execution_context_json: Optional[str] = None
     run_status: Optional[str] = None
     run_summary: Optional[str] = None
     run_error: Optional[str] = None
@@ -114,9 +116,13 @@ class ScheduleExecutionService:
                         workspace_path=getattr(schedule, "workspace_path", None),
                         provider_session_id=run_result.provider_session_id,
                         delivery_markup_json=delivery_markup_json,
+                        execution_context_json=run_result.execution_context_json,
                     )
                     if run_result.is_ai:
                         reply_markup = self._build_session_button(log_id)
+                    elif schedule_type == "command":
+                        reply_markup = self._build_command_aiwork_button(log_id)
+                    if run_result.is_ai or schedule_type == "command":
                         delivery_markup_json = self._serialize_reply_markup(reply_markup)
                         self._repo.set_message_delivery_markup(log_id, json.loads(delivery_markup_json))
 
@@ -201,6 +207,7 @@ class ScheduleExecutionService:
             return _ScheduleRunResult(response=result)
 
         if schedule_type == "command":
+            execution_context_json = self._build_command_execution_context(schedule)
             result = await self._command_runner.run(
                 schedule.message,
                 cwd=getattr(schedule, "workspace_path", None) or self._project_root(),
@@ -208,6 +215,10 @@ class ScheduleExecutionService:
             return _ScheduleRunResult(
                 response=self._command_runner.build_telegram_body(result),
                 response_is_html=True,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✨ AI Work", callback_data="aiwork:sched_cmd")
+                ]]),
+                execution_context_json=execution_context_json,
             )
 
         workspace_path = (
@@ -368,10 +379,28 @@ class ScheduleExecutionService:
         ]])
 
     @staticmethod
+    def _build_command_aiwork_button(log_id: int) -> InlineKeyboardMarkup:
+        """Build an AI Work button bound to this command execution result."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("✨ AI Work", callback_data=f"aiwork:sched_cmd:{log_id}"),
+        ]])
+
+    @staticmethod
     def _schedule_request_text(schedule) -> str:
         """Return a safe persisted request label for one schedule run."""
         message = getattr(schedule, "message", "")
         return message if isinstance(message, str) else ""
+
+    @classmethod
+    def _build_command_execution_context(cls, schedule) -> str:
+        """Snapshot the command script before execution for later AI Work."""
+        command = cls._schedule_request_text(schedule)
+        payload = build_command_execution_snapshot(
+            command,
+            getattr(schedule, "workspace_path", None),
+            default_workspace=Path(cls._project_root()),
+        )
+        return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
     def _serialize_reply_markup(reply_markup: Optional[InlineKeyboardMarkup]) -> Optional[str]:
