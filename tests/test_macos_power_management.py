@@ -202,6 +202,48 @@ def test_unknown_power_does_not_change_process_state(tmp_path):
     assert not paths["actions"].exists()
 
 
+def test_monitor_reconciles_battery_then_ac_stream_events(tmp_path):
+    env, paths = _power_env(tmp_path, power="ac")
+    _enable(env, paths, "on")
+    paths["running"].touch()
+
+    event_pmset = tmp_path / "event-pmset"
+    _write_executable(
+        event_pmset,
+        f"""#!/bin/bash
+if [ "$1 $2" = "-g batt" ]; then
+  power=$(sed -n '1p' {paths['power']!s})
+  case "$power" in
+    ac) echo "Now drawing from 'AC Power'" ;;
+    battery) echo "Now drawing from 'Battery Power'" ;;
+  esac
+  exit 0
+fi
+if [ "$1 $2" = "-g pslog" ]; then
+  echo battery > {paths['power']!s}
+  echo "Now drawing from 'Battery Power'"
+  sleep 1
+  echo ac > {paths['power']!s}
+  echo "Now drawing from 'AC Power'"
+  sleep 1
+  exit 0
+fi
+exit 1
+""",
+    )
+    env["BOT_POWER_PMSET_BIN"] = str(event_pmset)
+
+    result = _run_power(env, "monitor")
+
+    assert result.returncode == 0
+    assert paths["actions"].read_text(encoding="utf-8").splitlines() == ["stop-hard", "start"]
+    assert paths["running"].exists()
+    assert (paths["state"] / "desired_state").read_text(encoding="utf-8").strip() == "on"
+    notifications = paths["notifications"].read_text(encoding="utf-8")
+    assert "배터리 사용으로" in notifications
+    assert "전원이 연결되어" in notifications
+
+
 def test_power_status_reports_supervisor_only_runtime_as_degraded(tmp_path):
     env, paths = _power_env(tmp_path, power="ac")
     _enable(env, paths, "on")
