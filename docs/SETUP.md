@@ -57,6 +57,50 @@ To find your Telegram chat ID, start the bot temporarily and send `/chatid`.
 ./run.sh test-integration # Run integration tests
 ```
 
+## macOS Power Management (Optional)
+
+The power manager is macOS-only and opt-in. Until it is installed, `run.sh` behaves exactly as before. Linux and other operating systems never invoke `pmset`, `osascript`, or LaunchAgent commands.
+
+Install the per-user LaunchAgent from the project root:
+
+```bash
+./run.sh power-install
+./run.sh power-status
+```
+
+The first installation infers user intent from the current process state: a running bot starts with `desired=on`; a stopped bot starts with `desired=off`. Reinstallation preserves an existing valid desired state. After installation, the runtime rule is:
+
+```text
+bot should run = desired state is ON AND power source is AC
+```
+
+- `./run.sh start`, `restart-soft`, or `restart-hard` records `desired=on`. On battery, the bot remains stopped and starts automatically after AC power returns.
+- `./run.sh stop-soft` or `stop-hard` records `desired=off`, so reconnecting AC does not restart a bot the user stopped.
+- A battery transition performs a hard stop, including detached workers and their child processes, to avoid continued battery use. `desired=on` is preserved for the later AC restart.
+- A user `stop-soft` keeps its existing meaning: supervisor/main stop while in-flight detached workers may finish.
+- macOS notifications are emitted only when the power manager actually starts or battery-stops the bot. Notification visibility still depends on macOS notification and Focus settings.
+- If the power source cannot be determined, the manager does not start or stop anything and records the condition in its log.
+
+Runtime files use the project data directory:
+
+```text
+.data/power-management/desired_state
+.data/power-management/enabled
+.data/logs/power-manager.log
+.data/logs/power-manager-launchd.log
+~/Library/LaunchAgents/com.telegram-ai-cli-bot.power-manager.plist
+```
+
+If `BOT_DATA_DIR` or `BOT_LOG_DIR` changes, reinstall the LaunchAgent so its generated plist receives the new absolute paths.
+
+Remove power management without changing the bot's current process state:
+
+```bash
+./run.sh power-uninstall
+```
+
+Use `run.sh` for normal starts and stops. A process killed directly through Activity Monitor or `kill` does not update `desired_state`; the next power reconciliation still follows the last `run.sh` intent.
+
 ## Security
 
 | Layer | Protection |

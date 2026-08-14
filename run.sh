@@ -8,7 +8,7 @@
 
 cd "$(dirname "$0")"
 
-BASE_DIR="$(pwd)"
+BASE_DIR="$(pwd -P)"
 DATA_DIR="${BOT_DATA_DIR:-$BASE_DIR/.data}"
 PID_FILE="${BOT_PID_FILE:-$DATA_DIR/telegram-bot.pid}"
 LOCK_FILE="${BOT_LOCK_FILE:-$DATA_DIR/telegram-bot.lock}"
@@ -26,6 +26,66 @@ LEGACY_SUPERVISOR_LOCK_FILE="/tmp/telegram-bot-supervisor.lock"
 LEGACY_APP_LOG_LINK="/tmp/telegram-bot.log"
 LEGACY_BOOT_LOG_LINK="/tmp/telegram-bot-boot.log"
 LEGACY_LOG_DIR="/tmp/telegram-bot-logs"
+POWER_MANAGER_SCRIPT="${BOT_POWER_MANAGER_SCRIPT:-$BASE_DIR/scripts/macos/power_manager.sh}"
+POWER_MANAGER_PLATFORM="${BOT_POWER_PLATFORM:-$(uname -s 2>/dev/null || echo unknown)}"
+POWER_MANAGER_INTERNAL="${BOT_POWER_MANAGER_INTERNAL:-0}"
+
+_power_management_enabled() {
+    [ "$POWER_MANAGER_INTERNAL" != "1" ] &&
+        [ "$POWER_MANAGER_PLATFORM" = "Darwin" ] &&
+        [ -x "$POWER_MANAGER_SCRIPT" ] &&
+        "$POWER_MANAGER_SCRIPT" is-enabled >/dev/null 2>&1
+}
+
+_prepare_power_managed_start() {
+    if ! _power_management_enabled; then
+        return 0
+    fi
+
+    if ! "$POWER_MANAGER_SCRIPT" set-desired on; then
+        echo "❌ macOS 전원 관리 희망 상태를 저장하지 못했습니다."
+        return 11
+    fi
+
+    local power_state
+    power_state=$("$POWER_MANAGER_SCRIPT" current-power 2>/dev/null) || power_state="unknown"
+    case "$power_state" in
+      ac)
+        return 0
+        ;;
+      battery)
+        "$POWER_MANAGER_SCRIPT" reconcile || true
+        echo "🔋 배터리 사용 중이므로 봇을 실행하지 않습니다."
+        echo "   AC 전원이 연결되면 자동으로 시작됩니다."
+        return 10
+        ;;
+      *)
+        echo "❌ 현재 전원 상태를 확인할 수 없어 봇을 시작하지 않습니다."
+        return 11
+        ;;
+    esac
+}
+
+_record_power_managed_stop_intent() {
+    if ! _power_management_enabled; then
+        return 0
+    fi
+    if ! "$POWER_MANAGER_SCRIPT" set-desired off; then
+        echo "❌ macOS 전원 관리 희망 상태를 OFF로 저장하지 못했습니다."
+        echo "   자동 재실행을 방지하기 위해 종료를 중단합니다."
+        return 1
+    fi
+}
+
+_apply_power_start_gate() {
+    _prepare_power_managed_start
+    local result=$?
+    case "$result" in
+      0) return 0 ;;
+      10) return 10 ;;
+      *) return 11 ;;
+    esac
+}
 
 _get_running_pid() {
     # 락 파일에서 PID 읽기 (supervisor 락 파일 우선)
@@ -33,7 +93,9 @@ _get_running_pid() {
         if [ -f "$lf" ]; then
             local pid
             pid=$(cat "$lf" 2>/dev/null)
-            if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
+            local expected_pattern='python.*src\.main'
+            [ "$lf" = "$SUPERVISOR_LOCK_FILE" ] && expected_pattern='python.*src\.supervisor'
+            if [ -n "$pid" ] && _pid_matches_project_command "$pid" "$expected_pattern"; then
                 echo "$pid"
                 return 0
             fi
@@ -55,7 +117,50 @@ _get_running_pid() {
 
 _get_matching_pids() {
     local pattern="$1"
-    ps ax -o pid= -o command= | grep -E "$pattern" | grep -v grep | awk '{print $1}' | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    local candidates pid matches=""
+    candidates=$(ps ax -o pid= -o command= | grep -E "$pattern" | grep -v grep | awk '{print $1}')
+    for pid in $candidates; do
+        if _pid_matches_project_command "$pid" "$pattern"; then
+            matches="$matches $pid"
+        fi
+    done
+    echo "${matches# }"
+}
+
+_pid_matches_project_command() {
+    local pid="$1"
+    local pattern="$2"
+    local command_line process_cwd
+    command_line=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    [ -n "$command_line" ] || return 1
+    echo "$command_line" | grep -Eq "$pattern" || return 1
+    process_cwd=$(_get_process_cwd "$pid")
+    [ "$process_cwd" = "$BASE_DIR" ]
+}
+
+_get_process_cwd() {
+    local pid="$1"
+    local process_cwd=""
+
+    if [ -L "/proc/$pid/cwd" ]; then
+        process_cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+    elif command -v lsof >/dev/null 2>&1; then
+        process_cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+    fi
+
+    if [ -n "$process_cwd" ]; then
+        (cd "$process_cwd" 2>/dev/null && pwd -P) || true
+    fi
+}
+
+_get_descendant_pids() {
+    local parent_pid="$1"
+    local child nested descendants=""
+    for child in $(ps ax -o pid= -o ppid= | awk -v parent="$parent_pid" '$2 == parent {print $1}'); do
+        nested=$(_get_descendant_pids "$child")
+        descendants="$descendants $nested $child"
+    done
+    echo "${descendants# }"
 }
 
 _get_supervisor_pids() {
@@ -156,7 +261,11 @@ _stop_bot_processes() {
 
     if [ "$mode" = "hard" ]; then
         workers=$(_get_worker_pids)
-        _terminate_pids "detached worker" $workers
+        local worker worker_descendants=""
+        for worker in $workers; do
+            worker_descendants="$worker_descendants $(_get_descendant_pids "$worker")"
+        done
+        _terminate_pids "detached worker tree" $worker_descendants $workers
     fi
 
     _cleanup_pid_files
@@ -341,6 +450,10 @@ _tail_logs() {
 
 case "$1" in
   start)
+    _apply_power_start_gate
+    power_gate_result=$?
+    [ "$power_gate_result" -eq 10 ] && exit 0
+    [ "$power_gate_result" -ne 0 ] && exit 1
     if _is_running; then
         echo "⚠️  봇이 이미 실행 중입니다."
         echo "   soft 재시작: ./run.sh restart-soft"
@@ -353,6 +466,7 @@ case "$1" in
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
     ;;
   stop-soft)
+    _record_power_managed_stop_intent || exit 1
     if _is_running; then
         echo "🛑 봇 soft stop 중 (detached worker 유지 시도)..."
         _stop_bot_processes soft
@@ -363,6 +477,7 @@ case "$1" in
     fi
     ;;
   stop-hard)
+    _record_power_managed_stop_intent || exit 1
     if _is_running || [ -n "$(_get_worker_pids)" ]; then
         echo "🛑 봇 hard stop 중 (detached worker 포함)..."
         _stop_bot_processes hard
@@ -375,6 +490,10 @@ case "$1" in
     fi
     ;;
   restart-soft)
+    _apply_power_start_gate
+    power_gate_result=$?
+    [ "$power_gate_result" -eq 10 ] && exit 0
+    [ "$power_gate_result" -ne 0 ] && exit 1
     echo "🔄 봇 soft 재시작 중 (in-flight worker 유지 시도)..."
     _preflight_startup || exit 1
     _stop_bot_processes soft
@@ -382,6 +501,10 @@ case "$1" in
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
     ;;
   restart-hard)
+    _apply_power_start_gate
+    power_gate_result=$?
+    [ "$power_gate_result" -eq 10 ] && exit 0
+    [ "$power_gate_result" -ne 0 ] && exit 1
     echo "🔄 봇 hard 재시작 중 (detached worker 포함 종료)..."
     _preflight_startup || exit 1
     _stop_bot_processes hard
@@ -399,11 +522,28 @@ case "$1" in
     ;;
   status)
     _show_status
+    if _power_management_enabled; then
+        echo ""
+        "$POWER_MANAGER_SCRIPT" status
+    fi
+    ;;
+  power-install)
+    "$BASE_DIR/scripts/macos/install_power_manager.sh"
+    ;;
+  power-uninstall)
+    "$BASE_DIR/scripts/macos/uninstall_power_manager.sh"
+    ;;
+  power-status)
+    "$POWER_MANAGER_SCRIPT" status
     ;;
   log)
     _tail_logs "$2"
     ;;
   trace)
+    _apply_power_start_gate
+    power_gate_result=$?
+    [ "$power_gate_result" -eq 10 ] && exit 0
+    [ "$power_gate_result" -ne 0 ] && exit 1
     echo "🔍 TRACE 모드로 시작"
     _preflight_startup || exit 1
     if _is_running; then
@@ -414,6 +554,10 @@ case "$1" in
     _start_supervisor "TRACE" || exit 1
     ;;
   debug)
+    _apply_power_start_gate
+    power_gate_result=$?
+    [ "$power_gate_result" -eq 10 ] && exit 0
+    [ "$power_gate_result" -ne 0 ] && exit 1
     echo "🐛 DEBUG 모드로 시작"
     _preflight_startup || exit 1
     if _is_running; then
@@ -437,8 +581,17 @@ case "$1" in
     source venv/bin/activate
     PYTHONPYCACHEPREFIX=.build pytest tests/ -v --tb=short
     ;;
+  _power-is-running)
+    _is_running
+    ;;
+  _power-has-processes)
+    _is_running || [ -n "$(_get_worker_pids)" ]
+    ;;
+  _power-worker-pids)
+    _get_worker_pids
+    ;;
   *)
-    echo "사용법: $0 {start|stop-soft|stop-hard|restart-soft|restart-hard|status|log|trace|debug|test|test-integration|test-all}"
+    echo "사용법: $0 {start|stop-soft|stop-hard|restart-soft|restart-hard|status|log|trace|debug|power-install|power-uninstall|power-status|test|test-integration|test-all}"
     echo ""
     echo "  start         - 봇 시작 (기본 LOG_LEVEL=${DEFAULT_LOG_LEVEL})"
     echo "  stop-soft     - supervisor/main만 중지, detached worker 유지 시도"
@@ -449,6 +602,9 @@ case "$1" in
     echo "  log [target]  - 로그 보기 (기본: app, 선택: boot)"
     echo "  trace         - TRACE 모드 soft 재시작"
     echo "  debug         - DEBUG 모드 soft 재시작"
+    echo "  power-install - macOS 전원 관리 LaunchAgent 설치"
+    echo "  power-uninstall - macOS 전원 관리 제거"
+    echo "  power-status  - macOS 전원/희망/프로세스 상태 확인"
     echo "  test          - 단위 테스트 실행"
     echo "  test-integration - 통합 테스트 실행"
     echo "  test-all      - 전체 테스트 실행"

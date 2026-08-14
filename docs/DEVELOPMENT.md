@@ -254,6 +254,22 @@ The supervisor and the main bot process have separate PID artifacts:
 
 `SIGUSR1` schedule reload is handled by the main bot process only. Runtime reload helpers must read `get_main_lock_path()` / `.data/telegram-bot.lock`; sending `SIGUSR1` to the supervisor will not update in-memory jobs.
 
+### macOS Power Management Boundary
+
+Power management is an optional platform adapter, not a portable runtime requirement:
+
+- [`scripts/macos/power_manager.sh`](../scripts/macos/power_manager.sh) owns `pmset` parsing, persisted desired state, reconciliation, macOS notifications, and the event monitor.
+- [`install_power_manager.sh`](../scripts/macos/install_power_manager.sh) renders the committed plist template into the current user's `~/Library/LaunchAgents`, then registers it with `launchctl bootstrap`. Uninstall uses `bootout` and does not alter the current bot process state.
+- [`run.sh`](../run.sh) consults the power manager only when the platform is Darwin, the manager script exists, and `.data/power-management/enabled` exists. Otherwise all lifecycle commands retain their original behavior.
+- The invariant is `should_run = desired_state == on && power_state == ac`. Missing or invalid desired state is fail-safe `off`; unknown power leaves the actual process state unchanged.
+- LaunchAgent runs `power_manager.sh monitor`, which reconciles once at startup and again on `pmset -g pslog` power/wake events. `KeepAlive` restarts the monitor if the event stream exits.
+- Reconciliation uses an atomic directory lock with stale-PID recovery. Repeated events are idempotent: an already-correct process state produces no start, stop, or notification.
+- Power-triggered lifecycle calls set `BOT_POWER_MANAGER_INTERNAL=1`, preventing internal `run.sh start/stop-*` calls from rewriting user intent.
+- Battery reconciliation uses `stop-hard`; user `stop-soft` continues to preserve detached workers. Project workers are selected by command plus working-directory ownership, and hard stop snapshots and terminates their descendant processes before terminating the worker.
+- `BOT_POWER_PLATFORM`, `BOT_POWER_PMSET_BIN`, `BOT_POWER_OSASCRIPT_BIN`, and related `BOT_POWER_*` paths are test seams. Production LaunchAgents rely on their Darwin defaults.
+
+Do not move `pmset`, `osascript`, or `launchctl` calls into portable Python/runtime modules. Non-Darwin environments and macOS installations without the opt-in marker must never participate in power reconciliation.
+
 ## Plugin System
 
 ### Plugin Runtime Surface

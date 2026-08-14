@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.telegram-ai-cli-bot.power-manager</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__POWER_MANAGER_SCRIPT__</string>
+        <string>monitor</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_ROOT__</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>BOT_DATA_DIR</key>
+        <string>__DATA_DIR__</string>
+        <key>BOT_LOG_DIR</key>
+        <string>__LOG_DIR__</string>
+        <key>BOT_POWER_STATE_DIR</key>
+        <string>__STATE_DIR__</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__LAUNCHD_LOG_FILE__</string>
+    <key>StandardErrorPath</key>
+    <string>__LAUNCHD_LOG_FILE__</string>
+</dict>
+</plist>
