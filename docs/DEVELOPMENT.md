@@ -150,6 +150,8 @@ The Telegram boundary is primarily enforced by [`src/telegram_request.py`](../sr
 
 Transient dependency failures raise `NetworkUnavailable`. Once the threshold is reached, later calls raise `CircuitOpen` without touching the network until the reset window expires. A `CircuitOpen` does not count as a Telegram delivery attempt unless an actual send attempt already happened in the same delivery flow.
 
+The `getUpdates` request uses the same circuit state but waits asynchronously for an open circuit's retry window before trying again. This prevents PTB polling from producing an unbounded traceback loop while preserving fail-fast behavior for response delivery and its database-backed retry flow.
+
 Generated detached AI responses are persisted via `store_generated_message()` before Telegram delivery starts. Scheduled chat/workspace/plugin/command results that produce a Telegram notification are also inserted into `message_log` before delivery through `insert_schedule_delivery_log()`. Delivery status then follows this model:
 
 - `pending`: generated response exists and delivery is being attempted
@@ -260,15 +262,21 @@ Power management is an optional platform adapter, not a portable runtime require
 
 - [`scripts/macos/power_manager.sh`](../scripts/macos/power_manager.sh) owns `pmset` parsing, persisted desired state, reconciliation, macOS notifications, and the event monitor.
 - [`install_power_manager.sh`](../scripts/macos/install_power_manager.sh) renders the committed plist template into the current user's `~/Library/LaunchAgents`, then registers it with `launchctl bootstrap`. Uninstall uses `bootout` and does not alter the current bot process state.
+- The installer renders a sanitized runtime `PATH` into the plist. Temporary `/tmp`, `/private/tmp`, `/var/folders/.../T`, `/var/run`, and `~/.codex/tmp` entries are excluded; stable shell, NVM, user-local, and Homebrew directories remain available to AI CLI discovery. Reinstall when CLI locations change.
 - [`run.sh`](../run.sh) consults the power manager only when the platform is Darwin, the manager script exists, and `.data/power-management/enabled` exists. Otherwise all lifecycle commands retain their original behavior.
+- Runtime reporting distinguishes `running` (main exists), `degraded` (supervisor only), and `stopped`. Process ownership checks still treat supervisor-only as active for stop and duplicate-start prevention.
 - The invariant is `should_run = desired_state == on && power_state == ac`. Missing or invalid desired state is fail-safe `off`; unknown power leaves the actual process state unchanged.
 - LaunchAgent runs `power_manager.sh monitor`, which reconciles once at startup and again on `pmset -g pslog` power/wake events. `KeepAlive` restarts the monitor if the event stream exits.
+- `AbandonProcessGroup=true` prevents `launchctl bootout` during reinstall/uninstall from terminating a bot previously spawned by the monitor. The monitor owns a signal trap that terminates only its direct `pmset` pipeline children, avoiding orphaned event-stream processes.
+- Reinstallation allows launchd teardown to settle and retries a transient `bootstrap` failure up to three times. Exhausting those retries removes the opt-in marker and returns a failed installation instead of claiming that monitoring is active.
 - Reconciliation uses an atomic directory lock with stale-PID recovery. Repeated events are idempotent: an already-correct process state produces no start, stop, or notification.
 - Power-triggered lifecycle calls set `BOT_POWER_MANAGER_INTERNAL=1`, preventing internal `run.sh start/stop-*` calls from rewriting user intent.
 - Battery reconciliation uses `stop-hard`; user `stop-soft` continues to preserve detached workers. Project workers are selected by command plus working-directory ownership, and hard stop snapshots and terminates their descendant processes before terminating the worker.
 - `BOT_POWER_PLATFORM`, `BOT_POWER_PMSET_BIN`, `BOT_POWER_OSASCRIPT_BIN`, and related `BOT_POWER_*` paths are test seams. Production LaunchAgents rely on their Darwin defaults.
 
 Do not move `pmset`, `osascript`, or `launchctl` calls into portable Python/runtime modules. Non-Darwin environments and macOS installations without the opt-in marker must never participate in power reconciliation.
+
+Background starts set `BOT_LOG_CONSOLE=0` so structured messages are not duplicated into both `bot.log` and the nohup supervisor log. The application file sink rotates by size, retains old segments for a bounded period, and compresses rotated segments. Telegram polling circuit backoff is the first-line protection against high-rate network-error logs; rotation is the final disk-usage guardrail.
 
 ## Plugin System
 

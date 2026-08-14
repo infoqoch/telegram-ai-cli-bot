@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import plistlib
 import stat
 import subprocess
 import sys
@@ -32,6 +33,7 @@ def _power_env(tmp_path: Path, power: str = "ac") -> tuple[dict[str, str], dict[
     notifications_file = runtime_dir / "notifications"
     running_file = runtime_dir / "running"
     worker_file = runtime_dir / "worker"
+    degraded_file = runtime_dir / "degraded"
 
     pmset = tmp_path / "pmset"
     _write_executable(
@@ -68,6 +70,15 @@ printf '%s\\n' "$*" >> {notifications_file!s}
         f"""#!/bin/bash
 case "$1" in
   _power-is-running) [ -f {running_file!s} ] ;;
+  _power-runtime-state)
+    if [ -f {running_file!s} ]; then
+      echo running
+    elif [ -f {degraded_file!s} ]; then
+      echo degraded
+    else
+      echo stopped
+    fi
+    ;;
   _power-has-processes) [ -f {running_file!s} ] || [ -f {worker_file!s} ] ;;
   start)
     echo start >> {actions_file!s}
@@ -105,6 +116,7 @@ esac
         "notifications": notifications_file,
         "running": running_file,
         "worker": worker_file,
+        "degraded": degraded_file,
         "run_script": run_script,
     }
     return env, paths
@@ -188,6 +200,17 @@ def test_unknown_power_does_not_change_process_state(tmp_path):
 
     assert paths["running"].exists()
     assert not paths["actions"].exists()
+
+
+def test_power_status_reports_supervisor_only_runtime_as_degraded(tmp_path):
+    env, paths = _power_env(tmp_path, power="ac")
+    _enable(env, paths, "on")
+    paths["degraded"].touch()
+
+    result = _run_power(env, "status")
+
+    assert result.returncode == 0
+    assert "bot      : degraded" in result.stdout
 
 
 def test_run_sh_defers_start_on_battery_only_when_power_management_enabled(tmp_path):
@@ -314,6 +337,11 @@ exit 0
             "BOT_POWER_PLUTIL_BIN": "/usr/bin/plutil",
             "BOT_POWER_USER_ID": "501",
             "BOT_RUN_SCRIPT": str(paths["run_script"]),
+            "BOT_POWER_RUNTIME_PATH": (
+                "/opt/example-stable-bin:"
+                "/var/folders/example/T/cmux-cli-shims/session:"
+                f"{Path.home() / '.codex/tmp/arg0/session'}:/var/run/example/bin:/usr/bin:/bin"
+            ),
         }
     )
 
@@ -330,6 +358,14 @@ exit 0
     assert install.returncode == 0, install.stderr
     assert target.exists()
     assert "__PROJECT_ROOT__" not in target.read_text(encoding="utf-8")
+    plist = plistlib.loads(target.read_bytes())
+    assert plist["AbandonProcessGroup"] is True
+    runtime_path = plist["EnvironmentVariables"]["PATH"]
+    assert "/opt/example-stable-bin" in runtime_path.split(":")
+    assert "/usr/bin" in runtime_path.split(":")
+    assert "/var/folders/example/T/cmux-cli-shims/session" not in runtime_path
+    assert str(Path.home() / ".codex/tmp/arg0/session") not in runtime_path
+    assert "/var/run/example/bin" not in runtime_path
     assert (paths["state"] / "enabled").exists()
     assert "bootstrap gui/501" in launchctl_calls.read_text(encoding="utf-8")
 
@@ -357,3 +393,46 @@ exit 0
     assert uninstall.returncode == 0
     assert not target.exists()
     assert not (paths["state"] / "enabled").exists()
+
+
+def test_installer_retries_transient_launchctl_bootstrap_failure(tmp_path):
+    env, paths = _power_env(tmp_path, power="ac")
+    launch_agents = tmp_path / "LaunchAgents"
+    launchctl_attempts = tmp_path / "launchctl-attempts"
+    launchctl = tmp_path / "launchctl"
+    _write_executable(
+        launchctl,
+        f"""#!/bin/bash
+if [ "$1" = "bootstrap" ]; then
+  attempt=0
+  [ -f {launchctl_attempts!s} ] && attempt=$(cat {launchctl_attempts!s})
+  attempt=$((attempt + 1))
+  echo "$attempt" > {launchctl_attempts!s}
+  [ "$attempt" -ge 2 ]
+  exit $?
+fi
+exit 0
+""",
+    )
+    env.update(
+        {
+            "BOT_POWER_LAUNCH_AGENTS_DIR": str(launch_agents),
+            "BOT_POWER_LAUNCHCTL_BIN": str(launchctl),
+            "BOT_POWER_PLUTIL_BIN": "/usr/bin/plutil",
+            "BOT_POWER_USER_ID": "501",
+            "BOT_RUN_SCRIPT": str(paths["run_script"]),
+        }
+    )
+
+    result = subprocess.run(
+        [str(INSTALLER)],
+        cwd=PROJECT_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert launchctl_attempts.read_text(encoding="utf-8").strip() == "2"
+    assert (paths["state"] / "enabled").exists()

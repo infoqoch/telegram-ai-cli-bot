@@ -125,7 +125,7 @@ def create_app(settings) -> Application:
         Application.builder()
         .token(settings.telegram_token)
         .request(build_guarded_telegram_request())
-        .get_updates_request(build_guarded_telegram_request())
+        .get_updates_request(build_guarded_telegram_request(wait_for_open_circuit=True))
         .concurrent_updates(True)
         .post_init(post_init)
         .build()
@@ -248,7 +248,8 @@ def main() -> None:
     # 로깅 초기화 (가장 먼저!)
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     log_file = os.getenv("LOG_FILE")  # 옵션: 파일 로깅
-    setup_logging(level=log_level, log_file=log_file)
+    console_enabled = os.getenv("BOT_LOG_CONSOLE", "1") != "0"
+    setup_logging(level=log_level, log_file=log_file, console=console_enabled)
 
     logger.trace("main() started")
 

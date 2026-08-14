@@ -21,6 +21,7 @@ Usage:
 
 import contextvars
 import logging
+import os
 import sys
 import uuid
 from typing import Optional
@@ -138,13 +139,15 @@ def setup_logging(
     level: str = "INFO",
     log_file: Optional[str] = None,
     intercept_stdlib: bool = True,
+    console: bool = True,
 ) -> None:
     """로깅 시스템 초기화.
 
     Args:
         level: 로그 레벨 (TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: 로그 파일 경로 (None이면 콘솔만)
+        log_file: 기본 bot.log 외에 추가할 로그 파일 경로
         intercept_stdlib: 표준 logging 라이브러리 통합 여부
+        console: stderr 콘솔 sink 활성화 여부
     """
     # 기존 핸들러 제거
     logger.remove()
@@ -153,15 +156,19 @@ def setup_logging(
     log_dir.mkdir(parents=True, exist_ok=True)
     default_log_file = log_dir / "bot.log"
 
-    # 콘솔 출력 (컬러)
-    logger.add(
-        sys.stderr,
-        format=_log_format,
-        level=level,
-        colorize=True,
-        backtrace=True,
-        diagnose=False,
-    )
+    # 백그라운드 supervisor에서는 파일 중복 기록을 피하기 위해 끌 수 있다.
+    if console:
+        logger.add(
+            sys.stderr,
+            format=_log_format,
+            level=level,
+            colorize=True,
+            backtrace=True,
+            diagnose=False,
+        )
+
+    rotation = os.getenv("BOT_LOG_ROTATION", "100 MB")
+    retention = os.getenv("BOT_LOG_RETENTION", "14 days")
 
     # 항상 파일에도 출력 (nohup stderr 리다이렉트가 자식 프로세스에서 동작하지 않는 문제 우회)
     logger.add(
@@ -171,8 +178,9 @@ def setup_logging(
         colorize=False,
         backtrace=True,
         diagnose=False,
-        rotation="00:00",
-        retention="14 days",
+        rotation=rotation,
+        retention=retention,
+        compression="gz",
     )
 
     # 파일 출력 (옵션)

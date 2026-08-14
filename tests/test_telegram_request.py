@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from telegram.request import BaseRequest
 
-from src.network_guard import NetworkUnavailable, network_guard
+from src.network_guard import CircuitOpen, NetworkUnavailable, network_guard
 from src.telegram_request import GuardedTelegramRequest
 
 
@@ -73,3 +75,37 @@ async def test_guarded_telegram_request_wraps_direct_do_request_errors():
 
     snapshot = network_guard.snapshot("telegram")
     assert snapshot.failures == 1
+
+
+@pytest.mark.asyncio
+async def test_polling_request_waits_for_open_circuit_before_retrying():
+    calls = 0
+    waits: list[float] = []
+
+    class FakeGuard:
+        async def run_async(self, dependency, func, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise CircuitOpen(dependency, "circuit open")
+            return await func(*args, **kwargs)
+
+        def snapshot(self, dependency):
+            return SimpleNamespace(seconds_until_retry=7.0)
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    inner = FakeRequest()
+    request = GuardedTelegramRequest(
+        inner,
+        guard=FakeGuard(),
+        wait_for_open_circuit=True,
+        sleep=fake_sleep,
+    )
+
+    result = await request.do_request("https://example.invalid", "POST")
+
+    assert result == (200, b'{"ok":true,"result":true}')
+    assert calls == 2
+    assert waits == [7.0]

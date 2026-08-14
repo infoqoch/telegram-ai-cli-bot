@@ -80,6 +80,15 @@ bot should run = desired state is ON AND power source is AC
 - A user `stop-soft` keeps its existing meaning: supervisor/main stop while in-flight detached workers may finish.
 - macOS notifications are emitted only when the power manager actually starts or battery-stops the bot. Notification visibility still depends on macOS notification and Focus settings.
 - If the power source cannot be determined, the manager does not start or stop anything and records the condition in its log.
+- Reinstalling or uninstalling the LaunchAgent does not terminate a bot that is already running. The monitor explicitly cleans up only its own `pmset` stream children when it exits.
+
+The installer writes a sanitized snapshot of the current command `PATH` into the generated LaunchAgent plist. Temporary macOS paths such as cmux shims under `/var/folders/.../T`, `/var/run`, and `~/.codex/tmp` are removed, while stable CLI locations such as the active NVM `bin`, `~/.local/bin`, and Homebrew remain available. Reinstall after moving or upgrading an AI CLI to a different directory. `BOT_POWER_RUNTIME_PATH` can provide an explicit source path when installation must not use the current shell path.
+
+`./run.sh status` and `./run.sh power-status` distinguish runtime health:
+
+- `running`: the main bot process exists.
+- `degraded`: the supervisor exists but the main bot does not, usually during restart or after a startup failure.
+- `stopped`: neither main nor supervisor exists.
 
 Runtime files use the project data directory:
 
@@ -91,7 +100,7 @@ Runtime files use the project data directory:
 ~/Library/LaunchAgents/com.telegram-ai-cli-bot.power-manager.plist
 ```
 
-If `BOT_DATA_DIR` or `BOT_LOG_DIR` changes, reinstall the LaunchAgent so its generated plist receives the new absolute paths.
+If `BOT_DATA_DIR`, `BOT_LOG_DIR`, or the AI CLI path changes, reinstall the LaunchAgent so its generated plist receives the current runtime values.
 
 Remove power management without changing the bot's current process state:
 
@@ -133,6 +142,9 @@ Use `run.sh` for normal starts and stops. A process killed directly through Acti
 | `GOOGLE_CALENDAR_ID` | `primary` | Google Calendar ID to use |
 | `BOT_DATA_DIR` | `.data/` | Root directory for runtime files (locks, PID, logs) |
 | `BOT_LOG_DIR` | `.data/logs/` | Log file directory |
+| `BOT_LOG_ROTATION` | `100 MB` | Maximum active application log size before rotation |
+| `BOT_LOG_RETENTION` | `14 days` | Rotated application log retention |
+| `BOT_POWER_RUNTIME_PATH` | current sanitized `PATH` | Explicit command path captured by `power-install` |
 | `BOT_MAIN_MENU_PLUGINS` | (none) | Comma-separated plugin names to promote to the main menu |
 | `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
 | `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (`sol-xhigh`/`sol-high`/`terra-xhigh`; legacy `xhigh`/`high`/`medium` and `gpt54_*` aliases still work) |
@@ -148,6 +160,8 @@ Network calls are grouped by dependency, not by feature. A Google Calendar outag
 - `telegram`: Telegram Bot API request/send/retrieve/admin notification traffic
 - `google_calendar`: Google Calendar API calls from the Calendar plugin
 - `weather`: Weather and geocoding API calls from the Weather plugin
+
+When the Telegram circuit is open, the long-polling request waits until the circuit retry window instead of immediately throwing the same error in a tight loop. Delivery requests still fail fast so persisted delivery retry state remains authoritative. Application logs rotate at 100 MB by default, retain 14 days, and compress rotated files.
 
 When a circuit is open, the bot skips calls to that dependency until the reset window expires. Telegram delivery retry does not consume retry attempts while the Telegram circuit is already open, because no real network send was attempted.
 

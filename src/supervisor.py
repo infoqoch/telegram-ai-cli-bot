@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from src.ai.registry import build_default_registry
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.lock import ProcessLock
@@ -97,6 +98,13 @@ def _run_preflight() -> bool:
     if not settings.telegram_token:
         logger.error("Supervisor preflight failed: TELEGRAM_TOKEN is empty")
         _notify_startup_failure("TELEGRAM_TOKEN is 비어 있어 시작하지 못했습니다.")
+        return False
+
+    try:
+        build_default_registry(settings)
+    except RuntimeError as exc:
+        logger.error(f"Supervisor preflight failed: AI provider unavailable: {exc}")
+        _notify_startup_failure("사용 가능한 AI CLI가 없어 시작하지 못했습니다.", str(exc))
         return False
 
     return True
@@ -205,7 +213,8 @@ def main():
     # 로깅 초기화
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     log_file = os.getenv("LOG_FILE")
-    setup_logging(level=log_level, log_file=log_file)
+    console_enabled = os.getenv("BOT_LOG_CONSOLE", "1") != "0"
+    setup_logging(level=log_level, log_file=log_file, console=console_enabled)
 
     logger.trace("main() started")
 

@@ -31,6 +31,24 @@ def test_run_preflight_rejects_empty_telegram_token(monkeypatch):
     notify.assert_called_once()
 
 
+def test_run_preflight_rejects_missing_ai_provider(monkeypatch):
+    monkeypatch.setattr(
+        supervisor,
+        "get_settings",
+        MagicMock(return_value=SimpleNamespace(telegram_token="token")),
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "build_default_registry",
+        MagicMock(side_effect=RuntimeError("No supported AI CLI provider found")),
+    )
+    notify = MagicMock()
+    monkeypatch.setattr(supervisor, "notify_admin", notify)
+
+    assert supervisor._run_preflight() is False
+    notify.assert_called_once()
+
+
 def test_record_crash_time_prunes_outside_window():
     crash_times = deque([100.0, 150.0])
 

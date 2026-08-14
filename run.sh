@@ -275,6 +275,19 @@ _is_running() {
     [ -n "$(_get_running_pid)" ]
 }
 
+_runtime_state() {
+    local supervisors mains
+    supervisors=$(_get_supervisor_pids)
+    mains=$(_get_main_pids)
+    if [ -n "$mains" ]; then
+        echo "running"
+    elif [ -n "$supervisors" ]; then
+        echo "degraded"
+    else
+        echo "stopped"
+    fi
+}
+
 _ensure_log_dir() {
     mkdir -p "$DATA_DIR" "$LOG_DIR"
 }
@@ -315,9 +328,13 @@ _preflight_startup() {
     local check_output
     if ! check_output=$(PYTHONPYCACHEPREFIX=.build ./venv/bin/python - <<'PY' 2>&1
 import src.main  # noqa: F401 - startup import validation only
+from src.ai.registry import build_default_registry
+from src.config import get_settings
+
+build_default_registry(get_settings())
 PY
     ); then
-        echo "❌ 시작 전 점검 실패: 앱 import 단계에서 오류 발생"
+        echo "❌ 시작 전 점검 실패: 앱/AI CLI 검증 단계에서 오류 발생"
         echo "$check_output" | tail -20
         echo "   의존성/환경을 먼저 확인하세요."
         echo "   예: ./venv/bin/pip install -e ."
@@ -359,7 +376,7 @@ _start_supervisor() {
     source venv/bin/activate
     unset CLAUDECODE
 
-    LOG_LEVEL="$level" BOT_DATA_DIR="$DATA_DIR" BOT_LOG_DIR="$LOG_DIR" BOT_LOCK_FILE="$LOCK_FILE" \
+    LOG_LEVEL="$level" BOT_LOG_CONSOLE=0 BOT_DATA_DIR="$DATA_DIR" BOT_LOG_DIR="$LOG_DIR" BOT_LOCK_FILE="$LOCK_FILE" \
         BOT_SUPERVISOR_LOCK_FILE="$SUPERVISOR_LOCK_FILE" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build \
         nohup python -m src.supervisor >> "$boot_log" 2>&1 < /dev/null &
     local new_pid=$!
@@ -407,8 +424,10 @@ _show_status() {
     mains=$(_get_main_pids)
     workers=$(_get_worker_pids)
 
-    if [ -n "$supervisors$mains" ]; then
+    if [ -n "$mains" ]; then
         echo "✅ 봇 실행 중"
+    elif [ -n "$supervisors" ]; then
+        echo "⚠️  봇 비정상 상태 (Supervisor 실행 중, Main 없음)"
     else
         echo "❌ 봇 중지됨"
     fi
@@ -425,7 +444,7 @@ _show_status() {
 
     echo ""
     echo "로그:"
-    echo "  main: $APP_LOG_LINK (daily rotate at midnight)"
+    echo "  main: $APP_LOG_LINK (size rotation + retention)"
 }
 
 _tail_logs() {
@@ -583,6 +602,9 @@ case "$1" in
     ;;
   _power-is-running)
     _is_running
+    ;;
+  _power-runtime-state)
+    _runtime_state
     ;;
   _power-has-processes)
     _is_running || [ -n "$(_get_worker_pids)" ]

@@ -92,6 +92,21 @@ _bot_is_running() {
     BOT_POWER_MANAGER_INTERNAL=1 "$RUN_SCRIPT" _power-is-running >/dev/null 2>&1
 }
 
+_bot_runtime_state() {
+    local state
+    state=$(BOT_POWER_MANAGER_INTERNAL=1 "$RUN_SCRIPT" _power-runtime-state 2>/dev/null || true)
+    case "$state" in
+      running|degraded|stopped) echo "$state" ;;
+      *)
+        if _bot_is_running; then
+            echo "running"
+        else
+            echo "stopped"
+        fi
+        ;;
+    esac
+}
+
 _bot_has_processes() {
     BOT_POWER_MANAGER_INTERNAL=1 "$RUN_SCRIPT" _power-has-processes >/dev/null 2>&1
 }
@@ -227,6 +242,15 @@ _monitor() {
     _log "power monitor started"
     _reconcile || true
 
+    _cleanup_monitor_children() {
+        local child_pids
+        child_pids=$(ps ax -o pid= -o ppid= | awk -v parent="$$" '$2 == parent {print $1}')
+        if [ -n "$child_pids" ]; then
+            kill -TERM $child_pids 2>/dev/null || true
+        fi
+    }
+    trap _cleanup_monitor_children EXIT INT TERM
+
     "$PMSET_BIN" -g pslog 2>> "$LOG_FILE" | while IFS= read -r line; do
         if ! _is_enabled; then
             break
@@ -234,7 +258,9 @@ _monitor() {
         case "$line" in
           *"Now drawing from"*|*"wake"*|*"Wake"*) _reconcile || true ;;
         esac
-    done
+    done &
+    local stream_pid=$!
+    wait "$stream_pid" 2>/dev/null || true
 
     _log "power monitor stopped"
 }
@@ -244,11 +270,11 @@ _show_status() {
     local enabled="off"
     local desired
     local power
-    local actual="stopped"
+    local actual
     _is_enabled && enabled="on"
     desired=$(_get_desired_state)
     power=$(_current_power || true)
-    _bot_is_running && actual="running"
+    actual=$(_bot_runtime_state)
 
     echo "macOS 전원 관리:"
     echo "  installed: $enabled"

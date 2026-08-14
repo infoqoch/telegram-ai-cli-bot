@@ -15,12 +15,16 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>AbandonProcessGroup</key>
+    <true/>
     <key>ProcessType</key>
     <string>Background</string>
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <key>EnvironmentVariables</key>
     <dict>
+        <key>PATH</key>
+        <string>__RUNTIME_PATH__</string>
         <key>BOT_DATA_DIR</key>
         <string>__DATA_DIR__</string>
         <key>BOT_LOG_DIR</key>
