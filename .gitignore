@@ -53,3 +53,8 @@ GEMINI.md
 
 # Antigravity CLI project config (machine-specific absolute paths)
 .agents/
+
+# Local AI session and research artifacts
+.ai/tmp/
+.ai/*-session-summary-*.txt
+.ai/*-telegram-relay-*.txt
