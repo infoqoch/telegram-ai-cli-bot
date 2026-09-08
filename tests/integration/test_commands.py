@@ -161,7 +161,7 @@ class TestNewSessionCommands:
         assert "📚 ⚡ Haiku" in button_texts
         assert "🤖 🧠 Sol XHigh" in button_texts
         assert "🤖 🚀 Sol High" in button_texts
-        assert "🤖 ⚡ Terra XHigh" in button_texts
+        assert "🤖 🧠 Astra XHigh" in button_texts
 
     @pytest.mark.asyncio
     async def test_new_codex_profile_switches_selected_provider(self, handlers, session_store):

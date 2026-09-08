@@ -93,16 +93,16 @@ class TestCodexClient:
         assert cmd[cmd.index("-m") + 1] == "gpt-5.6-sol"
         assert 'model_reasoning_effort="high"' in cmd
 
-    def test_build_command_uses_terra_xhigh_profile(self, client):
-        """Terra XHigh should pass both the model and explicit reasoning."""
+    def test_build_command_uses_astra_xhigh_profile(self, client):
+        """Astra XHigh should pass both the model and explicit reasoning."""
         cmd = client._build_command(
             "Hello",
             session_id=None,
-            model="terra-xhigh",
+            model="astra-xhigh",
             workspace_path=None,
         )
 
-        assert cmd[cmd.index("-m") + 1] == "gpt-5.6-terra"
+        assert cmd[cmd.index("-m") + 1] == "gpt-6-astra"
         assert 'model_reasoning_effort="xhigh"' in cmd
 
     @pytest.mark.asyncio

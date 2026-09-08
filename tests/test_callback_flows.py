@@ -514,7 +514,7 @@ class TestSessionCallbackFlows:
         assert "📚 ⚡ Haiku" in buttons
         assert "🤖 🧠 Sol XHigh" in buttons
         assert "🤖 🚀 Sol High" in buttons
-        assert "🤖 ⚡ Terra XHigh" in buttons
+        assert "🤖 🧠 Astra XHigh" in buttons
 
     @pytest.mark.asyncio
     async def test_sess_new_force_reply(self, handlers):

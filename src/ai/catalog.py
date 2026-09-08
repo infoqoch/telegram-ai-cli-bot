@@ -19,6 +19,12 @@ from src.ui_emoji import (
 
 SUPPORTED_PROVIDERS = ["claude", "codex", "gemini", "agy"]
 DEFAULT_PROVIDER = "claude"
+DEFAULT_MODEL_KEYS = {
+    "claude": "opus",
+    "codex": "sol-xhigh",
+    "gemini": "gemini-pro",
+    "agy": "agy-pro-high",
+}
 
 
 @dataclass(frozen=True)
@@ -91,6 +97,16 @@ MODEL_PROFILES = {
     ],
     "codex": [
         ModelProfile(
+            key="astra-xhigh",
+            provider="codex",
+            label="Astra XHigh",
+            short_label="Astra XHigh",
+            button_label="Astra XHigh",
+            badge=MODEL_BADGE_TOP,
+            provider_model="gpt-6-astra",
+            reasoning_effort="xhigh",
+        ),
+        ModelProfile(
             key="sol-xhigh",
             provider="codex",
             label="Sol XHigh",
@@ -109,16 +125,6 @@ MODEL_PROFILES = {
             badge=MODEL_BADGE_MID,
             provider_model="gpt-5.6-sol",
             reasoning_effort="high",
-        ),
-        ModelProfile(
-            key="terra-xhigh",
-            provider="codex",
-            label="Terra XHigh",
-            short_label="Terra XHigh",
-            button_label="Terra XHigh",
-            badge=MODEL_BADGE_LIGHT,
-            provider_model="gpt-5.6-terra",
-            reasoning_effort="xhigh",
         ),
     ],
     "gemini": [
@@ -206,15 +212,16 @@ MODEL_KEY_ALIASES = {
         # provider-local profiles. The concrete CLI model can now change independently.
         "xhigh": "sol-xhigh",
         "high": "sol-high",
-        "medium": "terra-xhigh",
+        "medium": "astra-xhigh",
         "codex_xhigh": "sol-xhigh",
         "codex_high": "sol-high",
-        "codex_medium": "terra-xhigh",
+        "codex_medium": "astra-xhigh",
         "gpt54_xhigh": "sol-xhigh",
         "gpt54_high": "sol-high",
         "gpt55_xhigh": "sol-xhigh",
         "gpt55_high": "sol-high",
-        "gpt53_codex_medium": "terra-xhigh",
+        "gpt53_codex_medium": "astra-xhigh",
+        "terra-xhigh": "astra-xhigh",
     },
     "agy": {
         "gemini-3.5-pro": "agy-pro-high",
@@ -279,14 +286,16 @@ def _find_provider_profile(provider: str, model: str) -> ModelProfile | None:
 def get_default_model(provider: str) -> str:
     """Return default model profile key for a provider.
 
-    Priority: env var override > first (highest) model in MODEL_PROFILES.
+    Priority: env var override > built-in provider default > first available profile.
     """
     overrides = _get_default_model_overrides()
     override = overrides.get(provider)
     resolved_override = resolve_model_key(override, provider)
     if resolved_override and _find_provider_profile(provider, resolved_override):
         return resolved_override
-    # First profile = highest tier model
+    built_in_default = DEFAULT_MODEL_KEYS.get(provider)
+    if built_in_default and _find_provider_profile(provider, built_in_default):
+        return built_in_default
     profiles = MODEL_PROFILES.get(provider, MODEL_PROFILES[DEFAULT_PROVIDER])
     return profiles[0].key
 
@@ -344,7 +353,7 @@ def infer_provider_from_model(model: str | None) -> str:
     if (
         model.startswith("gpt")
         or model.startswith("codex")
-        or canonical_model in {"sol-xhigh", "sol-high", "terra-xhigh"}
+        or canonical_model in {"sol-xhigh", "sol-high", "astra-xhigh"}
     ):
         return "codex"
     if canonical_model.startswith("agy-") or canonical_model.startswith("gemini-3.5"):

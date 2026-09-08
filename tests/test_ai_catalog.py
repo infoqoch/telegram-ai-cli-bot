@@ -1,8 +1,11 @@
 """AI model catalog tests."""
 
+from unittest.mock import patch
+
 from src.ai.catalog import (
     get_default_model,
     get_profile,
+    get_provider_profiles,
     infer_provider_from_model,
     is_supported_model,
     normalize_model,
@@ -18,13 +21,24 @@ def test_codex_sol_profile_uses_requested_model_and_reasoning():
     assert profile.reasoning_effort == "high"
 
 
-def test_codex_terra_profile_uses_xhigh_reasoning():
-    """Terra profile should use GPT-5.6 Terra with xhigh reasoning."""
-    profile = get_profile("codex", "terra-xhigh")
+def test_codex_astra_profile_uses_xhigh_reasoning():
+    """Astra profile should use GPT-6 Astra with xhigh reasoning."""
+    profile = get_profile("codex", "astra-xhigh")
 
-    assert profile.key == "terra-xhigh"
-    assert profile.provider_model == "gpt-5.6-terra"
+    assert profile.key == "astra-xhigh"
+    assert profile.provider_model == "gpt-6-astra"
     assert profile.reasoning_effort == "xhigh"
+
+
+def test_codex_astra_profile_is_listed_first():
+    """Astra should be the first option in Codex model pickers."""
+    assert get_provider_profiles("codex")[0].key == "astra-xhigh"
+
+
+def test_codex_builtin_default_remains_sol_without_env_override():
+    """Picker order should not silently change the built-in default."""
+    with patch("src.ai.catalog._get_default_model_overrides", return_value={}):
+        assert get_default_model("codex") == "sol-xhigh"
 
 
 def test_codex_legacy_gpt54_key_resolves_to_current_profile():
@@ -40,7 +54,7 @@ def test_codex_legacy_gpt54_key_resolves_to_current_profile():
 def test_codex_stable_key_provider_inference():
     """Command parsing should recognize stable Codex profile keys."""
     assert infer_provider_from_model("sol-high") == "codex"
-    assert infer_provider_from_model("terra-xhigh") == "codex"
+    assert infer_provider_from_model("astra-xhigh") == "codex"
     assert get_default_model("codex") == "sol-xhigh"
 
 
@@ -54,7 +68,8 @@ def test_codex_previous_stable_keys_resolve_to_new_profiles():
     """Previously persisted provider-local keys should keep working."""
     assert normalize_model("codex", "xhigh") == "sol-xhigh"
     assert normalize_model("codex", "high") == "sol-high"
-    assert normalize_model("codex", "medium") == "terra-xhigh"
+    assert normalize_model("codex", "medium") == "astra-xhigh"
+    assert normalize_model("codex", "terra-xhigh") == "astra-xhigh"
 
 
 def test_agy_profiles_use_stable_keys_with_exact_cli_model_names():
