@@ -7,6 +7,7 @@ import plistlib
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -159,6 +160,70 @@ def test_ac_power_starts_once_when_desired_on(tmp_path):
     assert "전원이 연결되어" in paths["notifications"].read_text(encoding="utf-8")
 
     assert _run_power(env, "reconcile").returncode == 0
+    assert paths["actions"].read_text(encoding="utf-8").splitlines() == ["start"]
+
+
+def test_daily_start_overrides_desired_off_and_starts_once_on_ac(tmp_path):
+    env, paths = _power_env(tmp_path, power="ac")
+    _enable(env, paths, "off")
+
+    assert _run_power(env, "daily-start").returncode == 0
+    assert _run_power(env, "daily-start").returncode == 0
+
+    assert (paths["state"] / "desired_state").read_text(encoding="utf-8").strip() == "on"
+    assert paths["running"].exists()
+    assert paths["actions"].read_text(encoding="utf-8").splitlines() == ["start"]
+
+
+def test_daily_start_on_battery_preserves_on_for_later_ac_start(tmp_path):
+    env, paths = _power_env(tmp_path, power="battery")
+    _enable(env, paths, "off")
+
+    assert _run_power(env, "daily-start").returncode == 0
+
+    assert (paths["state"] / "desired_state").read_text(encoding="utf-8").strip() == "on"
+    assert not paths["running"].exists()
+    assert not paths["actions"].exists()
+
+    paths["power"].write_text("ac", encoding="utf-8")
+    assert _run_power(env, "reconcile").returncode == 0
+    assert paths["running"].exists()
+    assert paths["actions"].read_text(encoding="utf-8").splitlines() == ["start"]
+
+
+def test_daily_start_waits_for_active_reconciliation(tmp_path):
+    env, paths = _power_env(tmp_path, power="ac")
+    _enable(env, paths, "off")
+    env["BOT_POWER_DAILY_RETRY_ATTEMPTS"] = "20"
+    env["BOT_POWER_DAILY_RETRY_DELAY_SECONDS"] = "0.05"
+
+    lock_dir = paths["state"] / "reconcile.lock"
+    lock_dir.mkdir()
+    blocker = subprocess.Popen(["sleep", "30"])
+    (lock_dir / "pid").write_text(f"{blocker.pid}\n", encoding="utf-8")
+    process = subprocess.Popen(
+        [str(POWER_MANAGER), "daily-start"],
+        cwd=PROJECT_ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        time.sleep(0.2)
+        blocker.terminate()
+        blocker.wait(timeout=5)
+        _, stderr = process.communicate(timeout=5)
+    finally:
+        if blocker.poll() is None:
+            blocker.terminate()
+            blocker.wait(timeout=5)
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0, stderr
+    assert paths["running"].exists()
     assert paths["actions"].read_text(encoding="utf-8").splitlines() == ["start"]
 
 
@@ -397,11 +462,18 @@ exit 0
     )
 
     target = launch_agents / "com.telegram-ai-cli-bot.power-manager.plist"
+    daily_target = launch_agents / "com.telegram-ai-cli-bot.daily-start.plist"
+    runtime_script = paths["state"] / "runtime" / "power_manager.sh"
     assert install.returncode == 0, install.stderr
     assert target.exists()
+    assert daily_target.exists()
+    assert runtime_script.exists()
+    assert os.access(runtime_script, os.X_OK)
     assert "__PROJECT_ROOT__" not in target.read_text(encoding="utf-8")
     plist = plistlib.loads(target.read_bytes())
     assert plist["AbandonProcessGroup"] is True
+    assert plist["ProgramArguments"][0] == str(runtime_script)
+    assert plist["EnvironmentVariables"]["BOT_RUN_SCRIPT"] == str(paths["run_script"])
     runtime_path = plist["EnvironmentVariables"]["PATH"]
     assert "/opt/example-stable-bin" in runtime_path.split(":")
     assert "/usr/bin" in runtime_path.split(":")
@@ -409,7 +481,16 @@ exit 0
     assert str(Path.home() / ".codex/tmp/arg0/session") not in runtime_path
     assert "/var/run/example/bin" not in runtime_path
     assert (paths["state"] / "enabled").exists()
-    assert "bootstrap gui/501" in launchctl_calls.read_text(encoding="utf-8")
+    launchctl_output = launchctl_calls.read_text(encoding="utf-8")
+    assert f"bootstrap gui/501 {target}" in launchctl_output
+    assert f"bootstrap gui/501 {daily_target}" in launchctl_output
+
+    daily_plist = plistlib.loads(daily_target.read_bytes())
+    assert daily_plist["ProgramArguments"][0] == str(runtime_script)
+    assert daily_plist["ProgramArguments"][-1] == "daily-start"
+    assert daily_plist["StartCalendarInterval"] == {"Hour": 3, "Minute": 0}
+    assert daily_plist["RunAtLoad"] is False
+    assert "KeepAlive" not in daily_plist
 
     (paths["state"] / "desired_state").write_text("on\n", encoding="utf-8")
     reinstall = subprocess.run(
@@ -434,6 +515,8 @@ exit 0
 
     assert uninstall.returncode == 0
     assert not target.exists()
+    assert not daily_target.exists()
+    assert not runtime_script.exists()
     assert not (paths["state"] / "enabled").exists()
 
 
@@ -476,5 +559,51 @@ exit 0
     )
 
     assert result.returncode == 0, result.stderr
-    assert launchctl_attempts.read_text(encoding="utf-8").strip() == "2"
+    assert launchctl_attempts.read_text(encoding="utf-8").strip() == "3"
     assert (paths["state"] / "enabled").exists()
+
+
+def test_installer_rolls_back_both_agents_when_daily_bootstrap_fails(tmp_path):
+    env, paths = _power_env(tmp_path, power="ac")
+    launch_agents = tmp_path / "LaunchAgents"
+    launchctl_calls = tmp_path / "launchctl-calls"
+    launchctl = tmp_path / "launchctl"
+    _write_executable(
+        launchctl,
+        f"""#!/bin/bash
+echo "$*" >> {launchctl_calls!s}
+if [ "$1" = "bootstrap" ] && [[ "$3" == *daily-start.plist ]]; then
+  exit 1
+fi
+exit 0
+""",
+    )
+    env.update(
+        {
+            "BOT_POWER_LAUNCH_AGENTS_DIR": str(launch_agents),
+            "BOT_POWER_LAUNCHCTL_BIN": str(launchctl),
+            "BOT_POWER_PLUTIL_BIN": "/usr/bin/plutil",
+            "BOT_POWER_USER_ID": "501",
+            "BOT_RUN_SCRIPT": str(paths["run_script"]),
+        }
+    )
+
+    result = subprocess.run(
+        [str(INSTALLER)],
+        cwd=PROJECT_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    monitor_target = launch_agents / "com.telegram-ai-cli-bot.power-manager.plist"
+    daily_target = launch_agents / "com.telegram-ai-cli-bot.daily-start.plist"
+    runtime_script = paths["state"] / "runtime" / "power_manager.sh"
+    assert result.returncode != 0
+    assert not monitor_target.exists()
+    assert not daily_target.exists()
+    assert not runtime_script.exists()
+    assert not (paths["state"] / "enabled").exists()
+    launchctl_output = launchctl_calls.read_text(encoding="utf-8")
+    assert "bootout gui/501/com.telegram-ai-cli-bot.power-manager" in launchctl_output

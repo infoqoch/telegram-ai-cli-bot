@@ -76,6 +76,7 @@ bot should run = desired state is ON AND power source is AC
 
 - `./run.sh start`, `restart-soft`, or `restart-hard` records `desired=on`. On battery, the bot remains stopped and starts automatically after AC power returns.
 - `./run.sh stop-soft` or `stop-hard` records `desired=off`, so reconnecting AC does not restart a bot the user stopped.
+- Every day at 03:00, a separate calendar LaunchAgent records `desired=on` and reconciles the bot state. If AC power is available, a stopped bot starts; if the Mac is on battery, the bot stays stopped with `desired=on` and starts after AC power returns. A manual stop before 03:00 is therefore overridden by the daily policy.
 - A battery transition performs a hard stop, including detached workers and their child processes, to avoid continued battery use. `desired=on` is preserved for the later AC restart.
 - A user `stop-soft` keeps its existing meaning: supervisor/main stop while in-flight detached workers may finish.
 - macOS notifications are emitted only when the power manager actually starts or battery-stops the bot. Notification visibility still depends on macOS notification and Focus settings.
@@ -95,10 +96,16 @@ Runtime files use the project data directory:
 ```text
 .data/power-management/desired_state
 .data/power-management/enabled
+.data/power-management/runtime/power_manager.sh
 .data/logs/power-manager.log
 .data/logs/power-manager-launchd.log
 ~/Library/LaunchAgents/com.telegram-ai-cli-bot.power-manager.plist
+~/Library/LaunchAgents/com.telegram-ai-cli-bot.daily-start.plist
 ```
+
+The daily job uses launchd's `StartCalendarInterval`. A 03:00 run missed while the Mac is asleep is delivered after the next wake; the LaunchAgent does not wake or power on the Mac itself.
+
+The installer snapshots `power_manager.sh` into the runtime directory above. Both LaunchAgents execute that installed copy so editing or updating the project source cannot change a shell process that is already running; reinstall after changing the source.
 
 If `BOT_DATA_DIR`, `BOT_LOG_DIR`, or the AI CLI path changes, reinstall the LaunchAgent so its generated plist receives the current runtime values.
 

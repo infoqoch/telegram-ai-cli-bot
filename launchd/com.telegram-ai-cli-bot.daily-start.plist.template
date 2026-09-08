@@ -3,24 +3,25 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.telegram-ai-cli-bot.power-manager</string>
+    <string>com.telegram-ai-cli-bot.daily-start</string>
     <key>ProgramArguments</key>
     <array>
         <string>__POWER_MANAGER_SCRIPT__</string>
-        <string>monitor</string>
+        <string>daily-start</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__PROJECT_ROOT__</string>
     <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>AbandonProcessGroup</key>
-    <true/>
+    <false/>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
     <key>ProcessType</key>
     <string>Background</string>
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

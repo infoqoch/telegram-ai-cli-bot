@@ -16,6 +16,9 @@ RUN_SCRIPT="${BOT_RUN_SCRIPT:-$PROJECT_ROOT/run.sh}"
 PLATFORM="${BOT_POWER_PLATFORM:-$(/usr/bin/uname -s 2>/dev/null || uname -s)}"
 PMSET_BIN="${BOT_POWER_PMSET_BIN:-/usr/bin/pmset}"
 OSASCRIPT_BIN="${BOT_POWER_OSASCRIPT_BIN:-/usr/bin/osascript}"
+DAILY_RETRY_ATTEMPTS="${BOT_POWER_DAILY_RETRY_ATTEMPTS:-61}"
+DAILY_RETRY_DELAY_SECONDS="${BOT_POWER_DAILY_RETRY_DELAY_SECONDS:-5}"
+RECONCILE_BUSY_EXIT_CODE=75
 
 _require_macos() {
     if [ "$PLATFORM" != "Darwin" ]; then
@@ -170,13 +173,16 @@ _release_lock() {
 }
 
 _reconcile() (
+    local log_busy="${1:-yes}"
     _require_macos || return 1
     if ! _is_enabled; then
         return 0
     fi
     if ! _acquire_lock; then
-        _log "reconcile skipped: another reconciliation is active"
-        return 0
+        if [ "$log_busy" = "yes" ]; then
+            _log "reconcile skipped: another reconciliation is active"
+        fi
+        return "$RECONCILE_BUSY_EXIT_CODE"
     fi
     trap _release_lock EXIT INT TERM
 
@@ -228,6 +234,46 @@ _reconcile() (
     fi
 )
 
+_daily_start() {
+    _require_macos || return 1
+    if ! _is_enabled; then
+        echo "전원 관리가 설치되어 있지 않습니다." >&2
+        return 1
+    fi
+
+    if ! _set_desired_state on; then
+        _log "daily start failed: could not persist desired=on"
+        return 1
+    fi
+
+    local power
+    power=$(_current_power || true)
+    _log "daily start policy applied: desired=on (power=$power)"
+
+    local attempt=1
+    local result
+    while [ "$attempt" -le "$DAILY_RETRY_ATTEMPTS" ]; do
+        _reconcile no
+        result=$?
+        if [ "$result" -eq 0 ]; then
+            return 0
+        fi
+        if [ "$result" -ne "$RECONCILE_BUSY_EXIT_CODE" ]; then
+            return "$result"
+        fi
+        if [ "$attempt" -eq 1 ]; then
+            _log "daily start waiting for active reconciliation"
+        fi
+        if [ "$attempt" -lt "$DAILY_RETRY_ATTEMPTS" ]; then
+            sleep "$DAILY_RETRY_DELAY_SECONDS"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    _log "daily start failed: reconciliation remained busy"
+    return 1
+}
+
 _monitor() {
     _require_macos || return 1
     if ! _is_enabled; then
@@ -256,7 +302,7 @@ _monitor() {
             break
         fi
         case "$line" in
-          *"Now drawing from"*|*"wake"*|*"Wake"*) _reconcile || true ;;
+          *"Now drawing from"*|*"wake"*|*"Wake"*) "$SCRIPT_DIR/power_manager.sh" reconcile || true ;;
         esac
     done &
     local stream_pid=$!
@@ -303,6 +349,9 @@ case "${1:-}" in
   reconcile)
     _reconcile
     ;;
+  daily-start)
+    _daily_start
+    ;;
   monitor)
     _monitor
     ;;
@@ -310,7 +359,7 @@ case "${1:-}" in
     _show_status
     ;;
   *)
-    echo "사용법: $0 {is-enabled|current-power|get-desired|set-desired on|off|reconcile|monitor|status}" >&2
+    echo "사용법: $0 {is-enabled|current-power|get-desired|set-desired on|off|reconcile|daily-start|monitor|status}" >&2
     exit 1
     ;;
 esac
